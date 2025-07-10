@@ -18,7 +18,11 @@
     <CudaCompile Include="main.cu" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="BitVolume.hpp" />
     <ClInclude Include="main.cuh" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="HashMap.hpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{8A222423-956D-411E-9E4F-EE1C1C85880B}</ProjectGuid>

@@ -15,6 +15,130 @@ using namespace std;
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
+#include "nvapi510/include/nvapi.h"
+#include "nvapi510/include/NvApiDriverSettings.h"
+
+
+
+bool ForceGPUPerformance()
+{
+	NvAPI_Status status;
+
+	status = NvAPI_Initialize();
+	if (status != NVAPI_OK)
+	{
+		return false;
+	}
+
+	NvDRSSessionHandle hSession = 0;
+	status = NvAPI_DRS_CreateSession(&hSession);
+	if (status != NVAPI_OK)
+	{
+		return false;
+	}
+
+	// (2) load all the system settings into the session
+	status = NvAPI_DRS_LoadSettings(hSession);
+	if (status != NVAPI_OK)
+	{
+		return false;
+	}
+
+	NvDRSProfileHandle hProfile = 0;
+	status = NvAPI_DRS_GetBaseProfile(hSession, &hProfile);
+	if (status != NVAPI_OK)
+	{
+		return false;
+	}
+
+	NVDRS_SETTING drsGet = { 0, };
+	drsGet.version = NVDRS_SETTING_VER;
+	status = NvAPI_DRS_GetSetting(hSession, hProfile, PREFERRED_PSTATE_ID, &drsGet);
+	if (status != NVAPI_OK)
+	{
+		return false;
+	}
+	auto m_gpu_performance = drsGet.u32CurrentValue;
+
+	NVDRS_SETTING drsSetting = { 0, };
+	drsSetting.version = NVDRS_SETTING_VER;
+	drsSetting.settingId = PREFERRED_PSTATE_ID;
+	drsSetting.settingType = NVDRS_DWORD_TYPE;
+	drsSetting.u32CurrentValue = PREFERRED_PSTATE_PREFER_MAX;
+
+	status = NvAPI_DRS_SetSetting(hSession, hProfile, &drsSetting);
+	if (status != NVAPI_OK)
+	{
+		return false;
+	}
+
+	status = NvAPI_DRS_SaveSettings(hSession);
+	if (status != NVAPI_OK)
+	{
+		return false;
+	}
+
+	// (6) We clean up. This is analogous to doing a free()
+	NvAPI_DRS_DestroySession(hSession);
+	hSession = 0;
+
+	return true;
+}
+
+#pragma region Print GPU Performance Mode
+//{
+//	NvAPI_Status status;
+
+//	status = NvAPI_Initialize();
+//	if (status != NVAPI_OK)
+//	{
+//		printf("NvAPI_Initialize() status != NVAPI_OK\n");
+//		return;
+//	}
+
+//	NvDRSSessionHandle hSession = 0;
+//	status = NvAPI_DRS_CreateSession(&hSession);
+//	if (status != NVAPI_OK)
+//	{
+//		printf("NvAPI_DRS_CreateSession() status != NVAPI_OK\n");
+//		return;
+//	}
+
+//	// (2) load all the system settings into the session
+//	status = NvAPI_DRS_LoadSettings(hSession);
+//	if (status != NVAPI_OK)
+//	{
+//		printf("NvAPI_DRS_LoadSettings() status != NVAPI_OK\n");
+//		return;
+//	}
+
+//	NvDRSProfileHandle hProfile = 0;
+//	status = NvAPI_DRS_GetBaseProfile(hSession, &hProfile);
+//	if (status != NVAPI_OK)
+//	{
+//		printf("NvAPI_DRS_GetBaseProfile() status != NVAPI_OK\n");
+//		return;
+//	}
+
+//	NVDRS_SETTING drsGet = { 0, };
+//	drsGet.version = NVDRS_SETTING_VER;
+//	status = NvAPI_DRS_GetSetting(hSession, hProfile, PREFERRED_PSTATE_ID, &drsGet);
+//	if (status != NVAPI_OK)
+//	{
+//		printf("NvAPI_DRS_GetSetting() status != NVAPI_OK\n");
+//		return;
+//	}
+
+//	auto gpu_performance = drsGet.u32CurrentValue;
+
+//	printf("gpu_performance : %d\n", gpu_performance);
+
+//	// (6) We clean up. This is analogous to doing a free()
+//	NvAPI_DRS_DestroySession(hSession);
+//	hSession = 0;
+//}
+#pragma endregion
+
 //const string resource_file_name_ply = "../../res/3D/Compound_Partial.ply";
 //const string resource_file_name_alp = "../../res/3D/Compound_Partial.alp";
 
@@ -40,6 +164,8 @@ const f32 voxelSize = 0.1f;
 
 int main(int argc, char** argv)
 {
+	ForceGPUPerformance();
+
 	cout << "AppFeather" << endl;
 
 	Feather.Initialize(1920, 1080);
@@ -249,6 +375,10 @@ int main(int argc, char** argv)
 			f32 lx = Mx - mx;
 			f32 ly = My - my;
 			f32 lz = Mz - mz;
+
+			printf("min : %f, %f, %f\n", mx, my, mz);
+			printf("max : %f, %f, %f\n", Mx, My, Mz);
+			printf("dimensions : %f, %f, %f\n", lx, ly, lz);
 
 			Entity cam = Feather.GetEntityByName("Camera");
 			auto pcam = Feather.GetComponent<PerspectiveCamera>(cam);

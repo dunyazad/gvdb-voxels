@@ -10,8 +10,6 @@
 #include <cuda_gl_interop.h>
 #include <device_launch_parameters.h>
 #include <nvtx3/nvToolsExt.h>
-#include "nvapi510/include/nvapi.h"
-#include "nvapi510/include/NvApiDriverSettings.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -23,184 +21,187 @@
 
 #pragma comment(lib, "nvapi64.lib")
 
-struct HashMapVoxel
-{
-    unsigned int label = 0;
-    Eigen::Vector3f position = Eigen::Vector3f(0.0f, 0.0f, 0.0f);
-    Eigen::Vector3f normal = Eigen::Vector3f(0.0f, 0.0f, 0.0f);
-    Eigen::Vector3b color = Eigen::Vector3b(255, 255, 255);
-};
+#include <HashMap.hpp>
+#include <BitVolume.hpp>
 
-__device__ __host__ inline size_t voxel_hash(int3 coord, size_t tableSize)
-{
-    return ((size_t)(coord.x * 73856093) ^ (coord.y * 19349663) ^ (coord.z * 83492791)) % tableSize;
-}
-
-__global__ void Kernel_InsertPoints(Eigen::Vector3f* points, Eigen::Vector3f* normals, Eigen::Vector3b* colors, int numberOfPoints, float voxelSize, HashMapVoxel* table, size_t tableSize, unsigned int maxProbe)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= numberOfPoints) return;
-
-    auto p = points[idx];
-    auto n = normals[idx];
-    auto c = colors[idx];
-
-    int3 coord = make_int3(floorf(p.x() / voxelSize), floorf(p.y() / voxelSize), floorf(p.z() / voxelSize));
-
-    size_t h = voxel_hash(coord, tableSize);
-    for (int i = 0; i < maxProbe; ++i) {
-        size_t slot = (h + i) % tableSize;
-        if (atomicCAS(&table[slot].label, 0, slot) == 0)
-        {
-            //alog("%d, %d, %d\n", coord.x, coord.y, coord.z);
-
-            table[slot].label = slot;
-            table[slot].position = Eigen::Vector3f((float)coord.x * voxelSize, (float)coord.y * voxelSize, (float)coord.z * voxelSize);
-            table[slot].normal = Eigen::Vector3f(n.x(), n.y(), n.z());
-            table[slot].color = Eigen::Vector3b(c.x(), c.y(), c.z());
-            return;
-        }
-    }
-}
-
-__global__ void Kernel_Serialize(HashMapVoxel* d_table, size_t tableSize,
-    Eigen::Vector3f* d_points, Eigen::Vector3f* d_normals, Eigen::Vector3b* d_colors,
-    unsigned int* numberOfOccupiedVoxels)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= tableSize) return;
-
-    auto& voxel = d_table[idx];
-
-    if (0 != voxel.label)
-    {
-        //alog("%f, %f, %f\n", voxel.position.x(), voxel.position.y(), voxel.position.z());
-
-        auto oldIndex = atomicAdd(numberOfOccupiedVoxels, 1);
-        d_points[oldIndex] = voxel.position;
-        d_normals[oldIndex] = voxel.normal;
-        d_colors[oldIndex] = voxel.color;
-    }
-}
-
-struct HashMap
-{
-    size_t tableSize = 10485760;
-    unsigned int maxProbe = 32;
-    unsigned int blockSize = 256;
-
-    HashMapVoxel* d_table = nullptr;
-
-    void Initialize()
-    {
-        cudaMalloc(&d_table, sizeof(HashMapVoxel) * tableSize);
-        cudaMemset(d_table, 0, sizeof(HashMapVoxel) * tableSize);
-    }
-
-    void Terminate()
-    {
-        cudaFree(d_table);
-    }
-
-    void InsertHPoints(Eigen::Vector3f* h_points, Eigen::Vector3f* h_normals, Eigen::Vector3b* h_colors, unsigned numberOfPoints)
-    {
-        Eigen::Vector3f* d_points = nullptr;
-        Eigen::Vector3f* d_normals = nullptr;
-        Eigen::Vector3b* d_colors = nullptr;
-
-        cudaMalloc(&d_points, sizeof(Eigen::Vector3f) * numberOfPoints);
-        cudaMemcpy(d_points, h_points, sizeof(Eigen::Vector3f) * numberOfPoints, cudaMemcpyHostToDevice);
-
-        cudaMalloc(&d_normals, sizeof(Eigen::Vector3f) * numberOfPoints);
-        cudaMemcpy(d_normals, h_normals, sizeof(Eigen::Vector3f) * numberOfPoints, cudaMemcpyHostToDevice);
-
-        cudaMalloc(&d_colors, sizeof(Eigen::Vector3b) * numberOfPoints);
-        cudaMemcpy(d_colors, d_colors, sizeof(Eigen::Vector3b) * numberOfPoints, cudaMemcpyHostToDevice);
-
-        InsertDPoints(d_points, d_normals, d_colors, numberOfPoints);
-
-        cudaFree(d_points);
-        cudaFree(d_normals);
-        cudaFree(d_colors);
-    }
-
-    void InsertDPoints(Eigen::Vector3f* d_points, Eigen::Vector3f* d_normals, Eigen::Vector3b* d_colors, unsigned numberOfPoints)
-    {
-        unsigned int blockSize = 256;
-        unsigned int gridOccupied = (numberOfPoints + blockSize - 1) / blockSize;
-
-        Kernel_InsertPoints << <gridOccupied, blockSize >> > (
-            d_points,
-            d_normals,
-            d_colors,
-            numberOfPoints,
-            0.1f, d_table, tableSize, maxProbe);
-
-        cudaDeviceSynchronize();
-    }
-
-    void Serialize(const std::string& filename)
-    {
-        PLYFormat ply;
-
-        unsigned int* d_numberOfOccupiedVoxels = nullptr;
-        cudaMalloc(&d_numberOfOccupiedVoxels, sizeof(unsigned int));
-
-        Eigen::Vector3f* d_points = nullptr;
-        Eigen::Vector3f* d_normals = nullptr;
-        Eigen::Vector3b* d_colors = nullptr;
-
-        cudaMalloc(&d_points, sizeof(Eigen::Vector3f) * tableSize);
-        cudaMalloc(&d_normals, sizeof(Eigen::Vector3f) * tableSize);
-        cudaMalloc(&d_colors, sizeof(Eigen::Vector3b) * tableSize);
-
-        unsigned int blockSize = 256;
-        unsigned int gridOccupied = (tableSize + blockSize - 1) / blockSize;
-
-        Kernel_Serialize << <gridOccupied, blockSize >> > (
-            d_table,
-            tableSize,
-            d_points,
-            d_normals,
-            d_colors,
-            d_numberOfOccupiedVoxels);
-
-        cudaDeviceSynchronize();
-
-        unsigned int h_numberOfOccupiedVoxels = 0;
-        cudaMemcpy(&h_numberOfOccupiedVoxels, d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-
-        Eigen::Vector3f* h_points  = new Eigen::Vector3f[h_numberOfOccupiedVoxels];
-        Eigen::Vector3f* h_normals = new Eigen::Vector3f[h_numberOfOccupiedVoxels];
-        Eigen::Vector3b* h_colors  = new Eigen::Vector3b[h_numberOfOccupiedVoxels];
-
-        cudaMemcpy(h_points, d_points, sizeof(Eigen::Vector3f) * h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
-        cudaMemcpy(h_normals, d_normals, sizeof(Eigen::Vector3f) * h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
-        cudaMemcpy(h_colors, d_colors, sizeof(Eigen::Vector3b) * h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
-
-        for (size_t i = 0; i < h_numberOfOccupiedVoxels; i++)
-        {
-            auto& p = h_points[i];
-            auto& n = h_normals[i];
-            auto& c = h_colors[i];
-
-            ply.AddPoint(p.x(), p.y(), p.z());
-            ply.AddNormal(n.x(), n.y(), n.z());
-            ply.AddColor(c.x() / 255.0f, c.y() / 255.0f, c.z() / 255.0f);
-        }
-
-        ply.Serialize(filename);
-
-        cudaFree(d_numberOfOccupiedVoxels);
-        cudaFree(d_points);
-        cudaFree(d_normals);
-        cudaFree(d_colors);
-
-        delete[] h_points;
-        delete[] h_normals;
-        delete[] h_colors;
-    }
-};
+//struct HashMapVoxel
+//{
+//    unsigned int label = 0;
+//    Eigen::Vector3f position = Eigen::Vector3f(0.0f, 0.0f, 0.0f);
+//    Eigen::Vector3f normal = Eigen::Vector3f(0.0f, 0.0f, 0.0f);
+//    Eigen::Vector3b color = Eigen::Vector3b(255, 255, 255);
+//};
+//
+//__device__ __host__ inline size_t voxel_hash(int3 coord, size_t tableSize)
+//{
+//    return ((size_t)(coord.x * 73856093) ^ (coord.y * 19349663) ^ (coord.z * 83492791)) % tableSize;
+//}
+//
+//__global__ void Kernel_InsertPoints(Eigen::Vector3f* points, Eigen::Vector3f* normals, Eigen::Vector3b* colors, int numberOfPoints, float voxelSize, HashMapVoxel* table, size_t tableSize, unsigned int maxProbe)
+//{
+//    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+//    if (idx >= numberOfPoints) return;
+//
+//    auto p = points[idx];
+//    auto n = normals[idx];
+//    auto c = colors[idx];
+//
+//    int3 coord = make_int3(floorf(p.x() / voxelSize), floorf(p.y() / voxelSize), floorf(p.z() / voxelSize));
+//
+//    size_t h = voxel_hash(coord, tableSize);
+//    for (int i = 0; i < maxProbe; ++i) {
+//        size_t slot = (h + i) % tableSize;
+//        if (atomicCAS(&table[slot].label, 0, slot) == 0)
+//        {
+//            //alog("%d, %d, %d\n", coord.x, coord.y, coord.z);
+//
+//            table[slot].label = slot;
+//            table[slot].position = Eigen::Vector3f((float)coord.x * voxelSize, (float)coord.y * voxelSize, (float)coord.z * voxelSize);
+//            table[slot].normal = Eigen::Vector3f(n.x(), n.y(), n.z());
+//            table[slot].color = Eigen::Vector3b(c.x(), c.y(), c.z());
+//            return;
+//        }
+//    }
+//}
+//
+//__global__ void Kernel_Serialize(HashMapVoxel* d_table, size_t tableSize,
+//    Eigen::Vector3f* d_points, Eigen::Vector3f* d_normals, Eigen::Vector3b* d_colors,
+//    unsigned int* numberOfOccupiedVoxels)
+//{
+//    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+//    if (idx >= tableSize) return;
+//
+//    auto& voxel = d_table[idx];
+//
+//    if (0 != voxel.label)
+//    {
+//        //alog("%f, %f, %f\n", voxel.position.x(), voxel.position.y(), voxel.position.z());
+//
+//        auto oldIndex = atomicAdd(numberOfOccupiedVoxels, 1);
+//        d_points[oldIndex] = voxel.position;
+//        d_normals[oldIndex] = voxel.normal;
+//        d_colors[oldIndex] = voxel.color;
+//    }
+//}
+//
+//struct HashMap
+//{
+//    size_t tableSize = 10485760;
+//    unsigned int maxProbe = 32;
+//    unsigned int blockSize = 256;
+//
+//    HashMapVoxel* d_table = nullptr;
+//
+//    void Initialize()
+//    {
+//        cudaMalloc(&d_table, sizeof(HashMapVoxel) * tableSize);
+//        cudaMemset(d_table, 0, sizeof(HashMapVoxel) * tableSize);
+//    }
+//
+//    void Terminate()
+//    {
+//        cudaFree(d_table);
+//    }
+//
+//    void InsertHPoints(Eigen::Vector3f* h_points, Eigen::Vector3f* h_normals, Eigen::Vector3b* h_colors, unsigned numberOfPoints)
+//    {
+//        Eigen::Vector3f* d_points = nullptr;
+//        Eigen::Vector3f* d_normals = nullptr;
+//        Eigen::Vector3b* d_colors = nullptr;
+//
+//        cudaMalloc(&d_points, sizeof(Eigen::Vector3f) * numberOfPoints);
+//        cudaMemcpy(d_points, h_points, sizeof(Eigen::Vector3f) * numberOfPoints, cudaMemcpyHostToDevice);
+//
+//        cudaMalloc(&d_normals, sizeof(Eigen::Vector3f) * numberOfPoints);
+//        cudaMemcpy(d_normals, h_normals, sizeof(Eigen::Vector3f) * numberOfPoints, cudaMemcpyHostToDevice);
+//
+//        cudaMalloc(&d_colors, sizeof(Eigen::Vector3b) * numberOfPoints);
+//        cudaMemcpy(d_colors, d_colors, sizeof(Eigen::Vector3b) * numberOfPoints, cudaMemcpyHostToDevice);
+//
+//        InsertDPoints(d_points, d_normals, d_colors, numberOfPoints);
+//
+//        cudaFree(d_points);
+//        cudaFree(d_normals);
+//        cudaFree(d_colors);
+//    }
+//
+//    void InsertDPoints(Eigen::Vector3f* d_points, Eigen::Vector3f* d_normals, Eigen::Vector3b* d_colors, unsigned numberOfPoints)
+//    {
+//        unsigned int blockSize = 256;
+//        unsigned int gridOccupied = (numberOfPoints + blockSize - 1) / blockSize;
+//
+//        Kernel_InsertPoints << <gridOccupied, blockSize >> > (
+//            d_points,
+//            d_normals,
+//            d_colors,
+//            numberOfPoints,
+//            0.1f, d_table, tableSize, maxProbe);
+//
+//        cudaDeviceSynchronize();
+//    }
+//
+//    void Serialize(const std::string& filename)
+//    {
+//        PLYFormat ply;
+//
+//        unsigned int* d_numberOfOccupiedVoxels = nullptr;
+//        cudaMalloc(&d_numberOfOccupiedVoxels, sizeof(unsigned int));
+//
+//        Eigen::Vector3f* d_points = nullptr;
+//        Eigen::Vector3f* d_normals = nullptr;
+//        Eigen::Vector3b* d_colors = nullptr;
+//
+//        cudaMalloc(&d_points, sizeof(Eigen::Vector3f) * tableSize);
+//        cudaMalloc(&d_normals, sizeof(Eigen::Vector3f) * tableSize);
+//        cudaMalloc(&d_colors, sizeof(Eigen::Vector3b) * tableSize);
+//
+//        unsigned int blockSize = 256;
+//        unsigned int gridOccupied = (tableSize + blockSize - 1) / blockSize;
+//
+//        Kernel_Serialize << <gridOccupied, blockSize >> > (
+//            d_table,
+//            tableSize,
+//            d_points,
+//            d_normals,
+//            d_colors,
+//            d_numberOfOccupiedVoxels);
+//
+//        cudaDeviceSynchronize();
+//
+//        unsigned int h_numberOfOccupiedVoxels = 0;
+//        cudaMemcpy(&h_numberOfOccupiedVoxels, d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+//
+//        Eigen::Vector3f* h_points  = new Eigen::Vector3f[h_numberOfOccupiedVoxels];
+//        Eigen::Vector3f* h_normals = new Eigen::Vector3f[h_numberOfOccupiedVoxels];
+//        Eigen::Vector3b* h_colors  = new Eigen::Vector3b[h_numberOfOccupiedVoxels];
+//
+//        cudaMemcpy(h_points, d_points, sizeof(Eigen::Vector3f) * h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
+//        cudaMemcpy(h_normals, d_normals, sizeof(Eigen::Vector3f) * h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
+//        cudaMemcpy(h_colors, d_colors, sizeof(Eigen::Vector3b) * h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
+//
+//        for (size_t i = 0; i < h_numberOfOccupiedVoxels; i++)
+//        {
+//            auto& p = h_points[i];
+//            auto& n = h_normals[i];
+//            auto& c = h_colors[i];
+//
+//            ply.AddPoint(p.x(), p.y(), p.z());
+//            ply.AddNormal(n.x(), n.y(), n.z());
+//            ply.AddColor(c.x() / 255.0f, c.y() / 255.0f, c.z() / 255.0f);
+//        }
+//
+//        ply.Serialize(filename);
+//
+//        cudaFree(d_numberOfOccupiedVoxels);
+//        cudaFree(d_points);
+//        cudaFree(d_normals);
+//        cudaFree(d_colors);
+//
+//        delete[] h_points;
+//        delete[] h_normals;
+//        delete[] h_colors;
+//    }
+//};
 
 __host__ __device__
 float3 rgb_to_hsv(uchar3 rgb) {
@@ -269,6 +270,88 @@ uchar3 hsv_to_rgb(float3 hsv) {
     rgb.z = static_cast<unsigned char>((b + m) * 255.0f);
     return rgb;
 }
+
+__host__ __device__ uint64_t IndexToKey(uint3 index)
+{
+    uint32_t ux = static_cast<uint32_t>(index.x + (1 << 20)) & 0x1FFFFF; // 21 bits
+    uint32_t uy = static_cast<uint32_t>(index.y + (1 << 20)) & 0x1FFFFF; // 21 bits
+    uint32_t uz = static_cast<uint32_t>(index.z + (1 << 20)) & 0x1FFFFF; // 21 bits
+
+    // Pack into 64-bit key: |   21-bit Z   |   21-bit Y   |   21-bit X   |
+    uint64_t key = (static_cast<uint64_t>(uz) << 42) |
+        (static_cast<uint64_t>(uy) << 21) |
+        (static_cast<uint64_t>(ux));
+    return key;
+}
+
+__host__ __device__ uint3 KeyToIndex(uint64_t key)
+{
+    int32_t x = ((key >> 0) & 0x1FFFFF) - (1 << 20);
+    int32_t y = ((key >> 21) & 0x1FFFFF) - (1 << 20);
+    int32_t z = ((key >> 42) & 0x1FFFFF) - (1 << 20);
+    return make_uint3(x, y, z);
+}
+
+__device__ uint64_t D_ToKey(float3 p, float resolution)
+{
+    // Quantize float3 to int32
+    int32_t qx = __float2int_rd(p.x / resolution);
+    int32_t qy = __float2int_rd(p.y / resolution);
+    int32_t qz = __float2int_rd(p.z / resolution);
+
+    // Map signed int32 to unsigned 21-bit value (2's complement to unsigned shift)
+    // Shift by 20 to bring range [-2^20, 2^20) into [0, 2^21)
+    uint32_t ux = static_cast<uint32_t>(qx + (1 << 20)) & 0x1FFFFF; // 21 bits
+    uint32_t uy = static_cast<uint32_t>(qy + (1 << 20)) & 0x1FFFFF; // 21 bits
+    uint32_t uz = static_cast<uint32_t>(qz + (1 << 20)) & 0x1FFFFF; // 21 bits
+
+    // Pack into 64-bit key: |   21-bit Z   |   21-bit Y   |   21-bit X   |
+    uint64_t key = (static_cast<uint64_t>(uz) << 42) |
+        (static_cast<uint64_t>(uy) << 21) |
+        (static_cast<uint64_t>(ux));
+    return key;
+}
+
+__device__ float3 D_FromKey(uint64_t key, float resolution)
+{
+    int32_t x = ((key >> 0) & 0x1FFFFF) - (1 << 20);
+    int32_t y = ((key >> 21) & 0x1FFFFF) - (1 << 20);
+    int32_t z = ((key >> 42) & 0x1FFFFF) - (1 << 20);
+    return make_float3(x * resolution, y * resolution, z * resolution);
+}
+
+__host__ uint64_t H_ToKey(const float3& p, float resolution)
+{
+    // Quantize
+    int32_t qx = static_cast<int32_t>(std::floor(p.x / resolution));
+    int32_t qy = static_cast<int32_t>(std::floor(p.y / resolution));
+    int32_t qz = static_cast<int32_t>(std::floor(p.z / resolution));
+
+    // Convert to unsigned with bias to handle negative coordinates
+    uint32_t ux = static_cast<uint32_t>(qx + (1 << 20)) & 0x1FFFFF;
+    uint32_t uy = static_cast<uint32_t>(qy + (1 << 20)) & 0x1FFFFF;
+    uint32_t uz = static_cast<uint32_t>(qz + (1 << 20)) & 0x1FFFFF;
+
+    // Pack into 64-bit key
+    uint64_t key = (static_cast<uint64_t>(uz) << 42) |
+        (static_cast<uint64_t>(uy) << 21) |
+        (static_cast<uint64_t>(ux));
+    return key;
+}
+
+__host__ float3 H_FromKey(uint64_t key, float resolution)
+{
+    int32_t x = ((key >> 0) & 0x1FFFFF) - (1 << 20);
+    int32_t y = ((key >> 21) & 0x1FFFFF) - (1 << 20);
+    int32_t z = ((key >> 42) & 0x1FFFFF) - (1 << 20);
+
+    float3 result;
+    result.x = static_cast<float>(x) * resolution;
+    result.y = static_cast<float>(y) * resolution;
+    result.z = static_cast<float>(z) * resolution;
+    return result;
+}
+
 
 struct PointCloud
 {
@@ -347,6 +430,25 @@ vector<uint8_t> DetectEdge()
     return h_is_edge;
 }
 
+struct HashMapVoxel
+{
+    bool occupied = false;
+    uint64_t key = UINT64_MAX;
+};
+
+__global__ void Kernel_OccupyPointCloud(HashMap<uint64_t, HashMapVoxel> hashmap, PointCloud pointCloud)
+{
+    unsigned int threadid = blockDim.x * blockIdx.x + threadIdx.x;
+    if (threadid >= pointCloud.numberOfPoints) return;
+
+    //printf("%d, %f, %f, %f\n", threadid, pointCloud.d_points[threadid].x(), pointCloud.d_points[threadid].y(), pointCloud.d_points[threadid].z());
+    auto key = D_ToKey(make_float3(pointCloud.d_points[threadid].x(), pointCloud.d_points[threadid].y(), pointCloud.d_points[threadid].z()));
+    if (false == hashmap.insert(hashmap.info, key, { true, key }))
+    {
+        printf("Failed - %d, %f, %f, %f\n", threadid, pointCloud.d_points[threadid].x(), pointCloud.d_points[threadid].y(), pointCloud.d_points[threadid].z());
+    }
+}
+
 void cuMain(
 	float voxelSize,
 	std::vector<float3>& host_points,
@@ -354,6 +456,18 @@ void cuMain(
 	std::vector<uchar3>& host_colors,
 	float3 center)
 {
+    BitVolume bitVolume;
+    bitVolume.Initialize();
+    bitVolume.Terminate();
+
+
+
+
+
+
+
+
+
     pointCloud.numberOfPoints = host_points.size();
 
     cudaMalloc(&pointCloud.d_points, sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints);
@@ -364,6 +478,11 @@ void cuMain(
     cudaMemcpy(pointCloud.d_normals, host_normals.data(), sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
     cudaMemcpy(pointCloud.d_colors, host_colors.data(), sizeof(Eigen::Vector3b) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
 
+    HashMap<uint64_t, HashMapVoxel> hashmap;
+    hashmap.Initialize(pointCloud.numberOfPoints * hashmap.info.maxProbe / 4);
+
+    LaunchKernel(Kernel_OccupyPointCloud, pointCloud.numberOfPoints, hashmap, pointCloud);
+
     //HashMap hm;
     //hm.Initialize();
 
@@ -372,123 +491,7 @@ void cuMain(
     ////hm.Serialize("D:\\Debug\\PLY\\Set\\Voxels.ply");
 
     //hm.Terminate();
+
+    hashmap.Terminate();
 }
 
-bool ForceGPUPerformance()
-{
-    NvAPI_Status status;
-
-    status = NvAPI_Initialize();
-    if (status != NVAPI_OK)
-    {
-        return false;
-    }
-
-    NvDRSSessionHandle hSession = 0;
-    status = NvAPI_DRS_CreateSession(&hSession);
-    if (status != NVAPI_OK)
-    {
-        return false;
-    }
-
-    // (2) load all the system settings into the session
-    status = NvAPI_DRS_LoadSettings(hSession);
-    if (status != NVAPI_OK)
-    {
-        return false;
-    }
-
-    NvDRSProfileHandle hProfile = 0;
-    status = NvAPI_DRS_GetBaseProfile(hSession, &hProfile);
-    if (status != NVAPI_OK)
-    {
-        return false;
-    }
-
-    NVDRS_SETTING drsGet = { 0, };
-    drsGet.version = NVDRS_SETTING_VER;
-    status = NvAPI_DRS_GetSetting(hSession, hProfile, PREFERRED_PSTATE_ID, &drsGet);
-    if (status != NVAPI_OK)
-    {
-        return false;
-    }
-    auto m_gpu_performance = drsGet.u32CurrentValue;
-
-    NVDRS_SETTING drsSetting = { 0, };
-    drsSetting.version = NVDRS_SETTING_VER;
-    drsSetting.settingId = PREFERRED_PSTATE_ID;
-    drsSetting.settingType = NVDRS_DWORD_TYPE;
-    drsSetting.u32CurrentValue = PREFERRED_PSTATE_PREFER_MAX;
-
-    status = NvAPI_DRS_SetSetting(hSession, hProfile, &drsSetting);
-    if (status != NVAPI_OK)
-    {
-        return false;
-    }
-
-    status = NvAPI_DRS_SaveSettings(hSession);
-    if (status != NVAPI_OK)
-    {
-        return false;
-    }
-
-    // (6) We clean up. This is analogous to doing a free()
-    NvAPI_DRS_DestroySession(hSession);
-    hSession = 0;
-
-    return true;
-}
-
-#pragma region Print GPU Performance Mode
-//{
-//	NvAPI_Status status;
-
-//	status = NvAPI_Initialize();
-//	if (status != NVAPI_OK)
-//	{
-//		printf("NvAPI_Initialize() status != NVAPI_OK\n");
-//		return;
-//	}
-
-//	NvDRSSessionHandle hSession = 0;
-//	status = NvAPI_DRS_CreateSession(&hSession);
-//	if (status != NVAPI_OK)
-//	{
-//		printf("NvAPI_DRS_CreateSession() status != NVAPI_OK\n");
-//		return;
-//	}
-
-//	// (2) load all the system settings into the session
-//	status = NvAPI_DRS_LoadSettings(hSession);
-//	if (status != NVAPI_OK)
-//	{
-//		printf("NvAPI_DRS_LoadSettings() status != NVAPI_OK\n");
-//		return;
-//	}
-
-//	NvDRSProfileHandle hProfile = 0;
-//	status = NvAPI_DRS_GetBaseProfile(hSession, &hProfile);
-//	if (status != NVAPI_OK)
-//	{
-//		printf("NvAPI_DRS_GetBaseProfile() status != NVAPI_OK\n");
-//		return;
-//	}
-
-//	NVDRS_SETTING drsGet = { 0, };
-//	drsGet.version = NVDRS_SETTING_VER;
-//	status = NvAPI_DRS_GetSetting(hSession, hProfile, PREFERRED_PSTATE_ID, &drsGet);
-//	if (status != NVAPI_OK)
-//	{
-//		printf("NvAPI_DRS_GetSetting() status != NVAPI_OK\n");
-//		return;
-//	}
-
-//	auto gpu_performance = drsGet.u32CurrentValue;
-
-//	printf("gpu_performance : %d\n", gpu_performance);
-
-//	// (6) We clean up. This is analogous to doing a free()
-//	NvAPI_DRS_DestroySession(hSession);
-//	hSession = 0;
-//}
-#pragma endregion

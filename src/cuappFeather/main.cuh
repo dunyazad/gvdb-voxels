@@ -20,13 +20,25 @@ namespace Eigen {
 #define alog(...) printf("\033[38;5;1m\033[48;5;15m(^(OO)^) /V/\033[0m\t" __VA_ARGS__)
 #define alogt(tag, ...) printf("\033[38;5;1m\033[48;5;15m [%d] (^(OO)^) /V/\033[0m\t" tag, __VA_ARGS__)
 
+
+#define LaunchKernel_256(KERNEL, NOE, ...) { nvtxRangePushA(#KERNEL); auto NOT = 256; auto NOB = (NOE + NOT - 1) / NOT; KERNEL<<<NOB, NOT>>>(__VA_ARGS__); nvtxRangePop(); }
+#define LaunchKernel_512(KERNEL, NOE, ...) { nvtxRangePushA(#KERNEL); auto NOT = 512; auto NOB = (NOE + NOT - 1) / NOT; KERNEL<<<NOB, NOT>>>(__VA_ARGS__); nvtxRangePop(); }
+#define LaunchKernel(KERNEL, NOE, ...) LaunchKernel_512(KERNEL, NOE, __VA_ARGS__)
+
+
 __host__ __device__ float3 rgb_to_hsv(uchar3 rgb);
 __host__ __device__ uchar3 hsv_to_rgb(float3 hsv);
+
+__host__ __device__ uint64_t IndexToKey(uint3 index);
+__host__ __device__ uint3 KeyToIndex(uint64_t key);
+
+__device__ uint64_t D_ToKey(float3 p, float resolution = 0.0001f);
+__device__ float3 D_FromKey(uint64_t key, float resolution = 0.0001f);
+__host__ uint64_t H_ToKey(const float3& p, float resolution = 0.0001f);
+__host__ float3 H_FromKey(uint64_t key, float resolution = 0.0001f);
 
 class Texture;
 
 void cuMain(float voxelSize, std::vector<float3>& host_points, std::vector<float3>& host_normals, std::vector<uchar3>& host_colors, float3 center);
-
-bool ForceGPUPerformance();
 
 std::vector<uint8_t> DetectEdge();
