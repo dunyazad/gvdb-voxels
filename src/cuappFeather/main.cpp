@@ -293,7 +293,11 @@ int main(int argc, char** argv)
 				}
 				else if (GLFW_KEY_F3 == event.keyCode)
 				{
+					TS(DetectEdge);
 					auto is_edge = DetectEdge();
+					TE(DetectEdge); 
+					
+					TS(DetectEdge_Apply);
 					for (size_t i = 0; i < is_edge.size(); i++)
 					{
 						if (false == is_edge[i])
@@ -306,6 +310,7 @@ int main(int argc, char** argv)
 							renderable->SetInstanceColor(i, MiniMath::V4(1.0f, 0.0f, 0.0f, 1.0f));
 						}
 					}
+					TE(DetectEdge_Apply);
 				}
 				//else if (GLFW_KEY_R == event.keyCode)
 				//{

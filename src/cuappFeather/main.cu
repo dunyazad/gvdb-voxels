@@ -23,7 +23,6 @@
 
 #pragma comment(lib, "nvapi64.lib")
 
-
 struct HashMapVoxel
 {
     unsigned int label = 0;
@@ -330,7 +329,7 @@ vector<uint8_t> DetectEdge()
     uint8_t* d_is_edge = nullptr;
     cudaMalloc(&d_is_edge, sizeof(uint8_t) * pointCloud.numberOfPoints);
 
-    unsigned int blockSize = 256;
+    unsigned int blockSize = 512;
     unsigned int gridOccupied = (pointCloud.numberOfPoints + blockSize - 1) / blockSize;
 
     Kernel_DetectEdge << <gridOccupied, blockSize >> > (
@@ -365,14 +364,14 @@ void cuMain(
     cudaMemcpy(pointCloud.d_normals, host_normals.data(), sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
     cudaMemcpy(pointCloud.d_colors, host_colors.data(), sizeof(Eigen::Vector3b) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
 
-    HashMap hm;
-    hm.Initialize();
+    //HashMap hm;
+    //hm.Initialize();
 
-    hm.InsertDPoints(pointCloud.d_points, pointCloud.d_normals, pointCloud.d_colors, pointCloud.numberOfPoints);
+    //hm.InsertDPoints(pointCloud.d_points, pointCloud.d_normals, pointCloud.d_colors, pointCloud.numberOfPoints);
 
-    hm.Serialize("C:\\Debug\\PLY\\Set\\Voxels.ply");
+    ////hm.Serialize("D:\\Debug\\PLY\\Set\\Voxels.ply");
 
-    hm.Terminate();
+    //hm.Terminate();
 }
 
 bool ForceGPUPerformance()
