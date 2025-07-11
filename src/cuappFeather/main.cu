@@ -456,9 +456,29 @@ void cuMain(
 	std::vector<uchar3>& host_colors,
 	float3 center)
 {
-    BitVolume bitVolume;
-    bitVolume.Initialize();
-    bitVolume.Terminate();
+    //CUDA_TS(LUT);
+    //{
+    //    bool* d_lut;
+    //    cudaMalloc(&d_lut, sizeof(bool) * (1 << 26));
+
+    //    int threads = 256;
+    //    int blocks = ((1 << 26) + threads - 1) / threads;
+
+    //    Kernel_GenerateLUT << <blocks, threads >> > (d_lut);
+    //    cudaDeviceSynchronize();
+
+    //    // ¿˙¿Â
+    //    bool* h_lut = new bool[1 << 26];
+    //    cudaMemcpy(h_lut, d_lut, sizeof(bool) * (1 << 26), cudaMemcpyDeviceToHost);
+
+    //    std::ofstream fout("../../res/3D/simple_point_lut_cuda.bin", std::ios::binary);
+    //    fout.write(reinterpret_cast<const char*>(h_lut), (1 << 26));
+    //    fout.close();
+    //}
+    //CUDA_TE(LUT);
+
+
+
 
 
 
@@ -477,6 +497,80 @@ void cuMain(
     cudaMemcpy(pointCloud.d_points, host_points.data(), sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
     cudaMemcpy(pointCloud.d_normals, host_normals.data(), sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
     cudaMemcpy(pointCloud.d_colors, host_colors.data(), sizeof(Eigen::Vector3b) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
+
+
+
+    CUDA_TS(BitVolume);
+
+    BitVolume bitVolume;
+
+    
+    CUDA_TS(BitVolume_Initialize);
+    bitVolume.Initialize(dim3(1000, 1000, 1000), 0.1f);
+    cudaDeviceSynchronize();
+    CUDA_TE(BitVolume_Initialize);
+
+
+    CUDA_TS(BitVolume_Occupy);
+    bitVolume.OccupyFromEigenPoints(make_float3(-20, -70, -40), pointCloud.d_points, pointCloud.numberOfPoints);
+    cudaDeviceSynchronize();
+    CUDA_TE(BitVolume_Occupy);
+
+
+
+    unsigned int* d_numberOfPoints = nullptr;
+    cudaMalloc(&d_numberOfPoints, sizeof(unsigned int));
+    float3* d_points = nullptr;
+    cudaMalloc(&d_points, sizeof(float3) * pointCloud.numberOfPoints);
+    bitVolume.SerializeToFloat3(d_points, d_numberOfPoints);
+    cudaDeviceSynchronize();
+
+    CUDA_TS(BitVolume_MarchingCubes);
+    std::vector<float3> vertices;
+    std::vector<int3> faces;
+    bitVolume.MarchingCubes(vertices, faces);
+
+    PLYFormat mesh;
+    for (size_t i = 0; i < vertices.size(); i++)
+    {
+        mesh.AddPoint(vertices[i].x, vertices[i].y, vertices[i].z);
+    }
+
+    for (size_t i = 0; i < faces.size(); i++)
+    {
+        mesh.AddTriangleIndex(faces[i].x);
+        mesh.AddTriangleIndex(faces[i].y);
+        mesh.AddTriangleIndex(faces[i].z);
+    }
+
+    mesh.Serialize("../../res/3D/MarchingCubes.ply");
+
+    CUDA_TE(BitVolume_MarchingCubes);
+
+    unsigned int h_numberOfPoints = 0;
+    cudaMemcpy(&h_numberOfPoints, d_numberOfPoints, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+
+    float3* h_points = new float3[pointCloud.numberOfPoints];
+    cudaMemcpy(h_points, d_points, sizeof(float3) * h_numberOfPoints, cudaMemcpyDeviceToHost);
+
+
+    PLYFormat ply;
+    for (size_t i = 0; i < h_numberOfPoints; i++)
+    {
+        auto& p = h_points[i];
+
+        ply.AddPoint(p.x, p.y, p.z);
+    }
+    ply.Serialize("../../res/3D/Temp.ply");
+
+    CUDA_TS(BitVolume_Terminate);
+    bitVolume.Terminate();
+    CUDA_TE(BitVolume_Terminate);
+
+    CUDA_TE(BitVolume);
+
+
+
 
     HashMap<uint64_t, HashMapVoxel> hashmap;
     hashmap.Initialize(pointCloud.numberOfPoints * hashmap.info.maxProbe / 4);
