@@ -19,6 +19,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BitVolume.hpp" />
+    <ClInclude Include="DenseGrid.hpp" />
     <ClInclude Include="main.cuh" />
   </ItemGroup>
   <ItemGroup>

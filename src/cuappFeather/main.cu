@@ -23,6 +23,7 @@
 
 #include <HashMap.hpp>
 #include <BitVolume.hpp>
+#include <DenseGrid.hpp>
 
 //struct HashMapVoxel
 //{
@@ -449,6 +450,87 @@ __global__ void Kernel_OccupyPointCloud(HashMap<uint64_t, HashMapVoxel> hashmap,
     }
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
+#include <thrust/copy.h>
+#include <thrust/transform.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/constant_iterator.h>
+#include <thrust/remove.h>
+#include <iostream>
+#include <cmath>
+
+struct SpherePointGenerator
+{
+    float voxelSize;
+    float radius;
+    int gridSize;
+
+    SpherePointGenerator(float voxelSize_, float radius_)
+        : voxelSize(voxelSize_), radius(radius_) {
+        gridSize = static_cast<int>(radius / voxelSize) * 2 + 1;
+    }
+
+    __host__ __device__
+        bool inSphere(int x, int y, int z) const {
+        float fx = (x - gridSize / 2) * voxelSize;
+        float fy = (y - gridSize / 2) * voxelSize;
+        float fz = (z - gridSize / 2) * voxelSize;
+        return (fx * fx + fy * fy + fz * fz) <= radius * radius;
+    }
+
+    __host__ __device__
+        float3 operator()(int i) const {
+        int z = i % gridSize;
+        int y = (i / gridSize) % gridSize;
+        int x = i / (gridSize * gridSize);
+
+        if (inSphere(x, y, z)) {
+            float fx = (x - gridSize / 2) * voxelSize;
+            float fy = (y - gridSize / 2) * voxelSize;
+            float fz = (z - gridSize / 2) * voxelSize;
+            return make_float3(fx, fy, fz);
+        }
+        return make_float3(NAN, NAN, NAN); // Marker for invalid point
+    }
+};
+
+struct IsValidPoint
+{
+    __host__ __device__
+        bool operator()(const float3& p) const {
+        return !isnan(p.x);
+    }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 void cuMain(
 	float voxelSize,
 	std::vector<float3>& host_points,
@@ -456,136 +538,190 @@ void cuMain(
 	std::vector<uchar3>& host_colors,
 	float3 center)
 {
-    //CUDA_TS(LUT);
-    //{
-    //    bool* d_lut;
-    //    cudaMalloc(&d_lut, sizeof(bool) * (1 << 26));
-
-    //    int threads = 256;
-    //    int blocks = ((1 << 26) + threads - 1) / threads;
-
-    //    Kernel_GenerateLUT << <blocks, threads >> > (d_lut);
-    //    cudaDeviceSynchronize();
-
-    //    // 저장
-    //    bool* h_lut = new bool[1 << 26];
-    //    cudaMemcpy(h_lut, d_lut, sizeof(bool) * (1 << 26), cudaMemcpyDeviceToHost);
-
-    //    std::ofstream fout("../../res/3D/simple_point_lut_cuda.bin", std::ios::binary);
-    //    fout.write(reinterpret_cast<const char*>(h_lut), (1 << 26));
-    //    fout.close();
-    //}
-    //CUDA_TE(LUT);
-
-
-
-
-
-
-
-
-
-
-
-
-    pointCloud.numberOfPoints = host_points.size();
-
-    cudaMalloc(&pointCloud.d_points, sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints);
-    cudaMalloc(&pointCloud.d_normals, sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints);
-    cudaMalloc(&pointCloud.d_colors, sizeof(Eigen::Vector3b) * pointCloud.numberOfPoints);
-
-    cudaMemcpy(pointCloud.d_points, host_points.data(), sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
-    cudaMemcpy(pointCloud.d_normals, host_normals.data(), sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
-    cudaMemcpy(pointCloud.d_colors, host_colors.data(), sizeof(Eigen::Vector3b) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
-
-
-
-    CUDA_TS(BitVolume);
-
-    BitVolume bitVolume;
-
-    
-    CUDA_TS(BitVolume_Initialize);
-    bitVolume.Initialize(dim3(1000, 1000, 1000), 0.1f);
-    cudaDeviceSynchronize();
-    CUDA_TE(BitVolume_Initialize);
-
-
-    CUDA_TS(BitVolume_Occupy);
-    bitVolume.OccupyFromEigenPoints(make_float3(-20, -70, -40), pointCloud.d_points, pointCloud.numberOfPoints);
-    cudaDeviceSynchronize();
-    CUDA_TE(BitVolume_Occupy);
-
-
-
-    unsigned int* d_numberOfPoints = nullptr;
-    cudaMalloc(&d_numberOfPoints, sizeof(unsigned int));
-    float3* d_points = nullptr;
-    cudaMalloc(&d_points, sizeof(float3) * pointCloud.numberOfPoints);
-    bitVolume.SerializeToFloat3(d_points, d_numberOfPoints);
-    cudaDeviceSynchronize();
-
-    CUDA_TS(BitVolume_MarchingCubes);
-    std::vector<float3> vertices;
-    std::vector<int3> faces;
-    bitVolume.MarchingCubes(vertices, faces);
-
-    PLYFormat mesh;
-    for (size_t i = 0; i < vertices.size(); i++)
     {
-        mesh.AddPoint(vertices[i].x, vertices[i].y, vertices[i].z);
+        CUDA_TS(DenseGrid);
+
+        DenseGrid<float3> dg;
+        dg.Initialize(make_float3(-17.0f, -63.0f, -31.0f), dim3(800, 760, 480));
+
+        thrust::device_vector<float3> d_points = host_points;
+
+        CUDA_TS(Occupy);
+        dg.Occupy(thrust::raw_pointer_cast(d_points.data()), d_points.size());
+        cudaDeviceSynchronize();
+        CUDA_TE(Occupy);
+
+        //dg.Serialize("../../res/3D/denseGrid.ply");
+
+        dg.Terminate();
+
+        CUDA_TE(DenseGrid);
     }
 
-    for (size_t i = 0; i < faces.size(); i++)
     {
-        mesh.AddTriangleIndex(faces[i].x);
-        mesh.AddTriangleIndex(faces[i].y);
-        mesh.AddTriangleIndex(faces[i].z);
+        //CUDA_TS(LUT);
+        //{
+        //    bool* d_lut;
+        //    cudaMalloc(&d_lut, sizeof(bool) * (1 << 26));
+
+        //    int threads = 256;
+        //    int blocks = ((1 << 26) + threads - 1) / threads;
+
+        //    Kernel_GenerateLUT << <blocks, threads >> > (d_lut);
+        //    cudaDeviceSynchronize();
+
+        //    // 저장
+        //    bool* h_lut = new bool[1 << 26];
+        //    cudaMemcpy(h_lut, d_lut, sizeof(bool) * (1 << 26), cudaMemcpyDeviceToHost);
+
+        //    std::ofstream fout("../../res/3D/simple_point_lut_cuda.bin", std::ios::binary);
+        //    fout.write(reinterpret_cast<const char*>(h_lut), (1 << 26));
+        //    fout.close();
+        //}
+        //CUDA_TE(LUT);
     }
 
-    mesh.Serialize("../../res/3D/MarchingCubes.ply");
-
-    CUDA_TE(BitVolume_MarchingCubes);
-
-    unsigned int h_numberOfPoints = 0;
-    cudaMemcpy(&h_numberOfPoints, d_numberOfPoints, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-
-    float3* h_points = new float3[pointCloud.numberOfPoints];
-    cudaMemcpy(h_points, d_points, sizeof(float3) * h_numberOfPoints, cudaMemcpyDeviceToHost);
 
 
-    PLYFormat ply;
-    for (size_t i = 0; i < h_numberOfPoints; i++)
+
+
+
+
+
+
+
     {
-        auto& p = h_points[i];
+        //pointCloud.numberOfPoints = host_points.size();
 
-        ply.AddPoint(p.x, p.y, p.z);
+        //cudaMalloc(&pointCloud.d_points, sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints);
+        //cudaMalloc(&pointCloud.d_normals, sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints);
+        //cudaMalloc(&pointCloud.d_colors, sizeof(Eigen::Vector3b) * pointCloud.numberOfPoints);
+
+        //cudaMemcpy(pointCloud.d_points, host_points.data(), sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
+        //cudaMemcpy(pointCloud.d_normals, host_normals.data(), sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
+        //cudaMemcpy(pointCloud.d_colors, host_colors.data(), sizeof(Eigen::Vector3b) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
+
+
+
+        //CUDA_TS(BitVolume);
+
+        //BitVolume bitVolume;
+
+
+        //CUDA_TS(BitVolume_Initialize);
+        //bitVolume.Initialize(dim3(1000, 1000, 1000), 0.1f);
+        //cudaDeviceSynchronize();
+        //CUDA_TE(BitVolume_Initialize);
+
+
+        //CUDA_TS(BitVolume_Occupy);
+        //bitVolume.OccupyFromEigenPoints(make_float3(-20, -70, -40), pointCloud.d_points, pointCloud.numberOfPoints);
+        //cudaDeviceSynchronize();
+        //CUDA_TE(BitVolume_Occupy);
+
+
+
+        //unsigned int* d_numberOfPoints = nullptr;
+        //cudaMalloc(&d_numberOfPoints, sizeof(unsigned int));
+        //float3* d_points = nullptr;
+        //cudaMalloc(&d_points, sizeof(float3) * pointCloud.numberOfPoints);
+        //bitVolume.SerializeToFloat3(d_points, d_numberOfPoints);
+        //cudaDeviceSynchronize();
+
+        //CUDA_TS(BitVolume_MarchingCubes);
+        //std::vector<float3> vertices;
+        //std::vector<int3> faces;
+        //bitVolume.MarchingCubes(vertices, faces);
+
+        //PLYFormat mesh;
+        //for (size_t i = 0; i < vertices.size(); i++)
+        //{
+        //    mesh.AddPoint(vertices[i].x, vertices[i].y, vertices[i].z);
+        //}
+
+        //for (size_t i = 0; i < faces.size(); i++)
+        //{
+        //    mesh.AddTriangleIndex(faces[i].x);
+        //    mesh.AddTriangleIndex(faces[i].y);
+        //    mesh.AddTriangleIndex(faces[i].z);
+        //}
+
+        //mesh.Serialize("../../res/3D/MarchingCubes.ply");
+
+        //CUDA_TE(BitVolume_MarchingCubes);
+
+        //unsigned int h_numberOfPoints = 0;
+        //cudaMemcpy(&h_numberOfPoints, d_numberOfPoints, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+
+        //float3* h_points = new float3[pointCloud.numberOfPoints];
+        //cudaMemcpy(h_points, d_points, sizeof(float3) * h_numberOfPoints, cudaMemcpyDeviceToHost);
+
+
+        //PLYFormat ply;
+        //for (size_t i = 0; i < h_numberOfPoints; i++)
+        //{
+        //    auto& p = h_points[i];
+
+        //    ply.AddPoint(p.x, p.y, p.z);
+        //}
+        //ply.Serialize("../../res/3D/Temp.ply");
+
+        //CUDA_TS(BitVolume_Terminate);
+        //bitVolume.Terminate();
+        //CUDA_TE(BitVolume_Terminate);
+
+        //CUDA_TE(BitVolume);
     }
-    ply.Serialize("../../res/3D/Temp.ply");
-
-    CUDA_TS(BitVolume_Terminate);
-    bitVolume.Terminate();
-    CUDA_TE(BitVolume_Terminate);
-
-    CUDA_TE(BitVolume);
 
 
 
 
-    HashMap<uint64_t, HashMapVoxel> hashmap;
-    hashmap.Initialize(pointCloud.numberOfPoints * hashmap.info.maxProbe / 4);
 
-    LaunchKernel(Kernel_OccupyPointCloud, pointCloud.numberOfPoints, hashmap, pointCloud);
 
-    //HashMap hm;
-    //hm.Initialize();
 
-    //hm.InsertDPoints(pointCloud.d_points, pointCloud.d_normals, pointCloud.d_colors, pointCloud.numberOfPoints);
 
-    ////hm.Serialize("D:\\Debug\\PLY\\Set\\Voxels.ply");
 
-    //hm.Terminate();
 
-    hashmap.Terminate();
+    {
+        //float voxelSize = 0.1f;
+        //float radius = 10.0f;
+
+        //SpherePointGenerator generator(voxelSize, radius);
+        //int gridSize = generator.gridSize;
+        //int totalVoxels = gridSize * gridSize * gridSize;
+
+        //thrust::device_vector<float3> d_points(totalVoxels);
+
+        //// Generate all points (with NAN for out-of-sphere points)
+        //thrust::transform(
+        //    thrust::counting_iterator<int>(0),
+        //    thrust::counting_iterator<int>(totalVoxels),
+        //    d_points.begin(),
+        //    generator
+        //);
+
+        //// Remove invalid (NAN) points
+        //auto new_end = thrust::remove_if(
+        //    d_points.begin(),
+        //    d_points.end(),
+        //    IsValidPoint{}
+        //);
+        //d_points.erase(new_end, d_points.end());
+    }
+
+
+
+
+
+
+
+    {
+        //HashMap<uint64_t, HashMapVoxel> hashmap;
+        //hashmap.Initialize(pointCloud.numberOfPoints * hashmap.info.maxProbe / 4);
+
+        //LaunchKernel(Kernel_OccupyPointCloud, pointCloud.numberOfPoints, hashmap, pointCloud);
+
+        //hashmap.Terminate();
+    }
 }
 
