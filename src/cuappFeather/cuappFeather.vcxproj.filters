@@ -11,6 +11,9 @@
     <ClInclude Include="BitVolume.hpp" />
     <ClInclude Include="main.cuh" />
     <ClInclude Include="DenseGrid.hpp" />
+    <ClInclude Include="KDTree.hpp" />
+    <ClInclude Include="VoxelHashMap.hpp" />
+    <ClInclude Include="TSDF.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HashMap.hpp" />

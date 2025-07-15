@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cuda_runtime.h>
-#include <Serialization.hpp>
 
 #ifndef LaunchKernel
 #define LaunchKernel_256(KERNEL, NOE, ...) { nvtxRangePushA(#KERNEL); auto NOT = 256; auto NOB = (NOE + NOT - 1) / NOT; KERNEL<<<NOB, NOT>>>(__VA_ARGS__); nvtxRangePop(); }
@@ -9,8 +8,31 @@
 #define LaunchKernel(KERNEL, NOE, ...) LaunchKernel_512(KERNEL, NOE, __VA_ARGS__)
 #endif
 
+#ifndef CUDA_TS
+#define CUDA_TS(name) \
+    cudaEvent_t time_##name##_start;\
+    cudaEvent_t time_##name##_stop;\
+    cudaEventCreate(&time_##name##_start);\
+    cudaEventCreate(&time_##name##_stop);\
+    cudaEventRecord(time_##name##_start);
+#endif
+
+#ifndef CUDA_TE
+#define CUDA_TE(name) \
+    cudaEventRecord(time_##name##_stop);\
+    cudaEventSynchronize(time_##name##_stop);\
+    float time_##name##_miliseconds = 0.0f;\
+    cudaEventElapsedTime(&time_##name##_miliseconds, time_##name##_start, time_##name##_stop);\
+    printf("[%s] %f ms\n", #name, time_##name##_miliseconds);\
+    cudaEventDestroy(time_##name##_start);\
+    cudaEventDestroy(time_##name##_stop);
+#endif
+
+#include <Serialization.hpp>
+
 template<typename Voxel>
-struct DenseGridInfo {
+struct DenseGridInfo
+{
     Voxel* d_voxels = nullptr;
     unsigned int* d_visitedFlags = nullptr;
 
@@ -26,7 +48,7 @@ struct DenseGridInfo {
 };
 
 template<typename Voxel>
-__global__ void Kernel_Occupy(
+__global__ void Kernel_OccupyDenseGrid(
     DenseGridInfo<Voxel> info,
     float3* d_positions,
     unsigned int numberOfPositions,
@@ -60,7 +82,8 @@ __global__ void Kernel_Occupy(
 }
 
 template<typename Voxel>
-struct DenseGrid {
+struct DenseGrid
+{
     DenseGridInfo<Voxel> info;
 
     void Initialize(float3 gridMin, dim3 dimensions = dim3(400, 400, 400), float voxelSize = 0.1f)
@@ -72,11 +95,19 @@ struct DenseGrid {
         info.voxelSize = voxelSize;
         info.numberOfVoxels = dimensions.x * dimensions.y * dimensions.z;
 
+        size_t allocated = 0;
+
         cudaMalloc(&info.d_voxels, sizeof(Voxel) * info.numberOfVoxels);
         cudaMemset(info.d_voxels, 0, sizeof(Voxel) * info.numberOfVoxels);
 
+        allocated += sizeof(Voxel) * info.numberOfVoxels;
+
         cudaMalloc(&info.d_visitedFlags, sizeof(unsigned int) * info.numberOfVoxels);
         cudaMemset(info.d_visitedFlags, 0, sizeof(unsigned int) * info.numberOfVoxels);
+
+        allocated += sizeof(unsigned int) * info.numberOfVoxels;
+
+        printf("[DenseGrid] Allocated : %zu\n", allocated);
     }
 
     void Terminate()
@@ -147,10 +178,10 @@ struct DenseGrid {
         printf("Dense Grid numberOfOccupiedVoxels capacity: %u\n", info.h_occupiedCapacity);
     }
 
-    void Occupy(float3* d_positions, unsigned int numberOfPositions, Voxel* d_voxels = nullptr)
+    void Occupy(float3* d_positions, float3* d_normals, float3* d_colors, unsigned int numberOfPositions, Voxel* d_voxels = nullptr)
     {
         CheckOccupiedIndicesLength(numberOfPositions);
-        LaunchKernel(Kernel_Occupy, numberOfPositions, info, d_positions, numberOfPositions, d_voxels);
+        LaunchKernel(Kernel_OccupyDenseGrid, numberOfPositions, info, d_positions, numberOfPositions, d_voxels);
         cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
         printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
     }
