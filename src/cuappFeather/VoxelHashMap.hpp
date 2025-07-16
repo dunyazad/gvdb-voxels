@@ -72,8 +72,7 @@ __global__ void Kernel_OccupyVoxelHashMap(
     float3* normals,
     float3* colors,
     float voxelSize,
-    unsigned int numberOfPoints,
-    unsigned int* failedCount);
+    unsigned int numberOfPoints);
 
 struct VoxelHashMap
 {
@@ -99,18 +98,8 @@ struct VoxelHashMap
 
     void Occupy(float3* d_positions, float3* d_normals, float3* d_colors, float voxelSize, unsigned int numberOfPoints)
     {
-        unsigned int* d_failedCount;
-        cudaMalloc(&d_failedCount, sizeof(unsigned int));
-        cudaMemset(d_failedCount, 0, sizeof(unsigned int));
-
         LaunchKernel(Kernel_OccupyVoxelHashMap, numberOfPoints,
-            info, d_positions, d_normals, d_colors, voxelSize, numberOfPoints, d_failedCount);
-
-        unsigned int h_failedCount = 0;
-        cudaMemcpy(&h_failedCount, d_failedCount, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-        cudaFree(d_failedCount);
-
-        printf("[!] Failed insertions: %u (%.2f%%)\n", h_failedCount, 100.0f * h_failedCount / numberOfPoints);
+            info, d_positions, d_normals, d_colors, voxelSize, numberOfPoints);
     }
 
     void Serialize(const std::string& filename, float voxelSize) const
@@ -237,8 +226,7 @@ __global__ void Kernel_OccupyVoxelHashMap(
     float3* normals,
     float3* colors,
     float voxelSize,
-    unsigned int numberOfPoints,
-    unsigned int* failedCount)
+    unsigned int numberOfPoints)
 {
     unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= numberOfPoints) return;
@@ -253,10 +241,8 @@ __global__ void Kernel_OccupyVoxelHashMap(
 
     for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
     {
-        //printf("tid : %d\n", tid);
         size_t slot = (h + probe) % info.capacity;
         VoxelHashEntry* entry = &info.entries[slot];
-
 
         VoxelKey old = atomicCAS(reinterpret_cast<unsigned long long*>(&entry->key),
             EMPTY_KEY, key);
@@ -278,7 +264,5 @@ __global__ void Kernel_OccupyVoxelHashMap(
             return;
         }
     }
-
-    atomicAdd(failedCount, 1);
 }
 
