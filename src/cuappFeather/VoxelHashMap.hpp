@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cuda_runtime.h>
+#include <cuda_vector_math.cuh>
 
 #ifndef LaunchKernel
 #define LaunchKernel_256(KERNEL, NOE, ...) { nvtxRangePushA(#KERNEL); auto NOT = 256; auto NOB = (NOE + NOT - 1) / NOT; KERNEL<<<NOB, NOT>>>(__VA_ARGS__); nvtxRangePop(); }
@@ -31,20 +32,19 @@
 
 #include <Serialization.hpp>
 
-using VoxelKey = unsigned long long;
-#define EMPTY_KEY 0xFFFFFFFFFFFFFFFFULL
+using VoxelKey = uint64_t;
+#define EMPTY_KEY UINT64_MAX
 #define VALID_KEY(k) ((k) != EMPTY_KEY)
-#define OFFSET_21BIT (1 << 20) // 1048576
 
 struct Voxel
 {
-    int3 coordinate = make_int3(0, 0, 0);
+    uint3 coordinate = make_uint3(UINT32_MAX, UINT32_MAX, UINT32_MAX);
     float3 normalSum = make_float3(0, 0, 0);
     float3 colorSum = make_float3(0, 0, 0);
     unsigned int count = 0;
 };
 
-struct alignas(8) VoxelHashEntry
+struct VoxelHashEntry
 {
     VoxelKey key;
     Voxel voxel;
@@ -54,7 +54,7 @@ struct VoxelHashMapInfo
 {
     VoxelHashEntry* entries = nullptr;
     size_t capacity = 1 << 24; // default 16M slots
-    uint8_t maxProbe = 64;
+    unsigned int maxProbe = 64;
 };
 
 __global__ void Kernel_ClearHashMap(VoxelHashMapInfo info)
@@ -79,19 +79,21 @@ struct VoxelHashMap
 {
     VoxelHashMapInfo info;
 
-    void Initialize(size_t capacity = 1 << 24, uint8_t maxProbe = 64)
+    void Initialize(size_t capacity = 1 << 24, unsigned int maxProbe = 64)
     {
         info.capacity = capacity;
         info.maxProbe = maxProbe;
         cudaMalloc(&info.entries, sizeof(VoxelHashEntry) * info.capacity);
+
         LaunchKernel(Kernel_ClearHashMap, info.capacity, info);
-        cudaDeviceSynchronize();
     }
 
     void Terminate()
     {
-        if (info.entries)
+        if (nullptr != info.entries)
+        {
             cudaFree(info.entries);
+        }
         info.entries = nullptr;
     }
 
@@ -144,31 +146,72 @@ struct VoxelHashMap
         ply.Serialize(filename);
     }
 
-    __host__ __device__ static inline VoxelKey IndexToVoxelKey(const int3& coord)
+    __host__ __device__ inline static uint64_t expandBits(uint32_t v)
     {
-        uint64_t x = static_cast<uint64_t>(coord.x + OFFSET_21BIT) & 0x1FFFFF;
-        uint64_t y = static_cast<uint64_t>(coord.y + OFFSET_21BIT) & 0x1FFFFF;
-        uint64_t z = static_cast<uint64_t>(coord.z + OFFSET_21BIT) & 0x1FFFFF;
-        return (x << 42) | (y << 21) | z;
+        uint64_t x = v & 0x1fffff; // 21 bits
+        x = (x | x << 32) & 0x1f00000000ffff;
+        x = (x | x << 16) & 0x1f0000ff0000ff;
+        x = (x | x << 8) & 0x100f00f00f00f00f;
+        x = (x | x << 4) & 0x10c30c30c30c30c3;
+        x = (x | x << 2) & 0x1249249249249249;
+        return x;
     }
 
-    __host__ __device__ static inline int3 VoxelKeyToIndex(VoxelKey key)
+    __host__ __device__ inline static uint32_t compactBits(uint64_t x)
     {
-        int x = static_cast<int>((key >> 42) & 0x1FFFFF) - OFFSET_21BIT;
-        int y = static_cast<int>((key >> 21) & 0x1FFFFF) - OFFSET_21BIT;
-        int z = static_cast<int>(key & 0x1FFFFF) - OFFSET_21BIT;
-        return make_int3(x, y, z);
+        x &= 0x1249249249249249;
+        x = (x ^ (x >> 2)) & 0x10c30c30c30c30c3;
+        x = (x ^ (x >> 4)) & 0x100f00f00f00f00f;
+        x = (x ^ (x >> 8)) & 0x1f0000ff0000ff;
+        x = (x ^ (x >> 16)) & 0x1f00000000ffff;
+        x = (x ^ (x >> 32)) & 0x1fffff;
+        return static_cast<uint32_t>(x);
     }
 
-    __host__ __device__ static inline int3 PositionToIndex(float3 pos, float voxelSize)
+    __host__ __device__ inline static VoxelKey IndexToVoxelKey(const int3& coord)
+    {
+        // Add offset to handle negative values
+        const int OFFSET = 1 << 20; // 2^20 = 1048576
+        return (expandBits(coord.z + OFFSET) << 2) |
+            (expandBits(coord.y + OFFSET) << 1) |
+            expandBits(coord.x + OFFSET);
+    }
+
+    __host__ __device__ inline static int3 VoxelKeyToIndex(VoxelKey key)
+    {
+        const int OFFSET = 1 << 20;
+        int x = static_cast<int>(compactBits(key));
+        int y = static_cast<int>(compactBits(key >> 1));
+        int z = static_cast<int>(compactBits(key >> 2));
+        return make_int3(x - OFFSET, y - OFFSET, z - OFFSET);
+    }
+
+    __host__ inline static int3 PositionToIndex_host(float3 pos, float voxelSize)
     {
         return make_int3(
-            static_cast<int>(floorf(pos.x / voxelSize)),
-            static_cast<int>(floorf(pos.y / voxelSize)),
-            static_cast<int>(floorf(pos.z / voxelSize)));
+            static_cast<int>(std::floor(pos.x / voxelSize)),
+            static_cast<int>(std::floor(pos.y / voxelSize)),
+            static_cast<int>(std::floor(pos.z / voxelSize)));
     }
 
-    __host__ __device__ static inline float3 IndexToPosition(int3 index, float voxelSize)
+    __device__ inline static int3 PositionToIndex_device(float3 pos, float voxelSize)
+    {
+        return make_int3(
+            __float2int_rd(pos.x / voxelSize),
+            __float2int_rd(pos.y / voxelSize),
+            __float2int_rd(pos.z / voxelSize));
+    }
+
+    __host__ __device__ inline static int3 VoxelHashMap::PositionToIndex(float3 pos, float voxelSize)
+    {
+#if defined(__CUDA_ARCH__)
+        return PositionToIndex_device(pos, voxelSize);
+#else
+        return PositionToIndex_host(pos, voxelSize);
+#endif
+    }
+
+    __host__ __device__ inline static float3 VoxelHashMap::IndexToPosition(int3 index, float voxelSize)
     {
         return make_float3(
             (index.x + 0.5f) * voxelSize,
@@ -176,53 +219,15 @@ struct VoxelHashMap
             (index.z + 0.5f) * voxelSize);
     }
 
-    __host__ __device__ static inline uint64_t mix64(uint64_t x)
-    {
-        x ^= x >> 33;
-        x *= 0xff51afd7ed558ccdULL;
-        x ^= x >> 33;
-        x *= 0xc4ceb9fe1a85ec53ULL;
-        x ^= x >> 33;
-        return x;
-    }
-
     __host__ __device__ static inline size_t hash(VoxelKey key, size_t capacity)
     {
-        return mix64(key) & (capacity - 1);
-    }
-
-    __device__ static bool insert_accumulate(VoxelHashMapInfo info, VoxelKey key, float3 n, float3 c)
-    {
-        size_t idx = hash(key, info.capacity);
-        for (int i = 0; i < info.maxProbe; ++i)
-        {
-            size_t slot = (idx + i) % info.capacity;
-            unsigned long long* slot_key = reinterpret_cast<unsigned long long*>(&info.entries[slot].key);
-            unsigned long long prev_key = atomicCAS(slot_key, EMPTY_KEY, key);
-
-            if (prev_key == EMPTY_KEY)
-            {
-                info.entries[slot].voxel.coordinate = VoxelKeyToIndex(key);
-                info.entries[slot].voxel.normalSum = n;
-                info.entries[slot].voxel.colorSum = c;
-                info.entries[slot].voxel.count = 1;
-                return true;
-            }
-            else if (prev_key == key)
-            {
-                atomicAdd(&info.entries[slot].voxel.normalSum.x, n.x);
-                atomicAdd(&info.entries[slot].voxel.normalSum.y, n.y);
-                atomicAdd(&info.entries[slot].voxel.normalSum.z, n.z);
-
-                atomicAdd(&info.entries[slot].voxel.colorSum.x, c.x);
-                atomicAdd(&info.entries[slot].voxel.colorSum.y, c.y);
-                atomicAdd(&info.entries[slot].voxel.colorSum.z, c.z);
-
-                atomicAdd(&info.entries[slot].voxel.count, 1u);
-                return true;
-            }
-        }
-        return false;
+        // Use a simple multiplicative hash (can be replaced with better ones)
+        key ^= (key >> 33);
+        key *= 0xff51afd7ed558ccd;
+        key ^= (key >> 33);
+        key *= 0xc4ceb9fe1a85ec53;
+        key ^= (key >> 33);
+        return static_cast<size_t>(key) % capacity;
     }
 };
 
@@ -241,10 +246,39 @@ __global__ void Kernel_OccupyVoxelHashMap(
     float3 pos = positions[tid];
     int3 index = VoxelHashMap::PositionToIndex(pos, voxelSize);
     VoxelKey key = VoxelHashMap::IndexToVoxelKey(index);
-
     float3 n = normals ? normals[tid] : make_float3(0, 0, 0);
     float3 c = colors ? colors[tid] : make_float3(0, 0, 0);
 
-    if (!VoxelHashMap::insert_accumulate(info, key, n, c) && failedCount)
-        atomicAdd(failedCount, 1);
+    size_t h = VoxelHashMap::hash(key, info.capacity);
+
+    for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+    {
+        //printf("tid : %d\n", tid);
+        size_t slot = (h + probe) % info.capacity;
+        VoxelHashEntry* entry = &info.entries[slot];
+
+
+        VoxelKey old = atomicCAS(reinterpret_cast<unsigned long long*>(&entry->key),
+            EMPTY_KEY, key);
+
+        if (old == EMPTY_KEY || old == key)
+        {
+            atomicAdd(&entry->voxel.normalSum.x, n.x);
+            atomicAdd(&entry->voxel.normalSum.y, n.y);
+            atomicAdd(&entry->voxel.normalSum.z, n.z);
+
+            atomicAdd(&entry->voxel.colorSum.x, c.x);
+            atomicAdd(&entry->voxel.colorSum.y, c.y);
+            atomicAdd(&entry->voxel.colorSum.z, c.z);
+
+            atomicAdd(&entry->voxel.count, 1u);
+
+            entry->voxel.coordinate = make_uint3(index.x, index.y, index.z);
+
+            return;
+        }
+    }
+
+    atomicAdd(failedCount, 1);
 }
+

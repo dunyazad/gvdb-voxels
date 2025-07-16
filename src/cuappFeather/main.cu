@@ -399,8 +399,8 @@ void cuMain(
 
         VoxelHashMap vhm;
 
-        //vhm.Initialize(host_points.size() * 8, 256);
-        vhm.Initialize(1 << 21, 256);
+        vhm.Initialize(host_points.size() * 8, 32);
+        //vhm.Initialize(1 << 21, 256);
 
         vhm.Occupy(
             thrust::raw_pointer_cast(d_points.data()),
