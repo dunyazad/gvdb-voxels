@@ -304,7 +304,7 @@ struct VoxelHashMap
         return false;
     }
 
-    __device__ static bool computeInterpolatedSurfacePoint_6(
+    __device__ static bool computeInterpolatedSurfacePoint_6_old(
         VoxelHashMapInfo info,
         int3 index,
         float sdfCenter,
@@ -369,7 +369,77 @@ struct VoxelHashMap
         return false;
     }
 
-    __device__ static bool computeInterpolatedSurfacePoint_26(
+    __device__ static bool computeInterpolatedSurfacePoint_6(
+        VoxelHashMapInfo info,
+        int3 index,
+        float sdfCenter,
+        float3& outPosition,
+        float3& outNormal,
+        float3& outColor)
+    {
+        const int3 dirs[6] = {
+            make_int3(1, 0, 0), make_int3(-1, 0, 0),
+            make_int3(0, 1, 0), make_int3(0, -1, 0),
+            make_int3(0, 0, 1), make_int3(0, 0, -1),
+        };
+
+        float3 p1 = VoxelHashMap::IndexToPosition(index, info.voxelSize);
+        Voxel voxel1;
+        {
+            VoxelKey key = VoxelHashMap::IndexToVoxelKey(index);
+            size_t h = VoxelHashMap::hash(key, info.capacity);
+
+            for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+            {
+                size_t slot = (h + probe) % info.capacity;
+                if (info.entries[slot].key == key)
+                {
+                    voxel1 = info.entries[slot].voxel;
+                    break;
+                }
+            }
+        }
+
+        for (int i = 0; i < 6; ++i)
+        {
+            int3 neighbor = index + dirs[i];
+            VoxelKey nkey = VoxelHashMap::IndexToVoxelKey(neighbor);
+            size_t h = VoxelHashMap::hash(nkey, info.capacity);
+
+            for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+            {
+                size_t slot = (h + probe) % info.capacity;
+                VoxelHashEntry entry = info.entries[slot];
+
+                if (entry.key == nkey)
+                {
+                    float sdfNeighbor = entry.voxel.sdfSum / max(1u, entry.voxel.count);
+
+                    if (sdfCenter > 0.0f && sdfNeighbor < 0.0f)
+                    {
+                        float diff = sdfCenter - sdfNeighbor;
+                        if (fabsf(diff) < 0.01f)
+                            break; // very flat interface, likely noise
+
+                        float alpha = sdfCenter / diff;
+                        if (alpha < 0.01f || alpha > 0.99f)
+                            break; // avoid extrapolated/interpolated noise
+
+                        float3 p2 = VoxelHashMap::IndexToPosition(neighbor, info.voxelSize);
+                        outPosition = p1 + alpha * (p2 - p1);
+                        outNormal = voxel1.normalSum / max(1u, voxel1.count);
+                        outColor = voxel1.colorSum / max(1u, voxel1.count);
+                        return true;
+                    }
+                    break;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    __device__ static bool computeInterpolatedSurfacePoint_26_old(
         VoxelHashMapInfo info,
         int3 index,
         float sdfCenter,
@@ -422,6 +492,79 @@ struct VoxelHashMap
                             {
                                 float3 p2 = VoxelHashMap::IndexToPosition(neighbor, info.voxelSize);
                                 float alpha = sdfCenter / (sdfCenter - sdfNeighbor);
+                                outPosition = p1 + alpha * (p2 - p1);
+                                outNormal = voxel1.normalSum / max(1u, voxel1.count);
+                                outColor = voxel1.colorSum / max(1u, voxel1.count);
+                                return true;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    __device__ static bool computeInterpolatedSurfacePoint_26(
+        VoxelHashMapInfo info,
+        int3 index,
+        float sdfCenter,
+        float3& outPosition,
+        float3& outNormal,
+        float3& outColor)
+    {
+        float3 p1 = VoxelHashMap::IndexToPosition(index, info.voxelSize);
+        Voxel voxel1;
+        {
+            VoxelKey key = VoxelHashMap::IndexToVoxelKey(index);
+            size_t h = VoxelHashMap::hash(key, info.capacity);
+
+            for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+            {
+                size_t slot = (h + probe) % info.capacity;
+                if (info.entries[slot].key == key)
+                {
+                    voxel1 = info.entries[slot].voxel;
+                    break;
+                }
+            }
+        }
+
+        for (int dz = -1; dz <= 1; ++dz)
+        {
+            for (int dy = -1; dy <= 1; ++dy)
+            {
+                for (int dx = -1; dx <= 1; ++dx)
+                {
+                    if (dx == 0 && dy == 0 && dz == 0)
+                        continue;
+
+                    int3 neighbor = index + make_int3(dx, dy, dz);
+                    VoxelKey nkey = VoxelHashMap::IndexToVoxelKey(neighbor);
+                    size_t h = VoxelHashMap::hash(nkey, info.capacity);
+
+                    for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+                    {
+                        size_t slot = (h + probe) % info.capacity;
+                        VoxelHashEntry entry = info.entries[slot];
+
+                        if (entry.key == nkey)
+                        {
+                            float sdfNeighbor = entry.voxel.sdfSum / max(1u, entry.voxel.count);
+
+                            if (sdfCenter > 0.0f && sdfNeighbor < 0.0f)
+                            {
+                                float diff = sdfCenter - sdfNeighbor;
+                                if (fabsf(diff) < 0.01f)
+                                    break;
+
+                                float alpha = sdfCenter / diff;
+                                if (alpha < 0.01f || alpha > 0.99f)
+                                    break;
+
+                                float3 p2 = VoxelHashMap::IndexToPosition(neighbor, info.voxelSize);
                                 outPosition = p1 + alpha * (p2 - p1);
                                 outNormal = voxel1.normalSum / max(1u, voxel1.count);
                                 outColor = voxel1.colorSum / max(1u, voxel1.count);
