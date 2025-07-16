@@ -14,6 +14,10 @@
     <ClInclude Include="KDTree.hpp" />
     <ClInclude Include="VoxelHashMap.hpp" />
     <ClInclude Include="TSDF.hpp" />
+    <ClInclude Include="marching_cubes_constants.cuh" />
+    <ClInclude Include="cuda_vector_math.cuh" />
+    <ClInclude Include="cuda_common.cuh" />
+    <ClInclude Include="Octree.cuh" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HashMap.hpp" />

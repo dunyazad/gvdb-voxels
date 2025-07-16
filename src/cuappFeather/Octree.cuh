@@ -1,11 +1,6 @@
 #pragma once
 
-#include <vector>
-
-#include <cuda_runtime.h>
-#include <cuda_gl_interop.h>
-#include <device_launch_parameters.h>
-#include <nvtx3/nvToolsExt.h>
+#include <cuda_common.cuh>
 
 #include <thrust/device_vector.h>
 #include <thrust/sort.h>

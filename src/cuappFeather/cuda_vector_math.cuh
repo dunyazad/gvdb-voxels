@@ -103,6 +103,13 @@ __host__ __device__ inline float2 normalize(const float2& v)
     return v / length(v);
 }
 
+__host__ __device__ inline float2 lerp(const float2& a, const float2& b, float t)
+{
+    return make_float2(
+        a.x + t * (b.x - a.x),
+        a.y + t * (b.y - a.y));
+}
+
 
 __host__ __device__ inline float3 make_float3(float s)
 {
@@ -214,6 +221,14 @@ __host__ __device__ inline float3 cross(const float3& a, const float3& b)
     );
 }
 
+__host__ __device__ inline float3 lerp(const float3& a, const float3& b, float t)
+{
+    return make_float3(
+        a.x + t * (b.x - a.x),
+        a.y + t * (b.y - a.y),
+        a.z + t * (b.z - a.z));
+}
+
 
 __host__ __device__ inline float4 make_float4(float s)
 {
@@ -314,6 +329,15 @@ __host__ __device__ inline float length(const float4& v)
 __host__ __device__ inline float4 normalize(const float4& v)
 {
     return v / length(v);
+}
+
+__host__ __device__ inline float4 lerp(const float4& a, const float4& b, float t)
+{
+    return make_float4(
+        a.x + t * (b.x - a.x),
+        a.y + t * (b.y - a.y),
+        a.z + t * (b.z - a.z),
+        a.w + t * (b.w - a.w));
 }
 
 
@@ -910,6 +934,13 @@ __host__ __device__ inline double2 normalize(const double2& v)
     return v / length(v);
 }
 
+__host__ __device__ inline double2 lerp(const double2 &a, const double2& b, double t)
+{
+    return make_double2(
+        a.x + t * (b.x - a.x),
+        a.y + t * (b.y - a.y));
+}
+
 
 __host__ __device__ inline double3 make_double3(double s)
 {
@@ -1012,6 +1043,13 @@ __host__ __device__ inline double3 normalize(const double3& v)
     return v / length(v);
 }
 
+__host__ __device__ inline double3 lerp(const double3& a, const double3& b, double t)
+{
+    return make_double3(
+        a.x + t * (b.x - a.x),
+        a.y + t * (b.y - a.y),
+        a.z + t * (b.z - a.z));
+}
 
 __host__ __device__ inline double4 make_double4(double s)
 {
@@ -1112,4 +1150,13 @@ __host__ __device__ inline double length(const double4& v)
 __host__ __device__ inline double4 normalize(const double4& v)
 {
     return v / length(v);
+}
+
+__host__ __device__ inline double4 lerp(const double4& a, const double4& b, double t)
+{
+    return make_double4(
+        a.x + t * (b.x - a.x),
+        a.y + t * (b.y - a.y),
+        a.z + t * (b.z - a.z),
+        a.w + t * (b.w - a.w));
 }

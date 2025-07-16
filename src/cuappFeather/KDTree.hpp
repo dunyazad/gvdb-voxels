@@ -1,12 +1,6 @@
 #pragma once
-#include <cuda_runtime.h>
-#include <cub/cub.cuh>
-#include <math.h>
 
-#ifndef LaunchKernel
-#define LaunchKernel_512(KERNEL, NOE, ...) { nvtxRangePushA(#KERNEL); int NOT = 512; int NOB = (NOE + NOT - 1) / NOT; KERNEL<<<NOB, NOT>>>(__VA_ARGS__); nvtxRangePop(); }
-#define LaunchKernel(KERNEL, NOE, ...) LaunchKernel_512(KERNEL, NOE, __VA_ARGS__)
-#endif
+#include <cuda_common.cuh>
 
 struct KDNode
 {

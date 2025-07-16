@@ -19,9 +19,13 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BitVolume.hpp" />
+    <ClInclude Include="cuda_common.cuh" />
+    <ClInclude Include="cuda_vector_math.cuh" />
     <ClInclude Include="DenseGrid.hpp" />
     <ClInclude Include="KDTree.hpp" />
     <ClInclude Include="main.cuh" />
+    <ClInclude Include="marching_cubes_constants.cuh" />
+    <ClInclude Include="Octree.cuh" />
     <ClInclude Include="TSDF.hpp" />
     <ClInclude Include="VoxelHashMap.hpp" />
   </ItemGroup>
