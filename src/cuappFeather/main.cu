@@ -409,7 +409,7 @@ void cuMain(
             host_points.size(),
             3);
 
-        //vhm.Serialize("../../res/3D/VoxelHashMap_SDF.ply");
+        vhm.Serialize("../../res/3D/VoxelHashMap_SDF.ply");
 
         CUDA_TE(VoxelHashMap);
     }

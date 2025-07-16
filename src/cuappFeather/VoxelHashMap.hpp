@@ -34,22 +34,7 @@ struct VoxelHashMapInfo
     unsigned int h_occupiedCapacity = 0;
 };
 
-__global__ void Kernel_ClearHashMap(VoxelHashMapInfo info)
-{
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= info.capacity) return;
-
-    info.entries[idx].key = EMPTY_KEY;
-    info.entries[idx].voxel = {};
-}
-
-__global__ void Kernel_OccupySDF(
-    VoxelHashMapInfo info,
-    float3* positions,
-    float3* normals,
-    float3* colors,
-    unsigned int numberOfPoints,
-    int offset = 1);
+__global__ void Kernel_ClearHashMap(VoxelHashMapInfo info);
 
 __global__ void Kernel_OccupyVoxelHashMap(
     VoxelHashMapInfo info,
@@ -57,6 +42,14 @@ __global__ void Kernel_OccupyVoxelHashMap(
     float3* normals,
     float3* colors,
     unsigned int numberOfPoints);
+
+__global__ void Kernel_OccupySDF(
+    VoxelHashMapInfo info,
+    float3* positions,
+    float3* normals,
+    float3* colors,
+    unsigned int numberOfPoints,
+    int offset = 1); 
 
 __global__ void Kernel_SerializeVoxelHashMap(
     VoxelHashMapInfo info,
@@ -311,7 +304,7 @@ struct VoxelHashMap
         return false;
     }
 
-    __device__ static bool computeInterpolatedSurfacePoint(
+    __device__ static bool computeInterpolatedSurfacePoint_6(
         VoxelHashMapInfo info,
         int3 index,
         float sdfCenter,
@@ -376,7 +369,83 @@ struct VoxelHashMap
         return false;
     }
 
+    __device__ static bool computeInterpolatedSurfacePoint_26(
+        VoxelHashMapInfo info,
+        int3 index,
+        float sdfCenter,
+        float3& outPosition,
+        float3& outNormal,
+        float3& outColor)
+    {
+        float3 p1 = VoxelHashMap::IndexToPosition(index, info.voxelSize);
+        Voxel voxel1;
+        {
+            VoxelKey key = VoxelHashMap::IndexToVoxelKey(index);
+            size_t h = VoxelHashMap::hash(key, info.capacity);
+
+            for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+            {
+                size_t slot = (h + probe) % info.capacity;
+                if (info.entries[slot].key == key)
+                {
+                    voxel1 = info.entries[slot].voxel;
+                    break;
+                }
+            }
+        }
+
+        // 26방향 오프셋 정의
+        for (int dz = -1; dz <= 1; ++dz)
+        {
+            for (int dy = -1; dy <= 1; ++dy)
+            {
+                for (int dx = -1; dx <= 1; ++dx)
+                {
+                    if (dx == 0 && dy == 0 && dz == 0)
+                        continue; // 중심은 건너뜀
+
+                    int3 neighbor = make_int3(index.x + dx, index.y + dy, index.z + dz);
+                    VoxelKey nkey = VoxelHashMap::IndexToVoxelKey(neighbor);
+                    size_t h = VoxelHashMap::hash(nkey, info.capacity);
+
+                    for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+                    {
+                        size_t slot = (h + probe) % info.capacity;
+                        VoxelHashEntry entry = info.entries[slot];
+
+                        if (entry.key == nkey)
+                        {
+                            float sdfNeighbor = entry.voxel.sdfSum / max(1u, entry.voxel.count);
+
+                            // 단방향 crossing: 양 → 음
+                            if (sdfCenter > 0.0f && sdfNeighbor < 0.0f)
+                            {
+                                float3 p2 = VoxelHashMap::IndexToPosition(neighbor, info.voxelSize);
+                                float alpha = sdfCenter / (sdfCenter - sdfNeighbor);
+                                outPosition = p1 + alpha * (p2 - p1);
+                                outNormal = voxel1.normalSum / max(1u, voxel1.count);
+                                outColor = voxel1.colorSum / max(1u, voxel1.count);
+                                return true;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
 };
+
+__global__ void Kernel_ClearHashMap(VoxelHashMapInfo info)
+{
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= info.capacity) return;
+
+    info.entries[idx].key = EMPTY_KEY;
+    info.entries[idx].voxel = {};
+}
 
 __global__ void Kernel_OccupyVoxelHashMap(
     VoxelHashMapInfo info,
@@ -538,7 +607,7 @@ __global__ void Kernel_SerializeVoxelHashMap(
             float sdf = voxel.sdfSum / (float)voxel.count;
 
             float3 pos, normal, color;
-            bool valid = VoxelHashMap::computeInterpolatedSurfacePoint(info, voxelIndex, sdf, pos, normal, color);
+            bool valid = VoxelHashMap::computeInterpolatedSurfacePoint_26(info, voxelIndex, sdf, pos, normal, color);
 
             if (!valid)
             {
