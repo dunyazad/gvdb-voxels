@@ -151,7 +151,8 @@ bool ForceGPUPerformance()
 //const string resource_file_name_ply = "../../res/3D/Normal.ply";
 //const string resource_file_name_alp = "../../res/3D/Normal.alp";
 
-const string resource_file_name = "Compound_Full";
+const string resource_file_name = "0_Initial";
+//const string resource_file_name = "Compound_Full";
 //const string resource_file_name = "Bridge";
 const string resource_file_name_ply = "../../res/3D/" + resource_file_name + ".ply";
 const string resource_file_name_alp = "../../res/3D/" + resource_file_name + ".alp";

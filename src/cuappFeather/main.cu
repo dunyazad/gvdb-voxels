@@ -402,14 +402,14 @@ void cuMain(
         vhm.Initialize(host_points.size() * 8, 32);
         //vhm.Initialize(1 << 21, 256);
 
-        vhm.Occupy(
+        vhm.Occupy_SDF(
             thrust::raw_pointer_cast(d_points.data()),
             thrust::raw_pointer_cast(d_normals.data()),
             thrust::raw_pointer_cast(d_colors.data()),
-            0.1f,
-            host_points.size());
+            host_points.size(),
+            2);
 
-        vhm.Serialize("../../res/3D/VoxelHashMap.ply", 0.1f);
+        vhm.Serialize("../../res/3D/VoxelHashMap_SDF.ply", 0.1f);
 
         CUDA_TE(VoxelHashMap);
     }
