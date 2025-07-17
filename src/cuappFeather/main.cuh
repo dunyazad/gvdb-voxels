@@ -7,8 +7,7 @@
 #include <string>
 #include <unordered_set>
 
-#include <cuda_runtime.h>
-#include <device_launch_parameters.h>
+#include <cuda_common.cuh>
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
@@ -55,6 +54,6 @@ __host__ float3 H_FromKey(uint64_t key, float resolution = 0.0001f);
 
 class Texture;
 
-void cuMain(float voxelSize, std::vector<float3>& host_points, std::vector<float3>& host_normals, std::vector<uchar3>& host_colors, float3 center);
+HostPointCloud ProcessPointCloud(const HostPointCloud& h_input);
 
-std::vector<uint8_t> DetectEdge();
+void cuMain(float voxelSize, std::vector<float3>& host_points, std::vector<float3>& host_normals, std::vector<uchar3>& host_colors, float3 center);

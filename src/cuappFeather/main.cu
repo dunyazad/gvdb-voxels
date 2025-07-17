@@ -28,6 +28,26 @@
 #include <VoxelHashMap.hpp>
 #include <TSDF.hpp>
 
+HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
+{
+    CUDA_TS(VoxelHashMap);
+
+    DevicePointCloud d_input(h_input);
+
+    VoxelHashMap vhm;
+
+    vhm.Initialize(d_input.numberOfPoints * 8, 32);
+
+    vhm.Occupy_SDF(d_input, 3);
+
+    HostPointCloud result = vhm.Serialize();
+    d_input.Terminate();
+
+    CUDA_TE(VoxelHashMap);
+
+    return result;
+}
+
 __host__ __device__
 float3 rgb_to_hsv(uchar3 rgb) {
     float r = rgb.x / 255.0f;
@@ -178,114 +198,6 @@ __host__ float3 H_FromKey(uint64_t key, float resolution)
 }
 
 
-struct PointCloud
-{
-    Eigen::Vector3f* d_points = nullptr;
-    Eigen::Vector3f* d_normals = nullptr;
-    Eigen::Vector3b* d_colors = nullptr;
-    unsigned int numberOfPoints = 0;
-};
-
-PointCloud pointCloud;
-
-__global__ void Kernel_DetectEdge(
-    const Eigen::Vector3f* d_points,
-    const Eigen::Vector3f* d_normals,
-    const Eigen::Vector3b* d_colors,
-    uint8_t* d_is_edge,
-    int numberOfPoints)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= numberOfPoints) return;
-
-    Eigen::Vector3f pi = d_points[idx];
-    Eigen::Vector3f ni = d_normals[idx];
-    Eigen::Vector3b ci = d_colors[idx];
-
-    float3 hsv_i = rgb_to_hsv(make_uchar3(ci.x(), ci.y(), ci.z()));
-
-    int edge_count = 0;
-    int total_neighbors = 0;
-
-    for (int j = 0; j < numberOfPoints; ++j) {
-        if (j == idx) continue;
-
-        Eigen::Vector3f pj = d_points[j];
-        if ((pj - pi).squaredNorm() > 0.01f) continue;
-
-        Eigen::Vector3f nj = d_normals[j];
-        Eigen::Vector3b cj = d_colors[j];
-        float3 hsv_j = rgb_to_hsv(make_uchar3(cj.x(), cj.y(), cj.z()));
-
-        float angle = acosf(fminf(fmaxf(ni.dot(nj), -1.0f), 1.0f));
-        float h_diff = fmodf(fabsf(hsv_i.x - hsv_j.x), 360.0f);
-        h_diff = fminf(h_diff, 360.0f - h_diff);
-
-        if (angle > 0.3f || h_diff > 20.0f) {
-            edge_count++;
-        }
-
-        total_neighbors++;
-    }
-
-    d_is_edge[idx] = (edge_count >= 2);
-}
-
-vector<uint8_t> DetectEdge()
-{
-    vector<uint8_t> h_is_edge(pointCloud.numberOfPoints);
-    uint8_t* d_is_edge = nullptr;
-    cudaMalloc(&d_is_edge, sizeof(uint8_t) * pointCloud.numberOfPoints);
-
-    unsigned int blockSize = 512;
-    unsigned int gridOccupied = (pointCloud.numberOfPoints + blockSize - 1) / blockSize;
-
-    Kernel_DetectEdge << <gridOccupied, blockSize >> > (
-        pointCloud.d_points,
-        pointCloud.d_normals,
-        pointCloud.d_colors,
-        d_is_edge,
-        pointCloud.numberOfPoints);
-
-    cudaDeviceSynchronize();
-
-    cudaMemcpy(h_is_edge.data(), d_is_edge, sizeof(uint8_t) * pointCloud.numberOfPoints, cudaMemcpyDeviceToHost);
-
-    cudaDeviceSynchronize();
-    return h_is_edge;
-}
-
-struct HashMapVoxel
-{
-    bool occupied = false;
-    uint64_t key = UINT64_MAX;
-};
-
-__global__ void Kernel_OccupyPointCloud(HashMap<uint64_t, HashMapVoxel> hashmap, PointCloud pointCloud)
-{
-    unsigned int threadid = blockDim.x * blockIdx.x + threadIdx.x;
-    if (threadid >= pointCloud.numberOfPoints) return;
-
-    //printf("%d, %f, %f, %f\n", threadid, pointCloud.d_points[threadid].x(), pointCloud.d_points[threadid].y(), pointCloud.d_points[threadid].z());
-    auto key = D_ToKey(make_float3(pointCloud.d_points[threadid].x(), pointCloud.d_points[threadid].y(), pointCloud.d_points[threadid].z()));
-    if (false == hashmap.insert(hashmap.info, key, { true, key }))
-    {
-        printf("Failed - %d, %f, %f, %f\n", threadid, pointCloud.d_points[threadid].x(), pointCloud.d_points[threadid].y(), pointCloud.d_points[threadid].z());
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <thrust/copy.h>
@@ -393,27 +305,7 @@ void cuMain(
 
     //    CUDA_TE(TSDF);
     //}
-    
-    {
-        CUDA_TS(VoxelHashMap);
-
-        VoxelHashMap vhm;
-
-        vhm.Initialize(host_points.size() * 8, 32);
-        //vhm.Initialize(1 << 21, 256);
-
-        vhm.Occupy_SDF(
-            thrust::raw_pointer_cast(d_points.data()),
-            thrust::raw_pointer_cast(d_normals.data()),
-            thrust::raw_pointer_cast(d_colors.data()),
-            host_points.size(),
-            3);
-
-        vhm.Serialize("../../res/3D/VoxelHashMap_SDF.ply");
-
-        CUDA_TE(VoxelHashMap);
-    }
-
+   
     //{
     //    CUDA_TS(DenseGrid);
     //    

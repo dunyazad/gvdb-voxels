@@ -35,3 +35,121 @@
     cudaEventDestroy(time_##name##_start);\
     cudaEventDestroy(time_##name##_stop);
 #endif
+
+struct HostPointCloud;
+struct DevicePointCloud;
+
+struct HostPointCloud
+{
+    float3* positions = nullptr;
+    float3* normals = nullptr;
+    float3* colors = nullptr;
+    unsigned int numberOfPoints = 0;
+
+    void Intialize(unsigned int numberOfPoints)
+    {
+        if (numberOfPoints == 0) return;
+
+        this->numberOfPoints = numberOfPoints;
+        positions = new float3[numberOfPoints];
+        normals = new float3[numberOfPoints];
+        colors = new float3[numberOfPoints];
+    }
+
+    void Terminate()
+    {
+        if (numberOfPoints > 0)
+        {
+            delete[] positions;
+            delete[] normals;
+            delete[] colors;
+
+            positions = nullptr;
+            normals = nullptr;
+            colors = nullptr;
+            numberOfPoints = 0;
+        }
+    }
+
+    HostPointCloud();
+    HostPointCloud(const DevicePointCloud& other);
+    HostPointCloud& operator=(const DevicePointCloud& other);
+};
+
+struct DevicePointCloud
+{
+    float3* positions = nullptr;
+    float3* normals = nullptr;
+    float3* colors = nullptr;
+    unsigned int numberOfPoints = 0;
+
+    void Intialize(unsigned int numberOfPoints)
+    {
+        if (numberOfPoints == 0) return;
+
+        this->numberOfPoints = numberOfPoints;
+        cudaMalloc(&positions, sizeof(float3) * numberOfPoints);
+        cudaMalloc(&normals, sizeof(float3) * numberOfPoints);
+        cudaMalloc(&colors, sizeof(float3) * numberOfPoints);
+        cudaDeviceSynchronize();
+    }
+
+    void Terminate()
+    {
+        if (numberOfPoints > 0)
+        {
+            cudaFree(positions);
+            cudaFree(normals);
+            cudaFree(colors);
+
+            positions = nullptr;
+            normals = nullptr;
+            colors = nullptr;
+            numberOfPoints = 0;
+
+            cudaDeviceSynchronize();
+        }
+    }
+
+    DevicePointCloud();
+    DevicePointCloud(const HostPointCloud& other);
+    DevicePointCloud& operator=(const HostPointCloud& other);
+};
+
+inline HostPointCloud::HostPointCloud() {}
+
+inline HostPointCloud::HostPointCloud(const DevicePointCloud& other)
+{
+    operator =(other);
+}
+
+inline HostPointCloud& HostPointCloud::operator=(const DevicePointCloud& other)
+{
+    Terminate();
+    Intialize(other.numberOfPoints);
+
+    cudaMemcpy(positions, other.positions, sizeof(float3) * other.numberOfPoints, cudaMemcpyDeviceToHost);
+    cudaMemcpy(normals, other.normals, sizeof(float3) * other.numberOfPoints, cudaMemcpyDeviceToHost);
+    cudaMemcpy(colors, other.colors, sizeof(float3) * other.numberOfPoints, cudaMemcpyDeviceToHost);
+
+    return *this;
+}
+
+inline DevicePointCloud::DevicePointCloud() {}
+
+inline DevicePointCloud::DevicePointCloud(const HostPointCloud& other)
+{
+    operator =(other);
+}
+
+inline DevicePointCloud& DevicePointCloud::operator=(const HostPointCloud& other)
+{
+    Terminate();
+    Intialize(other.numberOfPoints);
+
+    cudaMemcpy(positions, other.positions, sizeof(float3) * other.numberOfPoints, cudaMemcpyHostToDevice);
+    cudaMemcpy(normals, other.normals, sizeof(float3) * other.numberOfPoints, cudaMemcpyHostToDevice);
+    cudaMemcpy(colors, other.colors, sizeof(float3) * other.numberOfPoints, cudaMemcpyHostToDevice);
+
+    return *this;
+}

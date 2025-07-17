@@ -4,16 +4,13 @@
 #pragma warning(disable : 4244)
 
 #include <iostream>
+#include <libFeather.h>
 
 #include "main.cuh"
 
 #include <iostream>
 using namespace std;
 
-#include <libFeather.h>
-
-#include <cuda_runtime.h>
-#include <device_launch_parameters.h>
 
 #include "nvapi510/include/nvapi.h"
 #include "nvapi510/include/NvApiDriverSettings.h"
@@ -424,24 +421,6 @@ int main(int argc, char** argv)
 				}
 				else if (GLFW_KEY_F3 == event.keyCode)
 				{
-					TS(DetectEdge);
-					auto is_edge = DetectEdge();
-					TE(DetectEdge); 
-					
-					TS(DetectEdge_Apply);
-					for (size_t i = 0; i < is_edge.size(); i++)
-					{
-						if (false == is_edge[i])
-						{
-							auto& color = host_colors[i];
-							renderable->SetInstanceColor(i, MiniMath::V4(color.x / 255.0f, color.y / 255.0f, color.z / 255.0f, 1.0f));
-						}
-						else
-						{
-							renderable->SetInstanceColor(i, MiniMath::V4(1.0f, 0.0f, 0.0f, 1.0f));
-						}
-					}
-					TE(DetectEdge_Apply);
 				}
 				//else if (GLFW_KEY_R == event.keyCode)
 				//{
@@ -468,7 +447,41 @@ int main(int argc, char** argv)
 return (seed & 0xFFFFFF) / static_cast<float>(0xFFFFFF);
 			};
 
-			cuMain(voxelSize, host_points, host_normals, host_colors, make_float3(x, y, z));
+			HostPointCloud input;
+			input.Intialize(host_points.size());
+			for (size_t i = 0; i < host_points.size(); i++)
+			{
+				if (FLT_MAX == host_points[i].x || FLT_MAX == host_points[i].y || FLT_MAX == host_points[i].z) continue;
+
+				input.positions[i] = host_points[i];
+				input.normals[i] = host_normals[i];
+				auto r = (float)host_colors[i].x / 255.0f;
+				auto g = (float)host_colors[i].y / 255.0f;
+				auto b = (float)host_colors[i].z / 255.0f;
+				input.colors[i] = make_float3(r, g, b);
+			}
+
+			auto result = ProcessPointCloud(input);
+
+	/*		PLYFormat ply;
+			for (size_t i = 0; i < result.numberOfPoints; i++)
+			{
+				auto& p = result.positions[i];
+				if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
+
+				auto& n = result.normals[i];
+				auto& c = result.colors[i];
+
+				ply.AddPoint(p.x, p.y, p.z);
+				ply.AddNormal(n.x, n.y, n.z);
+				ply.AddColor(c.x, c.y, c.z);
+			}
+			ply.Serialize("../../res/3D/VoxelHashMap_SDF.ply");*/
+
+			result.Terminate();
+
+			input.Terminate();
+
 
 			for (size_t i = 0; i < host_colors.size(); i++)
 			{

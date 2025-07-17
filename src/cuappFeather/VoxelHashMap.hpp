@@ -137,55 +137,32 @@ struct VoxelHashMap
         printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
     }
 
-    void Serialize(const std::string& filename) const
+    void Occupy_SDF(const DevicePointCloud& d_input, int offset = 1)
     {
-        if (info.h_numberOfOccupiedVoxels == 0) return;
+        int count = (offset * 2 + 1) * (offset * 2 + 1) * (offset * 2 + 1);
 
-        float3* d_positions = nullptr;
-        cudaMalloc(&d_positions, sizeof(float3) * info.h_numberOfOccupiedVoxels);
-        float3* d_normals = nullptr;
-        cudaMalloc(&d_normals, sizeof(float3) * info.h_numberOfOccupiedVoxels);
-        float3* d_colors = nullptr;
-        cudaMalloc(&d_colors, sizeof(float3) * info.h_numberOfOccupiedVoxels);
+        CheckOccupiedIndicesLength(d_input.numberOfPoints * count);
+        LaunchKernel(Kernel_OccupySDF, d_input.numberOfPoints, info, d_input.positions, d_input.normals, d_input.colors, d_input.numberOfPoints, offset);
+        cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+        printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
+    }
 
-        LaunchKernel(Kernel_SerializeVoxelHashMap, info.h_numberOfOccupiedVoxels, info, d_positions, d_normals, d_colors);
+    HostPointCloud Serialize()
+    {
+        DevicePointCloud d_result;
 
-        float3* h_positions = new float3[info.h_numberOfOccupiedVoxels];
-        float3* h_normals = new float3[info.h_numberOfOccupiedVoxels];
-        float3* h_colors = new float3[info.h_numberOfOccupiedVoxels];
+        if (info.h_numberOfOccupiedVoxels == 0) return d_result;
 
-        cudaMemcpy(h_positions, d_positions, sizeof(float3) * info.h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
-        cudaMemcpy(h_normals, d_normals, sizeof(float3) * info.h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
-        cudaMemcpy(h_colors, d_colors, sizeof(float3) * info.h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
+        d_result.Intialize(info.h_numberOfOccupiedVoxels);
 
-        cudaDeviceSynchronize();
-
-        cudaFree(d_positions);
-        cudaFree(d_normals);
-        cudaFree(d_colors);
+        LaunchKernel(Kernel_SerializeVoxelHashMap, info.h_numberOfOccupiedVoxels, info, d_result.positions, d_result.normals, d_result.colors);
 
         cudaDeviceSynchronize();
 
-        PLYFormat ply;
-        for (unsigned int i = 0; i < info.h_numberOfOccupiedVoxels; ++i)
-        {
-            auto& p = h_positions[i];
+        HostPointCloud h_result(d_result);
+        d_result.Terminate();
 
-            if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
-
-            auto& n = h_normals[i];
-            auto& c = h_colors[i];
-
-            ply.AddPoint(p.x, p.y, p.z);
-            ply.AddNormal(n.x, n.y, n.z);
-            ply.AddColor(c.x, c.y, c.z);
-        }
-
-        ply.Serialize(filename);
-
-        delete[] h_positions;
-        delete[] h_normals;
-        delete[] h_colors;
+        return h_result;
     }
 
     __host__ __device__ inline static uint64_t expandBits(uint32_t v)
@@ -554,7 +531,8 @@ struct VoxelHashMap
                         {
                             float sdfNeighbor = entry.voxel.sdfSum / max(1u, entry.voxel.count);
 
-                            if (sdfCenter > 0.0f && sdfNeighbor < 0.0f)
+                            //if (sdfCenter > 0.0f && sdfNeighbor < 0.0f)
+                            if ((sdfCenter > 0.0f && sdfNeighbor < 0.0f) || (sdfCenter < 0.0f && sdfNeighbor > 0.0f))
                             {
                                 float diff = sdfCenter - sdfNeighbor;
                                 if (fabsf(diff) < 0.01f)
