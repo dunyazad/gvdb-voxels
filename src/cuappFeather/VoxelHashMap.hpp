@@ -2,6 +2,8 @@
 
 #include <cuda_common.cuh>
 
+#include <PointCloud.hpp>
+
 using VoxelKey = uint64_t;
 #define EMPTY_KEY UINT64_MAX
 #define VALID_KEY(k) ((k) != EMPTY_KEY)
@@ -56,6 +58,12 @@ __global__ void Kernel_SerializeVoxelHashMap(
     float3* positions,
     float3* normals,
     float3* colors);
+
+__global__ void Kernel_SmoothSDF_VoxelHashMap(VoxelHashMapInfo info, float smoothingFactor);
+
+__global__ void Kernel_FilterOppositeNormals(VoxelHashMapInfo info, float thresholdDotCos);
+
+__global__ void Kernel_FilterByNormalGradient(VoxelHashMapInfo info, float gradientThreshold, bool remove);
 
 struct VoxelHashMap
 {
@@ -127,6 +135,14 @@ struct VoxelHashMap
         printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
     }
 
+    void Occupy(const DevicePointCloud& d_input)
+    {
+        CheckOccupiedIndicesLength(d_input.numberOfPoints);
+        LaunchKernel(Kernel_OccupyVoxelHashMap, d_input.numberOfPoints, info, d_input.positions, d_input.normals, d_input.colors, d_input.numberOfPoints);
+        cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+        printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
+    }
+
     void Occupy_SDF(float3* d_positions, float3* d_normals, float3* d_colors, unsigned int numberOfPoints, int offset = 1)
     {
         int count = (offset * 2 + 1) * (offset * 2 + 1) * (offset * 2 + 1);
@@ -163,6 +179,28 @@ struct VoxelHashMap
         d_result.Terminate();
 
         return h_result;
+    }
+
+    void SmoothSDF(float smoothingFactor = 1.0f, int iterations = 1)
+    {
+        for (int i = 0; i < iterations; ++i)
+        {
+            LaunchKernel(Kernel_SmoothSDF_VoxelHashMap, info.h_numberOfOccupiedVoxels, info, smoothingFactor);
+            cudaDeviceSynchronize();
+        }
+    }
+
+    void FilterOppositeNormals()
+    {
+        LaunchKernel(Kernel_FilterOppositeNormals, info.h_numberOfOccupiedVoxels, info, 0.8f);
+        cudaDeviceSynchronize();
+    }
+
+    void FilterByNormalGradient(float gradientThreshold, bool remove)
+    {
+        //LaunchKernel(Kernel_FilterByNormalGradient, info.h_numberOfOccupiedVoxels, info, 1.5f);
+        LaunchKernel(Kernel_FilterByNormalGradient, info.h_numberOfOccupiedVoxels, info, gradientThreshold, remove);
+        cudaDeviceSynchronize();
     }
 
     __host__ __device__ inline static uint64_t expandBits(uint32_t v)
@@ -749,4 +787,194 @@ __global__ void Kernel_SerializeVoxelHashMap(
     d_positions[tid] = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
     d_normals[tid] = make_float3(0, 0, 0);
     d_colors[tid] = make_float3(0, 0, 0);
+}
+
+__global__ void Kernel_SmoothSDF_VoxelHashMap(
+    VoxelHashMapInfo info, float smoothingFactor) // 예: 1.0f 평균, 0.5f low-pass
+{
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= *info.d_numberOfOccupiedVoxels) return;
+
+    int3 index = info.d_occupiedVoxelIndices[tid];
+    VoxelKey key = VoxelHashMap::IndexToVoxelKey(index);
+    size_t h = VoxelHashMap::hash(key, info.capacity);
+
+    for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+    {
+        size_t slot = (h + probe) % info.capacity;
+        VoxelHashEntry& centerEntry = info.entries[slot];
+
+        if (centerEntry.key == key)
+        {
+            Voxel& voxel = centerEntry.voxel;
+            if (voxel.count == 0) return;
+
+            float sdfCenter = voxel.sdfSum / (float)voxel.count;
+            float sdfSum = sdfCenter;
+            int sdfCount = 1;
+
+            const int3 dirs[6] = {
+                make_int3(1, 0, 0), make_int3(-1, 0, 0),
+                make_int3(0, 1, 0), make_int3(0, -1, 0),
+                make_int3(0, 0, 1), make_int3(0, 0, -1),
+            };
+
+            for (int i = 0; i < 6; ++i)
+            {
+                int3 neighbor = index + dirs[i];
+                VoxelKey nkey = VoxelHashMap::IndexToVoxelKey(neighbor);
+                size_t hn = VoxelHashMap::hash(nkey, info.capacity);
+
+                for (unsigned int p = 0; p < info.maxProbe; ++p)
+                {
+                    size_t slotn = (hn + p) % info.capacity;
+                    VoxelHashEntry& nEntry = info.entries[slotn];
+
+                    if (nEntry.key == nkey && nEntry.voxel.count > 0)
+                    {
+                        float sdfNeighbor = nEntry.voxel.sdfSum / (float)nEntry.voxel.count;
+                        sdfSum += sdfNeighbor;
+                        ++sdfCount;
+                        break;
+                    }
+                }
+            }
+
+            float sdfSmoothed = (1.0f - smoothingFactor) * sdfCenter + smoothingFactor * (sdfSum / sdfCount);
+            centerEntry.voxel.sdfSum = sdfSmoothed * voxel.count; // 보존: sum 형태로 저장
+            return;
+        }
+    }
+}
+
+__global__ void Kernel_FilterOppositeNormals(VoxelHashMapInfo info, float thresholdDotCos) // 예: 0.2f
+{
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= *info.d_numberOfOccupiedVoxels) return;
+
+    int3 index = info.d_occupiedVoxelIndices[tid];
+    VoxelKey key = VoxelHashMap::IndexToVoxelKey(index);
+    size_t h = VoxelHashMap::hash(key, info.capacity);
+
+    for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+    {
+        size_t slot = (h + probe) % info.capacity;
+        Voxel& voxel = info.entries[slot].voxel;
+        if (info.entries[slot].key != key || voxel.count == 0) continue;
+
+        float3 n0 = normalize(voxel.normalSum / voxel.count);
+        float3 nAvg = make_float3(0, 0, 0);
+        int neighborCount = 0;
+
+        for (int dz = -1; dz <= 1; ++dz)
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dx = -1; dx <= 1; ++dx)
+                {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    int3 neighbor = index + make_int3(dx, dy, dz);
+                    VoxelKey nk = VoxelHashMap::IndexToVoxelKey(neighbor);
+                    size_t hn = VoxelHashMap::hash(nk, info.capacity);
+
+                    for (unsigned int p = 0; p < info.maxProbe; ++p)
+                    {
+                        size_t slotn = (hn + p) % info.capacity;
+                        VoxelHashEntry& e = info.entries[slotn];
+                        if (e.key == nk && e.voxel.count > 0)
+                        {
+                            nAvg += e.voxel.normalSum;
+                            neighborCount += e.voxel.count;
+                            break;
+                        }
+                    }
+                }
+
+        if (neighborCount < 3) return;
+
+        float3 nAvgNorm = normalize(nAvg / (float)neighborCount);
+        float dotProduct = dot(n0, nAvgNorm);
+
+        if (dotProduct < thresholdDotCos)
+        {
+            //voxel.count = 0;
+            //voxel.sdfSum = 0;
+            //voxel.normalSum = make_float3(0, 0, 0);
+            //voxel.colorSum = make_float3(0, 0, 0);
+
+            voxel.colorSum = make_float3((float)voxel.count, 0, 0);
+        }
+
+        return;
+    }
+}
+
+__global__ void Kernel_FilterByNormalGradient(
+    VoxelHashMapInfo info,
+    float gradientThreshold,
+    bool remove)
+{
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= *info.d_numberOfOccupiedVoxels) return;
+
+    int3 index = info.d_occupiedVoxelIndices[tid];
+    VoxelKey key = VoxelHashMap::IndexToVoxelKey(index);
+    size_t h = VoxelHashMap::hash(key, info.capacity);
+
+    for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+    {
+        size_t slot = (h + probe) % info.capacity;
+        Voxel& voxel = info.entries[slot].voxel;
+        if (info.entries[slot].key != key || voxel.count == 0) continue;
+
+        float3 n_center = voxel.normalSum / voxel.count;
+
+        float3 dnx = make_float3(0, 0, 0);
+        float3 dny = make_float3(0, 0, 0);
+        float3 dnz = make_float3(0, 0, 0);
+
+        auto get_normal = [&](int3 offset) -> float3
+        {
+            int3 nidx = index + offset;
+            VoxelKey nkey = VoxelHashMap::IndexToVoxelKey(nidx);
+            size_t nh = VoxelHashMap::hash(nkey, info.capacity);
+
+            for (unsigned int p = 0; p < info.maxProbe; ++p)
+            {
+                size_t nslot = (nh + p) % info.capacity;
+                VoxelHashEntry& e = info.entries[nslot];
+                if (e.key == nkey && e.voxel.count > 0)
+                    return e.voxel.normalSum / e.voxel.count;
+            }
+            return n_center; // fallback: self
+        };
+
+        float3 n_posx = get_normal(make_int3(1, 0, 0));
+        float3 n_negx = get_normal(make_int3(-1, 0, 0));
+        float3 n_posy = get_normal(make_int3(0, 1, 0));
+        float3 n_negy = get_normal(make_int3(0, -1, 0));
+        float3 n_posz = get_normal(make_int3(0, 0, 1));
+        float3 n_negz = get_normal(make_int3(0, 0, -1));
+
+        dnx = 0.5f * (n_posx - n_negx);
+        dny = 0.5f * (n_posy - n_negy);
+        dnz = 0.5f * (n_posz - n_negz);
+
+        float gradMag = length(dnx) + length(dny) + length(dnz);
+
+        if (gradMag > gradientThreshold)
+        {
+            if (remove)
+            {
+                voxel.count = 0;
+                voxel.normalSum = make_float3(0, 0, 0);
+                voxel.colorSum = make_float3(0, 0, 0);
+                voxel.sdfSum = 0.0f;
+            }
+            else
+            {
+                voxel.colorSum = make_float3((float)voxel.count, 0, 0);
+            }
+        }
+
+        return;
+    }
 }

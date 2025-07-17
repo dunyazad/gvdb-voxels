@@ -15,8 +15,6 @@ using namespace std;
 #include "nvapi510/include/nvapi.h"
 #include "nvapi510/include/NvApiDriverSettings.h"
 
-
-
 bool ForceGPUPerformance()
 {
 	NvAPI_Status status;
@@ -155,6 +153,60 @@ const string resource_file_name_ply = "../../res/3D/" + resource_file_name + ".p
 const string resource_file_name_alp = "../../res/3D/" + resource_file_name + ".alp";
 
 const f32 voxelSize = 0.1f;
+
+void ApplyPointCloudToEntity(Entity entity, const HostPointCloud& h_pointCloud);
+void ApplyPointCloudToEntity(Entity entity, const DevicePointCloud& d_pointCloud);
+
+void ApplyPointCloudToEntity(Entity entity, const DevicePointCloud& d_pointCloud)
+{
+	HostPointCloud h_pointCloud(d_pointCloud);
+	ApplyPointCloudToEntity(entity, h_pointCloud);
+}
+
+void ApplyPointCloudToEntity(Entity entity, const HostPointCloud& h_pointCloud)
+{
+	auto renderable = Feather.GetComponent<Renderable>(entity);
+	if (nullptr == renderable)
+	{
+		renderable = Feather.CreateComponent<Renderable>(entity);
+
+		renderable->Initialize(Renderable::GeometryMode::Triangles);
+		renderable->AddShader(Feather.CreateShader("Instancing", File("../../res/Shaders/Instancing.vs"), File("../../res/Shaders/Instancing.fs")));
+		renderable->AddShader(Feather.CreateShader("InstancingWithoutNormal", File("../../res/Shaders/InstancingWithoutNormal.vs"), File("../../res/Shaders/InstancingWithoutNormal.fs")));
+		renderable->SetActiveShaderIndex(1);
+	}
+	else
+	{
+		renderable->Clear();
+	}
+
+	auto [indices, vertices, normals, colors, uvs] = GeometryBuilder::BuildSphere("zero", 0.05f, 6, 6);
+	//auto [indices, vertices, normals, colors, uvs] = GeometryBuilder::BuildBox("zero", "half");
+	renderable->AddIndices(indices);
+	renderable->AddVertices(vertices);
+	renderable->AddNormals(normals);
+	renderable->AddColors(colors);
+	renderable->AddUVs(uvs);
+
+	for (size_t i = 0; i < h_pointCloud.numberOfPoints; i++)
+	{
+		auto& p = h_pointCloud.positions[i];
+		if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
+		auto& n = h_pointCloud.normals[i];
+		auto& c = h_pointCloud.colors[i];
+
+		renderable->AddInstanceColor(MiniMath::V4(c.x, c.y, c.z, 1.0f));
+		renderable->AddInstanceNormal({ n.x, n.y, n.z });
+
+		MiniMath::M4 model = MiniMath::M4::identity();
+		model.m[0][0] = 2.0f;
+		model.m[1][1] = 2.0f;
+		model.m[2][2] = 2.0f;
+		model = MiniMath::translate(model, { p.x, p.y, p.z });
+		renderable->AddInstanceTransform(model);
+	}
+	renderable->EnableInstancing(h_pointCloud.numberOfPoints);
+}
 
 #pragma once
 #include <algorithm>
@@ -317,52 +369,22 @@ int main(int argc, char** argv)
 			t = Time::End(t, "Loading Compound");
 
 			auto entity = Feather.CreateEntity("Input Point Cloud _ O");
-			auto renderable = Feather.CreateComponent<Renderable>(entity);
 
-			renderable->Initialize(Renderable::GeometryMode::Triangles);
-			renderable->AddShader(Feather.CreateShader("Instancing", File("../../res/Shaders/Instancing.vs"), File("../../res/Shaders/Instancing.fs")));
-			renderable->AddShader(Feather.CreateShader("InstancingWithoutNormal", File("../../res/Shaders/InstancingWithoutNormal.vs"), File("../../res/Shaders/InstancingWithoutNormal.fs")));
-			renderable->SetActiveShaderIndex(1);
+			HostPointCloud h_pointCloud;
+			h_pointCloud.Intialize(alp.GetPoints().size());
 
-			auto [indices, vertices, normals, colors, uvs] = GeometryBuilder::BuildSphere("zero", 0.05f, 6, 6);
-			//auto [indices, vertices, normals, colors, uvs] = GeometryBuilder::BuildBox("zero", "half");
-			renderable->AddIndices(indices);
-			renderable->AddVertices(vertices);
-			renderable->AddNormals(normals);
-			renderable->AddColors(colors);
-			renderable->AddUVs(uvs);
-
-			vector<float3> host_points;
-			vector<float3> host_normals;
-			vector<uchar3> host_colors;
-			vector<float3> host_colors_hsv;
-
-			for (auto& p : alp.GetPoints())
+			for (size_t i = 0; i < alp.GetPoints().size(); i++)
 			{
-				auto r = p.color.x;
-				auto g = p.color.y;
-				auto b = p.color.z;
-				auto a = 1.f;
+				auto& p = alp.GetPoints()[i];
 
-				renderable->AddInstanceColor(MiniMath::V4(r, g, b, a));
-				renderable->AddInstanceNormal(p.normal);
-
-				MiniMath::M4 model = MiniMath::M4::identity();
-				model.m[0][0] = 1.5f;
-				model.m[1][1] = 1.5f;
-				model.m[2][2] = 1.5f;
-				model = MiniMath::translate(model, p.position);
-				renderable->AddInstanceTransform(model);
-
-				host_points.push_back(make_float3(p.position.x, p.position.y, p.position.z));
-				host_normals.push_back(make_float3(p.normal.x, p.normal.y, p.normal.z));
-				host_colors.push_back(make_uchar3(r * 255, g * 255, b * 255));
-				host_colors_hsv.push_back(rgb_to_hsv(make_uchar3(r * 255, g * 255, b * 255)));
+				h_pointCloud.positions[i] = make_float3(p.position.x, p.position.y, p.position.z);
+				h_pointCloud.normals[i] = make_float3(p.normal.x, p.normal.y, p.normal.z);
+				h_pointCloud.colors[i] = make_float3(p.color.x, p.color.y, p.color.z);
 			}
+			ApplyPointCloudToEntity(entity, h_pointCloud);
 
 			alog("ALP %llu points loaded\n", alp.GetPoints().size());
 
-			renderable->EnableInstancing(alp.GetPoints().size());
 			auto [x, y, z] = alp.GetAABBCenter();
 			f32 cx = x;
 			f32 cy = y;
@@ -389,7 +411,7 @@ int main(int argc, char** argv)
 			cameraManipulator->MakeDefault();
 
 
-			Feather.CreateEventCallback<KeyEvent>(entity, [cx, cy, cz, lx, ly, lz, host_colors, host_colors_hsv](Entity entity, const KeyEvent& event) {
+			Feather.CreateEventCallback<KeyEvent>(entity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
 				auto renderable = Feather.GetComponent<Renderable>(entity);
 				if (GLFW_KEY_M == event.keyCode)
 				{
@@ -405,19 +427,19 @@ int main(int argc, char** argv)
 				}
 				else if (GLFW_KEY_F1 == event.keyCode)
 				{
-					for (size_t i = 0; i < host_colors.size(); i++)
-					{
-						auto& color = host_colors[i];
-						renderable->SetInstanceColor(i, MiniMath::V4(color.x / 255.0f, color.y / 255.0f, color.z / 255.0f, 1.0f));
-					}
+					//for (size_t i = 0; i < host_colors.size(); i++)
+					//{
+					//	auto& color = host_colors[i];
+					//	renderable->SetInstanceColor(i, MiniMath::V4(color.x / 255.0f, color.y / 255.0f, color.z / 255.0f, 1.0f));
+					//}
 				}
 				else if (GLFW_KEY_F2 == event.keyCode)
 				{
-					for (size_t i = 0; i < host_colors.size(); i++)
-					{
-						auto& color = host_colors_hsv[i];
-						renderable->SetInstanceColor(i, MiniMath::V4(color.x, color.y, 0.25f, 1.0f));
-					}
+					//for (size_t i = 0; i < host_colors.size(); i++)
+					//{
+					//	auto& color = host_colors_hsv[i];
+					//	renderable->SetInstanceColor(i, MiniMath::V4(color.x, color.y, 0.25f, 1.0f));
+					//}
 				}
 				else if (GLFW_KEY_F3 == event.keyCode)
 				{
@@ -444,50 +466,35 @@ int main(int argc, char** argv)
 				seed ^= seed >> 13;
 				seed *= 0x5bd1e995;
 				seed ^= seed >> 15;
-return (seed & 0xFFFFFF) / static_cast<float>(0xFFFFFF);
+				return (seed & 0xFFFFFF) / static_cast<float>(0xFFFFFF);
 			};
 
-			HostPointCloud input;
-			input.Intialize(host_points.size());
-			for (size_t i = 0; i < host_points.size(); i++)
-			{
-				if (FLT_MAX == host_points[i].x || FLT_MAX == host_points[i].y || FLT_MAX == host_points[i].z) continue;
+			auto result = ProcessPointCloud(h_pointCloud);
+			ApplyPointCloudToEntity(entity, result);
 
-				input.positions[i] = host_points[i];
-				input.normals[i] = host_normals[i];
-				auto r = (float)host_colors[i].x / 255.0f;
-				auto g = (float)host_colors[i].y / 255.0f;
-				auto b = (float)host_colors[i].z / 255.0f;
-				input.colors[i] = make_float3(r, g, b);
-			}
+			//PLYFormat ply;
+			//for (size_t i = 0; i < result.numberOfPoints; i++)
+			//{
+			//	auto& p = result.positions[i];
+			//	if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
 
-			auto result = ProcessPointCloud(input);
+			//	auto& n = result.normals[i];
+			//	auto& c = result.colors[i];
 
-	/*		PLYFormat ply;
-			for (size_t i = 0; i < result.numberOfPoints; i++)
-			{
-				auto& p = result.positions[i];
-				if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
-
-				auto& n = result.normals[i];
-				auto& c = result.colors[i];
-
-				ply.AddPoint(p.x, p.y, p.z);
-				ply.AddNormal(n.x, n.y, n.z);
-				ply.AddColor(c.x, c.y, c.z);
-			}
-			ply.Serialize("../../res/3D/VoxelHashMap_SDF.ply");*/
+			//	ply.AddPoint(p.x, p.y, p.z);
+			//	ply.AddNormal(n.x, n.y, n.z);
+			//	ply.AddColor(c.x, c.y, c.z);
+			//}
+			//ply.Serialize("../../res/3D/VoxelHashMap_SDF.ply");
 
 			result.Terminate();
+			h_pointCloud.Terminate();
 
-			input.Terminate();
-
-
-			for (size_t i = 0; i < host_colors.size(); i++)
-			{
-				auto& color = host_colors[i];
-				renderable->SetInstanceColor(i, MiniMath::V4(color.x / 255.0f, color.y / 255.0f, color.z / 255.0f, 1.0f));
-			}
+			//for (size_t i = 0; i < host_colors.size(); i++)
+			//{
+			//	auto& color = host_colors[i];
+			//	renderable->SetInstanceColor(i, MiniMath::V4(color.x / 255.0f, color.y / 255.0f, color.z / 255.0f, 1.0f));
+			//}
 
 			{ // AABB
 				auto m = alp.GetAABBMin();

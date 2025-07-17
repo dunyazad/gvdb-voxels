@@ -18,6 +18,7 @@
     <ClInclude Include="cuda_vector_math.cuh" />
     <ClInclude Include="cuda_common.cuh" />
     <ClInclude Include="Octree.cuh" />
+    <ClInclude Include="PointCloud.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HashMap.hpp" />

@@ -9,6 +9,8 @@
 
 #include <cuda_common.cuh>
 
+#include <PointCloud.hpp>
+
 #include <Eigen/Core>
 #include <Eigen/Dense>
 namespace Eigen {

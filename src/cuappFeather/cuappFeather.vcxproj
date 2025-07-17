@@ -26,6 +26,7 @@
     <ClInclude Include="main.cuh" />
     <ClInclude Include="marching_cubes_constants.cuh" />
     <ClInclude Include="Octree.cuh" />
+    <ClInclude Include="PointCloud.hpp" />
     <ClInclude Include="TSDF.hpp" />
     <ClInclude Include="VoxelHashMap.hpp" />
   </ItemGroup>
