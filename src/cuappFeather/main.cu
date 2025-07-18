@@ -40,12 +40,17 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
 //#define OCCUPY_SDF
 #ifndef OCCUPY_SDF
     vhm.Occupy(d_input);
-    vhm.FindOverlap(3, true);
+    //vhm.FilterByNormalGradientWithOffset(3, 0.5f, false);
+    //vhm.FilterBySDFGradient(10.0f, false);
+    vhm.FilterBySDFGradientWithOffset(10, 0.1f, false);
+    //vhm.FindOverlap(3, true);
+    //vhm.FilterByNormalGradient(0.5f, true);
     HostPointCloud result = vhm.Serialize();
     result.CompactValidPoints();
 #else
     vhm.Occupy_SDF(d_input, 3);
-    vhm.FindOverlap(true);
+    vhm.FilterBySDFGradientWithOffset(3, 10.0f, false);
+    //vhm.FindOverlap(3, true);
     //vhm.SmoothSDF(3);
     //vhm.FilterOppositeNormals();
     //vhm.FilterByNormalGradient(0.1f, false);

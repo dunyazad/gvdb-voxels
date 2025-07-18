@@ -64,6 +64,12 @@ struct VoxelHashMap
 
 	void FilterByNormalGradient(float gradientThreshold, bool remove);
 
+	void FilterByNormalGradientWithOffset(int offset, float gradientThreshold, bool remove);
+
+	void FilterBySDFGradient(float sdfThreshold, bool remove);
+
+	void FilterBySDFGradientWithOffset(int offset, float sdfThreshold, bool remove);
+
 	__host__ __device__ static uint64_t expandBits(uint32_t v);
 
 	__host__ __device__ static uint32_t compactBits(uint64_t x);
@@ -141,3 +147,9 @@ __global__ void Kernel_VoxelHashMap_SmoothSDF(VoxelHashMapInfo info, float smoot
 __global__ void Kernel_VoxelHashMap_FilterOppositeNormals(VoxelHashMapInfo info, float thresholdDotCos);
 
 __global__ void Kernel_VoxelHashMap_FilterByNormalGradient(VoxelHashMapInfo info, float gradientThreshold, bool remove);
+
+__global__ void Kernel_VoxelHashMap_FilterByNormalGradientWithOffset(VoxelHashMapInfo info, int offset, float gradientThreshold, bool remove);
+
+__global__ void Kernel_VoxelHashMap_FilterBySDFGradient(VoxelHashMapInfo info, float gradientThreshold, bool remove);
+
+__global__ void Kernel_VoxelHashMap_FilterBySDFGradient_26(VoxelHashMapInfo info, int offset, float gradientThreshold, bool remove);

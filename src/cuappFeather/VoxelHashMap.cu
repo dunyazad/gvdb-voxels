@@ -171,6 +171,25 @@ void VoxelHashMap::FilterByNormalGradient(float gradientThreshold, bool remove)
 	cudaDeviceSynchronize();
 }
 
+void VoxelHashMap::FilterByNormalGradientWithOffset(int offset, float gradientThreshold, bool remove)
+{
+	//LaunchKernel(Kernel_VoxelHashMap_FilterByNormalGradient, info.h_numberOfOccupiedVoxels, info, 1.5f);
+	LaunchKernel(Kernel_VoxelHashMap_FilterByNormalGradientWithOffset, info.h_numberOfOccupiedVoxels, info, offset, gradientThreshold, remove);
+	cudaDeviceSynchronize();
+}
+
+void VoxelHashMap::FilterBySDFGradient(float sdfThreshold, bool remove)
+{
+	LaunchKernel(Kernel_VoxelHashMap_FilterBySDFGradient, info.h_numberOfOccupiedVoxels, info, sdfThreshold, remove);
+	cudaDeviceSynchronize();
+}
+
+void VoxelHashMap::FilterBySDFGradientWithOffset(int offset, float sdfThreshold, bool remove)
+{
+	LaunchKernel(Kernel_VoxelHashMap_FilterBySDFGradient_26, info.h_numberOfOccupiedVoxels, info, offset, sdfThreshold, remove);
+	cudaDeviceSynchronize();
+}
+
 __host__ __device__ uint64_t VoxelHashMap::expandBits(uint32_t v)
 {
 	uint64_t x = v & 0x1fffff; // 21 bits
@@ -449,6 +468,14 @@ __global__ void Kernel_VoxelHashMap_Occupy(
 	float3 n = normals ? normals[tid] : make_float3(0, 0, 0);
 	float3 c = colors ? colors[tid] : make_float3(0, 0, 0);
 
+	float3 center = VoxelHashMap::IndexToPosition(index, info.voxelSize);
+
+	float3 dir = center - pos;
+	float dist = length(dir);
+
+	float sign = (dot(n, dir) >= 0.0f) ? 1.0f : -1.0f;
+	float sdf = dist * sign;
+
 	size_t h = VoxelHashMap::hash(key, info.capacity);
 
 	for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
@@ -460,6 +487,7 @@ __global__ void Kernel_VoxelHashMap_Occupy(
 
 		if (old == EMPTY_KEY || old == key)
 		{
+			atomicAdd(&entry->voxel.sdfSum, sdf);
 			atomicAdd(&entry->voxel.normalSum.x, n.x);
 			atomicAdd(&entry->voxel.normalSum.y, n.y);
 			atomicAdd(&entry->voxel.normalSum.z, n.z);
@@ -477,7 +505,6 @@ __global__ void Kernel_VoxelHashMap_Occupy(
 			}
 
 			entry->voxel.coordinate = index;
-
 			return;
 		}
 	}
@@ -613,6 +640,10 @@ __global__ void Kernel_VoxelHashMap_Serialize_SDF(
 		d_colors[tid] = make_float3(0, 0, 0);
 		return;
 	}
+
+	d_positions[tid] = pos;
+	d_normals[tid] = normal;
+	d_colors[tid] = color;
 }
 
 __global__ void Kernel_VoxelHashMap_FindOverlap(VoxelHashMapInfo info, int step, bool remove)
@@ -755,7 +786,7 @@ __global__ void Kernel_VoxelHashMap_FilterByNormalGradient(
 	float3 dny = 0.5f * (get_normal(make_int3(0, 1, 0)) - get_normal(make_int3(0, -1, 0)));
 	float3 dnz = 0.5f * (get_normal(make_int3(0, 0, 1)) - get_normal(make_int3(0, 0, -1)));
 
-	float gradMag = length(dnx) + length(dny) + length(dnz);
+	float gradMag = length(dnx + dny + dnz);
 
 	if (gradMag > gradientThreshold)
 	{
@@ -769,6 +800,185 @@ __global__ void Kernel_VoxelHashMap_FilterByNormalGradient(
 		else
 		{
 			voxel->colorSum = make_float3((float)voxel->count, 0, 0);
+		}
+	}
+}
+
+__global__ void Kernel_VoxelHashMap_FilterByNormalGradientWithOffset(
+	VoxelHashMapInfo info,
+	int offset,
+	float gradientThreshold,
+	bool remove)
+{
+	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+	if (tid >= *info.d_numberOfOccupiedVoxels) return;
+
+	int3 index = info.d_occupiedVoxelIndices[tid];
+	Voxel* voxel = VoxelHashMap::GetVoxel(info, index);
+	if (!voxel || voxel->count == 0) return;
+
+	float3 n_center = voxel->normalSum / (float)max(1u, voxel->count);
+
+	float maxGradient = 0.0f;
+	int neighborCount = 0;
+
+	for (int dz = -offset; dz <= offset; ++dz)
+	{
+		for (int dy = -offset; dy <= offset; ++dy)
+		{
+			for (int dx = -offset; dx <= offset; ++dx)
+			{
+				if (dx == 0 && dy == 0 && dz == 0) continue;
+
+				int3 nidx = index + make_int3(dx, dy, dz);
+				Voxel* nvoxel = VoxelHashMap::GetVoxel(info, nidx);
+				if (!nvoxel || nvoxel->count == 0) continue;
+
+				float3 n_neighbor = nvoxel->normalSum / (float)max(1u, nvoxel->count);
+				float3 diff = n_neighbor - n_center;
+				float gradMag = length(diff);
+
+				maxGradient = fmaxf(maxGradient, gradMag);
+				++neighborCount;
+			}
+		}
+	}
+
+	//if (neighborCount < 6) return; // 너무 적은 이웃은 무시
+
+	if (maxGradient > gradientThreshold)
+	{
+		if (remove)
+		{
+			voxel->normalSum = make_float3(0, 0, 0);
+			voxel->colorSum = make_float3(0, 0, 0);
+			voxel->sdfSum = FLT_MAX;
+			voxel->count = 0;
+		}
+		else
+		{
+			voxel->colorSum = make_float3((float)voxel->count, 0, 0); // 빨간색으로 마킹
+		}
+	}
+}
+
+__global__ void Kernel_VoxelHashMap_FilterBySDFGradient(
+	VoxelHashMapInfo info,
+	float gradientThreshold,
+	bool remove)
+{
+	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+	if (tid >= *info.d_numberOfOccupiedVoxels) return;
+
+	int3 index = info.d_occupiedVoxelIndices[tid];
+	Voxel* voxel = VoxelHashMap::GetVoxel(info, index);
+	if (!voxel || voxel->count == 0) return;
+
+	auto get_sdf = [&](int3 offset) -> float
+	{
+		int3 nidx = index + offset;
+		Voxel* nvoxel = VoxelHashMap::GetVoxel(info, nidx);
+		if (!nvoxel || nvoxel->count == 0) return 0.0f;
+		return nvoxel->sdfSum / (float)max(1u, nvoxel->count);
+	};
+
+	float sdf_x1 = get_sdf(make_int3(1, 0, 0));
+	float sdf_x2 = get_sdf(make_int3(-1, 0, 0));
+	float sdf_y1 = get_sdf(make_int3(0, 1, 0));
+	float sdf_y2 = get_sdf(make_int3(0, -1, 0));
+	float sdf_z1 = get_sdf(make_int3(0, 0, 1));
+	float sdf_z2 = get_sdf(make_int3(0, 0, -1));
+
+	float3 grad;
+	grad.x = 0.5f * (sdf_x1 - sdf_x2) / info.voxelSize;
+	grad.y = 0.5f * (sdf_y1 - sdf_y2) / info.voxelSize;
+	grad.z = 0.5f * (sdf_z1 - sdf_z2) / info.voxelSize;
+
+	float gradMag = length(grad);
+
+	if (gradMag > gradientThreshold)
+	{
+		if (remove)
+		{
+			voxel->normalSum = make_float3(0, 0, 0);
+			voxel->colorSum = make_float3(0, 0, 0);
+			voxel->sdfSum = FLT_MAX;
+			voxel->count = 0;
+		}
+		else
+		{
+			voxel->colorSum = make_float3((float)voxel->count, 0, 0); // 마킹 (빨간색)
+		}
+	}
+}
+
+__global__ void Kernel_VoxelHashMap_FilterBySDFGradient_26(
+	VoxelHashMapInfo info,
+	int offset,
+	float gradientThreshold,
+	bool remove)
+{
+	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+	if (tid >= *info.d_numberOfOccupiedVoxels) return;
+
+	int3 index = info.d_occupiedVoxelIndices[tid];
+	Voxel* voxel = VoxelHashMap::GetVoxel(info, index);
+	if (!voxel || voxel->count == 0) return;
+
+	float3 grad = make_float3(0, 0, 0);
+	int validCount = 0;
+
+	for (int dz = -offset; dz <= offset; ++dz)
+	{
+		for (int dy = -offset; dy <= offset; ++dy)
+		{
+			for (int dx = -offset; dx <= offset; ++dx)
+			{
+				if (dx == 0 && dy == 0 && dz == 0) continue;
+
+				int3 dir = make_int3(dx, dy, dz);
+				int3 i1 = index + dir;
+				int3 i2 = index - dir;
+
+				Voxel* v1 = VoxelHashMap::GetVoxel(info, i1);
+				Voxel* v2 = VoxelHashMap::GetVoxel(info, i2);
+				if (!v1 || !v2 || v1->count == 0 || v2->count == 0) continue;
+
+				float sdf1 = v1->sdfSum / (float)max(1u, v1->count);
+				float sdf2 = v2->sdfSum / (float)max(1u, v2->count);
+
+				//printf("%f, %f, %f\n", sdf1, sdf2, sdf1 - sdf2);
+
+				float3 unitDir = normalize(make_float3((float)dir.x, (float)dir.y, (float)dir.z) * info.voxelSize);
+				float delta = (sdf1 - sdf2) / (2.0f * info.voxelSize);
+
+				//printf("delta : %f\n", delta);
+
+				grad += unitDir * delta;
+				++validCount;
+			}
+		}
+	}
+
+	if (validCount == 0) return;
+
+	grad /= (float)validCount;
+	float gradMag = length(grad);
+
+	//printf("gradMag : %f\n", gradMag);
+
+	if (gradMag > gradientThreshold)
+	{
+		if (remove)
+		{
+			voxel->normalSum = make_float3(0, 0, 0);
+			voxel->colorSum = make_float3(0, 0, 0);
+			voxel->sdfSum = FLT_MAX;
+			voxel->count = 0;
+		}
+		else
+		{
+			voxel->colorSum = make_float3((float)voxel->count, 0, 0); // 시각적 마킹 (빨간색)
 		}
 	}
 }
