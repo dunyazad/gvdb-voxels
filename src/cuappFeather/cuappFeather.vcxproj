@@ -16,6 +16,8 @@
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="main.cu" />
+    <CudaCompile Include="PointCloud.cu" />
+    <CudaCompile Include="VoxelHashMap.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BitVolume.hpp" />

@@ -36,7 +36,8 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     DevicePointCloud d_input(h_input);
 
     VoxelHashMap vhm;
-    vhm.Initialize(0.2f, d_input.numberOfPoints * 8, 32);
+    vhm.Initialize(0.1f, d_input.numberOfPoints * 8, 32);
+
     //vhm.Occupy(d_input);
     //HostPointCloud result = vhm.Serialize();
     //result.CompactValidPoints();
@@ -45,7 +46,7 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     //vhm.SmoothSDF(3);
     //vhm.FilterOppositeNormals();
     //vhm.FilterByNormalGradient(0.1f, false);
-    HostPointCloud result = vhm.Serialize_SDF();
+    HostPointCloud result = vhm.Serialize();
     result.CompactValidPoints();
     
     d_input.Terminate();

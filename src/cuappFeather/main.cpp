@@ -137,6 +137,7 @@ bool ForceGPUPerformance()
 //const string resource_file_name = "0_Initial_Noise";
 //const string resource_file_name = "Compound_Full";
 const string resource_file_name = "Bridge";
+//const string resource_file_name = "Reintegrate";
 const string resource_file_name_ply = "../../res/3D/" + resource_file_name + ".ply";
 const string resource_file_name_alp = "../../res/3D/" + resource_file_name + ".alp";
 
@@ -473,7 +474,7 @@ int main(int argc, char** argv)
 				ply.AddNormal(n.x, n.y, n.z);
 				ply.AddColor(c.x, c.y, c.z);
 			}
-			ply.Serialize("../../res/3D/VoxelHashMap_SDF.ply");
+			ply.Serialize("../../res/3D/VoxelHashMap.ply");
 
 			result.Terminate();
 			h_pointCloud.Terminate();
@@ -526,49 +527,6 @@ int main(int argc, char** argv)
 				renderable->AddVertex({ X, Y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
 				renderable->AddVertex({ x, Y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
 				renderable->AddVertex({ x, Y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-			}
-			{ // AABB
-				auto m = alp.GetAABBMin();
-				float x = get<0>(m);
-				float y = get<1>(m);
-				float z = get<2>(m);
-				auto M = alp.GetAABBMax();
-				float X = x + 80.0f;
-				float Y = y + 80.0f;
-				float Z = z + 50.0f;
-
-				auto entity = Feather.CreateEntity("Cell");
-				auto renderable = Feather.CreateComponent<Renderable>(entity);
-				renderable->Initialize(Renderable::GeometryMode::Lines);
-
-				renderable->AddShader(Feather.CreateShader("Line", File("../../res/Shaders/Line.vs"), File("../../res/Shaders/Line.fs")));
-
-				renderable->AddVertex({ x, y, z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, y, z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, y, z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, Y, z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, Y, z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, Y, z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, Y, z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, y, z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-
-				renderable->AddVertex({ x, y, Z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, y, Z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, y, Z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, Y, Z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, Y, Z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, Y, Z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, Y, Z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, y, Z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-
-				renderable->AddVertex({ x, y, z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, y, Z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, y, z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, y, Z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, Y, z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, Y, Z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, Y, z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, Y, Z }); renderable->AddColor({ 1.0f, 0.0f, 1.0f, 1.0f });
 			}
 		}
 #pragma endregion
