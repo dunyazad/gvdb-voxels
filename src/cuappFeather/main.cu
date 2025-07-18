@@ -25,7 +25,7 @@
 #include <BitVolume.hpp>
 #include <DenseGrid.hpp>
 #include <KDTree.hpp>
-#include <VoxelHashMap.hpp>
+#include <VoxelHashMap.cuh>
 #include <TSDF.hpp>
 
 HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
@@ -36,16 +36,18 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     DevicePointCloud d_input(h_input);
 
     VoxelHashMap vhm;
-    vhm.Initialize(d_input.numberOfPoints * 8, 32);
+    vhm.Initialize(0.2f, d_input.numberOfPoints * 8, 32);
     //vhm.Occupy(d_input);
+    //HostPointCloud result = vhm.Serialize();
+    //result.CompactValidPoints();
+
     vhm.Occupy_SDF(d_input, 3);
     //vhm.SmoothSDF(3);
     //vhm.FilterOppositeNormals();
-    vhm.FilterByNormalGradient(0.4f, true);
-    vhm.FilterByNormalGradient(0.2f, false);
-
-    HostPointCloud result = vhm.Serialize();
-    //result.CompactValidPoints();
+    //vhm.FilterByNormalGradient(0.1f, false);
+    HostPointCloud result = vhm.Serialize_SDF();
+    result.CompactValidPoints();
+    
     d_input.Terminate();
 
     CUDA_TE(VoxelHashMap);

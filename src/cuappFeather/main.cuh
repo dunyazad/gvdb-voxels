@@ -9,7 +9,7 @@
 
 #include <cuda_common.cuh>
 
-#include <PointCloud.hpp>
+#include <PointCloud.cuh>
 
 #include <Eigen/Core>
 #include <Eigen/Dense>

@@ -12,13 +12,13 @@
     <ClInclude Include="main.cuh" />
     <ClInclude Include="DenseGrid.hpp" />
     <ClInclude Include="KDTree.hpp" />
-    <ClInclude Include="VoxelHashMap.hpp" />
+    <ClInclude Include="VoxelHashMap.cuh" />
     <ClInclude Include="TSDF.hpp" />
     <ClInclude Include="marching_cubes_constants.cuh" />
     <ClInclude Include="cuda_vector_math.cuh" />
     <ClInclude Include="cuda_common.cuh" />
     <ClInclude Include="Octree.cuh" />
-    <ClInclude Include="PointCloud.hpp" />
+    <ClInclude Include="PointCloud.cuh" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HashMap.hpp" />

@@ -2,7 +2,7 @@
 
 #include <cuda_common.cuh>
 
-#include <PointCloud.hpp>
+#include <PointCloud.cuh>
 
 using VoxelKey = uint64_t;
 #define EMPTY_KEY UINT64_MAX
@@ -51,9 +51,15 @@ __global__ void Kernel_OccupySDF(
     float3* normals,
     float3* colors,
     unsigned int numberOfPoints,
-    int offset = 1); 
+    int offset = 1);
 
 __global__ void Kernel_SerializeVoxelHashMap(
+    VoxelHashMapInfo info,
+    float3* positions,
+    float3* normals,
+    float3* colors);
+
+__global__ void Kernel_SerializeVoxelHashMap_SDF(
     VoxelHashMapInfo info,
     float3* positions,
     float3* normals,
@@ -69,8 +75,9 @@ struct VoxelHashMap
 {
     VoxelHashMapInfo info;
 
-    void Initialize(size_t capacity = 1 << 24, unsigned int maxProbe = 64)
+    void Initialize(float voxelSize = 0.1f, size_t capacity = 1 << 24, unsigned int maxProbe = 64)
     {
+        info.voxelSize = voxelSize;
         info.capacity = capacity;
         info.maxProbe = maxProbe;
         cudaMalloc(&info.entries, sizeof(VoxelHashEntry) * info.capacity);
@@ -172,6 +179,24 @@ struct VoxelHashMap
         d_result.Intialize(info.h_numberOfOccupiedVoxels);
 
         LaunchKernel(Kernel_SerializeVoxelHashMap, info.h_numberOfOccupiedVoxels, info, d_result.positions, d_result.normals, d_result.colors);
+
+        cudaDeviceSynchronize();
+
+        HostPointCloud h_result(d_result);
+        d_result.Terminate();
+
+        return h_result;
+    }
+
+    HostPointCloud Serialize_SDF()
+    {
+        DevicePointCloud d_result;
+
+        if (info.h_numberOfOccupiedVoxels == 0) return d_result;
+
+        d_result.Intialize(info.h_numberOfOccupiedVoxels);
+
+        LaunchKernel(Kernel_SerializeVoxelHashMap_SDF, info.h_numberOfOccupiedVoxels, info, d_result.positions, d_result.normals, d_result.colors);
 
         cudaDeviceSynchronize();
 
@@ -734,6 +759,55 @@ __global__ void Kernel_OccupySDF(
 }
 
 __global__ void Kernel_SerializeVoxelHashMap(
+    VoxelHashMapInfo info,
+    float3* d_positions,
+    float3* d_normals,
+    float3* d_colors)
+{
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= *info.d_numberOfOccupiedVoxels) return;
+
+    int3 voxelIndex = info.d_occupiedVoxelIndices[tid];
+    VoxelKey voxelKey = VoxelHashMap::IndexToVoxelKey(voxelIndex);
+    size_t h = VoxelHashMap::hash(voxelKey, info.capacity);
+
+    for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+    {
+        size_t slot = (h + probe) % info.capacity;
+        VoxelHashEntry& entry = info.entries[slot];
+
+        if (entry.key == voxelKey)
+        {
+            Voxel& voxel = entry.voxel;
+
+            if (voxel.count == 0)
+            {
+                d_positions[tid] = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+                d_normals[tid] = make_float3(0, 0, 0);
+                d_colors[tid] = make_float3(0, 0, 0);
+                return;
+            }
+            else
+            {
+                auto x = voxelIndex.x * info.voxelSize;
+                auto y = voxelIndex.y * info.voxelSize;
+                auto z = voxelIndex.z * info.voxelSize;
+
+                d_positions[tid] = make_float3(x, y, z);
+                d_normals[tid] = voxel.normalSum / (float)voxel.count;
+                d_colors[tid] = voxel.colorSum / (float)voxel.count;
+                return;
+            }
+        }
+    }
+
+    // Not found fallback
+    d_positions[tid] = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+    d_normals[tid] = make_float3(0, 0, 0);
+    d_colors[tid] = make_float3(0, 0, 0);
+}
+
+__global__ void Kernel_SerializeVoxelHashMap_SDF(
     VoxelHashMapInfo info,
     float3* d_positions,
     float3* d_normals,
