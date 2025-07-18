@@ -65,6 +65,8 @@ __global__ void Kernel_SerializeVoxelHashMap_SDF(
 	float3* normals,
 	float3* colors);
 
+__global__ void Kernel_VoxelHashMap_FindOverlap(VoxelHashMapInfo info);
+
 __global__ void Kernel_SmoothSDF_VoxelHashMap(VoxelHashMapInfo info, float smoothingFactor);
 
 __global__ void Kernel_FilterOppositeNormals(VoxelHashMapInfo info, float thresholdDotCos);
@@ -89,50 +91,38 @@ struct VoxelHashMap
 	HostPointCloud Serialize();
 	HostPointCloud Serialize_SDF();
 
+	void FindOverlap();
+
 	void SmoothSDF(float smoothingFactor = 1.0f, int iterations = 1);
 
 	void FilterOppositeNormals();
 
 	void FilterByNormalGradient(float gradientThreshold, bool remove);
 
-	__host__ __device__ inline static uint64_t expandBits(uint32_t v);
+	__host__ __device__ static uint64_t expandBits(uint32_t v);
 
-	__host__ __device__ inline static uint32_t compactBits(uint64_t x);
+	__host__ __device__ static uint32_t compactBits(uint64_t x);
 
-	__host__ __device__ inline static VoxelKey IndexToVoxelKey(const int3& coord);
+	__host__ __device__ static VoxelKey IndexToVoxelKey(const int3& coord);
 
-	__host__ __device__ inline static int3 VoxelKeyToIndex(VoxelKey key);
+	__host__ __device__ static int3 VoxelKeyToIndex(VoxelKey key);
 
-	__host__ inline static int3 PositionToIndex_host(float3 pos, float voxelSize);
+	__host__ static int3 PositionToIndex_host(float3 pos, float voxelSize);
 
-	__device__ inline static int3 PositionToIndex_device(float3 pos, float voxelSize);
+	__device__ static int3 PositionToIndex_device(float3 pos, float voxelSize);
 
-	__host__ __device__ inline static int3 VoxelHashMap::PositionToIndex(float3 pos, float voxelSize);
+	__host__ __device__ static int3 PositionToIndex(float3 pos, float voxelSize);
 
-	__host__ __device__ inline static float3 VoxelHashMap::IndexToPosition(int3 index, float voxelSize);
+	__host__ __device__ static float3 IndexToPosition(int3 index, float voxelSize);
 
-	__host__ __device__ static inline size_t hash(VoxelKey key, size_t capacity);
+	__host__ __device__ static size_t hash(VoxelKey key, size_t capacity);
 
-	__device__ static bool isZeroCrossing(VoxelHashMapInfo info, int3 index, float sdfCenter);
+	__device__ static Voxel* GetVoxel(VoxelHashMapInfo& info, const int3& index);
 
-	__device__ static bool computeInterpolatedSurfacePoint_6_old(
-		VoxelHashMapInfo info,
-		int3 index,
-		float sdfCenter,
-		float3& outPosition,
-		float3& outNormal,
-		float3& outColor);
+	__device__ static bool isZeroCrossing(VoxelHashMapInfo& info, int3 index, float sdfCenter);
 
 	__device__ static bool computeInterpolatedSurfacePoint_6(
-		VoxelHashMapInfo info,
-		int3 index,
-		float sdfCenter,
-		float3& outPosition,
-		float3& outNormal,
-		float3& outColor);
-
-	__device__ static bool computeInterpolatedSurfacePoint_26_old(
-		VoxelHashMapInfo info,
+		VoxelHashMapInfo& info,
 		int3 index,
 		float sdfCenter,
 		float3& outPosition,
@@ -140,48 +130,12 @@ struct VoxelHashMap
 		float3& outColor);
 
 	__device__ static bool computeInterpolatedSurfacePoint_26(
-		VoxelHashMapInfo info,
+		VoxelHashMapInfo& info,
 		int3 index,
 		float sdfCenter,
 		float3& outPosition,
 		float3& outNormal,
 		float3& outColor);
+
+	__device__ static bool isSimpleVoxel(VoxelHashMapInfo& info, int3 index);
 };
-
-__global__ void Kernel_ClearHashMap(VoxelHashMapInfo info);
-
-__global__ void Kernel_OccupyVoxelHashMap(
-	VoxelHashMapInfo info,
-	float3* positions,
-	float3* normals,
-	float3* colors,
-	unsigned int numberOfPoints);
-
-__global__ void Kernel_OccupySDF(
-	VoxelHashMapInfo info,
-	float3* positions,
-	float3* normals,
-	float3* colors,
-	unsigned int numberOfPoints,
-	int offset);
-
-__global__ void Kernel_SerializeVoxelHashMap(
-	VoxelHashMapInfo info,
-	float3* d_positions,
-	float3* d_normals,
-	float3* d_colors);
-
-__global__ void Kernel_SerializeVoxelHashMap_SDF(
-	VoxelHashMapInfo info,
-	float3* d_positions,
-	float3* d_normals,
-	float3* d_colors);
-
-__global__ void Kernel_SmoothSDF_VoxelHashMap(VoxelHashMapInfo info, float smoothingFactor);
-
-__global__ void Kernel_FilterOppositeNormals(VoxelHashMapInfo info, float thresholdDotCos);
-
-__global__ void Kernel_FilterByNormalGradient(
-	VoxelHashMapInfo info,
-	float gradientThreshold,
-	bool remove);

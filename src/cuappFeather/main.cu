@@ -30,7 +30,6 @@
 
 HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
 {
-
     CUDA_TS(VoxelHashMap);
 
     DevicePointCloud d_input(h_input);
@@ -43,6 +42,7 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     //result.CompactValidPoints();
 
     vhm.Occupy_SDF(d_input, 3);
+
     //vhm.SmoothSDF(3);
     //vhm.FilterOppositeNormals();
     //vhm.FilterByNormalGradient(0.1f, false);
