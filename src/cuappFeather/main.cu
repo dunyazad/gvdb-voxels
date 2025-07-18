@@ -37,17 +37,21 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     VoxelHashMap vhm;
     vhm.Initialize(0.1f, d_input.numberOfPoints * 8, 32);
 
-    //vhm.Occupy(d_input);
-    //HostPointCloud result = vhm.Serialize();
-    //result.CompactValidPoints();
-
+//#define OCCUPY_SDF
+#ifndef OCCUPY_SDF
+    vhm.Occupy(d_input);
+    vhm.FindOverlap(3, true);
+    HostPointCloud result = vhm.Serialize();
+    result.CompactValidPoints();
+#else
     vhm.Occupy_SDF(d_input, 3);
-
+    vhm.FindOverlap(true);
     //vhm.SmoothSDF(3);
     //vhm.FilterOppositeNormals();
     //vhm.FilterByNormalGradient(0.1f, false);
     HostPointCloud result = vhm.Serialize();
     result.CompactValidPoints();
+#endif
     
     d_input.Terminate();
 

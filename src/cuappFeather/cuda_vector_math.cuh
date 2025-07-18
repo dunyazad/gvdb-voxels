@@ -637,10 +637,10 @@ __host__ __device__ inline uint2 operator/(const unsigned int s, const uint2& a)
     return make_uint2(s / a.x, s / a.y);
 }
 
-__host__ __device__ inline uint2 operator-(const uint2& a)
-{
-    return make_uint2(-a.x, -a.y);
-}
+//__host__ __device__ inline uint2 operator-(const uint2& a)
+//{
+//    return make_uint2(-a.x, -a.y);
+//}
 
 __host__ __device__ inline uint2& operator+=(uint2& a, const uint2& b)
 {
@@ -719,10 +719,10 @@ __host__ __device__ inline uint3 operator/(const unsigned int s, const uint3& a)
     return make_uint3(s / a.x, s / a.y, s / a.z);
 }
 
-__host__ __device__ inline uint3 operator-(const uint3& a)
-{
-    return make_uint3(-a.x, -a.y, -a.z);
-}
+//__host__ __device__ inline uint3 operator-(const uint3& a)
+//{
+//    return make_uint3(-a.x, -a.y, -a.z);
+//}
 
 __host__ __device__ inline uint3& operator+=(uint3& a, const uint3& b)
 {
@@ -801,10 +801,10 @@ __host__ __device__ inline uint4 operator/(const unsigned int s, const uint4& a)
     return make_uint4(s / a.x, s / a.y, s / a.z, s / a.w);
 }
 
-__host__ __device__ inline uint4 operator-(const uint4& a)
-{
-    return make_uint4(-a.x, -a.y, -a.z, -a.w);
-}
+//__host__ __device__ inline uint4 operator-(const uint4& a)
+//{
+//    return make_uint4(-a.x, -a.y, -a.z, -a.w);
+//}
 
 __host__ __device__ inline uint4& operator+=(uint4& a, const uint4& b)
 {
@@ -926,7 +926,7 @@ __host__ __device__ inline double length2(const double2& v)
 
 __host__ __device__ inline double length(const double2& v)
 {
-    return sqrtf(length2(v));
+    return sqrt(length2(v));
 }
 
 __host__ __device__ inline double2 normalize(const double2& v)
@@ -1035,7 +1035,7 @@ __host__ __device__ inline double length2(const double3& v)
 
 __host__ __device__ inline double length(const double3& v)
 {
-    return sqrtf(length2(v));
+    return sqrt(length2(v));
 }
 
 __host__ __device__ inline double3 normalize(const double3& v)
@@ -1144,7 +1144,7 @@ __host__ __device__ inline double length2(const double4& v)
 
 __host__ __device__ inline double length(const double4& v)
 {
-    return sqrtf(length2(v));
+    return sqrt(length2(v));
 }
 
 __host__ __device__ inline double4 normalize(const double4& v)

@@ -5,15 +5,17 @@
 #include <PointCloud.cuh>
 
 using VoxelKey = uint64_t;
+#ifndef EMPTY_KEY
 #define EMPTY_KEY UINT64_MAX
 #define VALID_KEY(k) ((k) != EMPTY_KEY)
+#endif
 
 struct Voxel
 {
 	int3 coordinate = make_int3(INT32_MAX, INT32_MAX, INT32_MAX);
 	float3 normalSum = make_float3(0, 0, 0);
 	float3 colorSum = make_float3(0, 0, 0);
-	float sdfSum = 0.0f;
+	float sdfSum = FLT_MAX;
 	unsigned int count = 0;
 };
 
@@ -36,43 +38,6 @@ struct VoxelHashMapInfo
 	unsigned int h_occupiedCapacity = 0;
 };
 
-__global__ void Kernel_ClearHashMap(VoxelHashMapInfo info);
-
-__global__ void Kernel_OccupyVoxelHashMap(
-	VoxelHashMapInfo info,
-	float3* positions,
-	float3* normals,
-	float3* colors,
-	unsigned int numberOfPoints);
-
-__global__ void Kernel_OccupySDF(
-	VoxelHashMapInfo info,
-	float3* positions,
-	float3* normals,
-	float3* colors,
-	unsigned int numberOfPoints,
-	int offset = 1);
-
-__global__ void Kernel_SerializeVoxelHashMap(
-	VoxelHashMapInfo info,
-	float3* positions,
-	float3* normals,
-	float3* colors);
-
-__global__ void Kernel_SerializeVoxelHashMap_SDF(
-	VoxelHashMapInfo info,
-	float3* positions,
-	float3* normals,
-	float3* colors);
-
-__global__ void Kernel_VoxelHashMap_FindOverlap(VoxelHashMapInfo info);
-
-__global__ void Kernel_SmoothSDF_VoxelHashMap(VoxelHashMapInfo info, float smoothingFactor);
-
-__global__ void Kernel_FilterOppositeNormals(VoxelHashMapInfo info, float thresholdDotCos);
-
-__global__ void Kernel_FilterByNormalGradient(VoxelHashMapInfo info, float gradientThreshold, bool remove);
-
 struct VoxelHashMap
 {
 	VoxelHashMapInfo info;
@@ -91,7 +56,7 @@ struct VoxelHashMap
 	HostPointCloud Serialize();
 	HostPointCloud Serialize_SDF();
 
-	void FindOverlap();
+	void FindOverlap(int step, bool remove);
 
 	void SmoothSDF(float smoothingFactor = 1.0f, int iterations = 1);
 
@@ -139,3 +104,40 @@ struct VoxelHashMap
 
 	__device__ static bool isSimpleVoxel(VoxelHashMapInfo& info, int3 index);
 };
+
+__global__ void Kernel_VoxelHashMap_Clear(VoxelHashMapInfo info);
+
+__global__ void Kernel_VoxelHashMap_Occupy(
+	VoxelHashMapInfo info,
+	float3* positions,
+	float3* normals,
+	float3* colors,
+	unsigned int numberOfPoints);
+
+__global__ void Kernel_VoxelHashMap_Occupy_SDF(
+	VoxelHashMapInfo info,
+	float3* positions,
+	float3* normals,
+	float3* colors,
+	unsigned int numberOfPoints,
+	int offset = 1);
+
+__global__ void Kernel_VoxelHashMap_Serialize(
+	VoxelHashMapInfo info,
+	float3* positions,
+	float3* normals,
+	float3* colors);
+
+__global__ void Kernel_VoxelHashMap_Serialize_SDF(
+	VoxelHashMapInfo info,
+	float3* positions,
+	float3* normals,
+	float3* colors);
+
+__global__ void Kernel_VoxelHashMap_FindOverlap(VoxelHashMapInfo info, int step, bool remove);
+
+__global__ void Kernel_VoxelHashMap_SmoothSDF(VoxelHashMapInfo info, float smoothingFactor);
+
+__global__ void Kernel_VoxelHashMap_FilterOppositeNormals(VoxelHashMapInfo info, float thresholdDotCos);
+
+__global__ void Kernel_VoxelHashMap_FilterByNormalGradient(VoxelHashMapInfo info, float gradientThreshold, bool remove);
