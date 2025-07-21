@@ -557,7 +557,14 @@ __global__ void Kernel_VoxelHashMap_Occupy_SDF(
 
 					if (old == EMPTY_KEY || old == key)
 					{
-						atomicAdd(&entry->voxel.sdfSum, sdf);
+						float prev = atomicCAS(reinterpret_cast<int*>(&entry->voxel.sdfSum),
+							__float_as_int(FLT_MAX),
+							__float_as_int(sdf));
+
+						if (__int_as_float(prev) != FLT_MAX)
+						{
+							atomicAdd(&entry->voxel.sdfSum, sdf);
+						}
 						atomicAdd(&entry->voxel.normalSum.x, n.x);
 						atomicAdd(&entry->voxel.normalSum.y, n.y);
 						atomicAdd(&entry->voxel.normalSum.z, n.z);
@@ -566,7 +573,6 @@ __global__ void Kernel_VoxelHashMap_Occupy_SDF(
 						atomicAdd(&entry->voxel.colorSum.y, c.y);
 						atomicAdd(&entry->voxel.colorSum.z, c.z);
 
-						// Count 0 → 1일 때만 index 등록
 						if (atomicCAS(&entry->voxel.count, 0u, 1u) == 0u)
 						{
 							unsigned int occindex = atomicAdd(info.d_numberOfOccupiedVoxels, 1);
@@ -575,7 +581,6 @@ __global__ void Kernel_VoxelHashMap_Occupy_SDF(
 						}
 						else
 						{
-							// 이후 count 증가
 							atomicAdd(&entry->voxel.count, 1u);
 						}
 
@@ -601,6 +606,8 @@ __global__ void Kernel_VoxelHashMap_Serialize(
 	auto voxel = VoxelHashMap::GetVoxel(info, voxelIndex);
 	if (!voxel || voxel->count == 0) return;
 
+	float sdf = voxel->sdfSum / (float)max(1u, voxel->count);
+
 	auto x = voxelIndex.x * info.voxelSize;
 	auto y = voxelIndex.y * info.voxelSize;
 	auto z = voxelIndex.z * info.voxelSize;
@@ -612,6 +619,15 @@ __global__ void Kernel_VoxelHashMap_Serialize(
 	if (voxel->colorSum == make_float3(0.0f, 0.0f, 0.0f))
 	{
 		printf("[%d, %d, %d] count : %d\n", voxel->coordinate.x, voxel->coordinate.y, voxel->coordinate.z, voxel->count);
+	}
+
+	if (0 < sdf)
+	{
+		d_colors[tid] = make_float3(1.0f, 0.0f, 0.0f);
+	}
+	else if (0 > sdf)
+	{
+		d_colors[tid] = make_float3(0.0f, 0.0f, 1.0f);
 	}
 }
 
