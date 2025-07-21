@@ -1288,7 +1288,7 @@ __global__ void Kernel_VoxelHashMap_MarchingCubes(
 	}
 	if (!hasAnyCorner) return;
 
-	VoxelHashMap::FillMissingCornersWithNearest(baseIndex, sdf, normal, color, cornerValid);
+	//VoxelHashMap::FillMissingCornersWithNearest(baseIndex, sdf, normal, color, cornerValid);
 
 	int cubeIndex = 0;
 	for (int i = 0; i < 8; ++i)

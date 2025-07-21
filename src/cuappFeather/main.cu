@@ -48,7 +48,7 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     HostPointCloud result = vhm.Serialize();
     result.CompactValidPoints();
 #else
-    vhm.Occupy_SDF(d_input, 3);
+    vhm.Occupy_SDF(d_input, 4);
 
     //vhm.Dilation(3, 1);
     
