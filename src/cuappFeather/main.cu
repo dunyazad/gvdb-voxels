@@ -35,7 +35,7 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     DevicePointCloud d_input(h_input);
 
     VoxelHashMap vhm;
-    vhm.Initialize(0.1f, d_input.numberOfPoints * 8, 32);
+    vhm.Initialize(0.2f, d_input.numberOfPoints * 8, 32);
 
 #define OCCUPY_SDF
 #ifndef OCCUPY_SDF
@@ -49,11 +49,15 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     result.CompactValidPoints();
 #else
     vhm.Occupy_SDF(d_input, 3);
+
+    //vhm.Dilation(3, 1);
+    
     vector<float3> vertices;
     vector<float3> normals;
     vector<float3> colors;
     vector<uint3> triangles;
     vhm.MarchingCubes(vertices, normals, colors, triangles);
+
     PLYFormat ply;
     for (size_t i = 0; i < vertices.size(); i++)
     {

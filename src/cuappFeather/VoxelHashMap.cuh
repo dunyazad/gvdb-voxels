@@ -56,6 +56,8 @@ struct VoxelHashMap
 	HostPointCloud Serialize();
 	HostPointCloud Serialize_SDF();
 
+	void Dilation(int iterations, int step);
+
 	bool MarchingCubes(std::vector<float3>& outVertices, std::vector<float3>& outNormals, std::vector<float3>& outColors, std::vector<uint3>& outTriangles);
 
 	void FindOverlap(int step, bool remove);
@@ -115,6 +117,17 @@ struct VoxelHashMap
 	__device__ static uint64_t EncodeEdgeKey(int3 v0, int3 v1);
 
 	__device__ static float3 Interpolate(float3 p1, float3 p2, float sdf1, float sdf2);
+
+	__device__ static bool FillMissingCorner(
+		VoxelHashMapInfo& info, int3* cornerIndices, float* sdf, float3* normal, float3* color, bool* valid);
+
+	__device__ static void FillHardMissingCorner(float* sdf, float3* normal, float3* color, bool* valid);
+
+	__device__ static bool GetOrFillVoxelCorner(
+		VoxelHashMapInfo& info, int3 corner, float& outSDF, float3& outNormal, float3& outColor);
+
+	__device__ static void FillMissingCornersWithNearest(
+		int3 baseIndex, float* sdf, float3* normal, float3* color, bool* cornerValid);
 };
 
 __global__ void Kernel_VoxelHashMap_Clear(VoxelHashMapInfo info);
@@ -171,3 +184,5 @@ __global__ void Kernel_VoxelHashMap_MarchingCubes(
 	int edgeSlotCapacity,
 	unsigned int* d_vertexCounter,
 	unsigned int* d_triangleCounter);
+
+__global__ void Kernel_VoxelHashMap_Dilation(VoxelHashMapInfo info, int3* d_newOccupiedIndices, unsigned int* d_newOccupiedCount, int dilationStep);

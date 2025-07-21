@@ -143,6 +143,47 @@ HostPointCloud VoxelHashMap::Serialize_SDF()
 	return h_result;
 }
 
+void VoxelHashMap::Dilation(int iterations, int step)
+{
+	for (int iter = 0; iter < iterations; ++iter)
+	{
+		unsigned int prevNumOccupied = info.h_numberOfOccupiedVoxels;
+
+		int maxNew = prevNumOccupied * ((2 * step + 1) * (2 * step + 1) * (2 * step + 1) - 1);
+		int3* d_newOccupiedIndices = nullptr;
+		unsigned int* d_newOccupiedCount = nullptr;
+		cudaMalloc(&d_newOccupiedIndices, sizeof(int3) * maxNew);
+		cudaMalloc(&d_newOccupiedCount, sizeof(unsigned int));
+		cudaMemset(d_newOccupiedCount, 0, sizeof(unsigned int));
+
+		LaunchKernel(Kernel_VoxelHashMap_Dilation, prevNumOccupied, info,
+			d_newOccupiedIndices, d_newOccupiedCount, step);
+
+		// d_newOccupiedCount → host 복사
+		unsigned int h_newOccupied = 0;
+		cudaMemcpy(&h_newOccupied, d_newOccupiedCount, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+
+		if (h_newOccupied > 0)
+		{
+			// 기존 occupiedIndices 확장
+			CheckOccupiedIndicesLength(info.h_numberOfOccupiedVoxels + h_newOccupied);
+			cudaMemcpy(
+				info.d_occupiedVoxelIndices + info.h_numberOfOccupiedVoxels,
+				d_newOccupiedIndices,
+				sizeof(int3) * h_newOccupied, cudaMemcpyDeviceToDevice
+			);
+			info.h_numberOfOccupiedVoxels += h_newOccupied;
+			cudaMemcpy(info.d_numberOfOccupiedVoxels, &info.h_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyHostToDevice);
+		}
+
+		cudaFree(d_newOccupiedIndices);
+		cudaFree(d_newOccupiedCount);
+
+		printf("Dilation iteration %d: prevNumOccupied: %u, new: %u, total: %u\n",
+			iter, prevNumOccupied, h_newOccupied, info.h_numberOfOccupiedVoxels);
+	}
+}
+
 bool VoxelHashMap::MarchingCubes(std::vector<float3>& outVertices, std::vector<float3>& outNormals, std::vector<float3>& outColors, std::vector<uint3>& outTriangles)
 {
 	if (info.h_numberOfOccupiedVoxels == 0)
@@ -535,6 +576,140 @@ __device__ float3 VoxelHashMap::Interpolate(float3 p1, float3 p2, float sdf1, fl
 	float alpha = sdf1 / (sdf1 - sdf2 + 1e-6f);
 	alpha = fminf(fmaxf(alpha, 0.0f), 1.0f);
 	return p1 + alpha * (p2 - p1);
+}
+
+__device__ bool VoxelHashMap::FillMissingCorner(
+	VoxelHashMapInfo& info, int3* cornerIndices, float* sdf, float3* normal, float3* color, bool* valid)
+{
+	bool anyFilled = false;
+	for (int i = 0; i < 8; ++i)
+	{
+		if (!valid[i])
+		{
+			// 주변 코너 중 valid인 것의 평균
+			float sumSdf = 0.0f;
+			float3 sumNormal = make_float3(0, 0, 0);
+			float3 sumColor = make_float3(0, 0, 0);
+			int cnt = 0;
+			for (int j = 0; j < 8; ++j)
+			{
+				if (valid[j])
+				{
+					sumSdf += sdf[j];
+					sumNormal += normal[j];
+					sumColor += color[j];
+					cnt++;
+				}
+			}
+			if (cnt > 0)
+			{
+				sdf[i] = sumSdf / cnt;
+				normal[i] = sumNormal / (float)cnt;
+				color[i] = sumColor / (float)cnt;
+				valid[i] = true;
+				anyFilled = true;
+			}
+		}
+	}
+	return anyFilled;
+}
+
+__device__ void VoxelHashMap::FillHardMissingCorner(float* sdf, float3* normal, float3* color, bool* valid)
+{
+	// 1. 찾기: valid 코너
+	int firstValid = -1;
+	for (int i = 0; i < 8; ++i) if (valid[i]) { firstValid = i; break; }
+	if (firstValid < 0) return; // 전부 비었으면 return
+
+	// 2. 할당
+	for (int i = 0; i < 8; ++i)
+	{
+		if (!valid[i])
+		{
+			sdf[i] = sdf[firstValid];
+			normal[i] = normal[firstValid];
+			color[i] = color[firstValid];
+			valid[i] = true;
+		}
+	}
+}
+
+__device__ bool VoxelHashMap::GetOrFillVoxelCorner(
+	VoxelHashMapInfo& info, int3 corner, float& outSDF, float3& outNormal, float3& outColor)
+{
+	Voxel* voxel = VoxelHashMap::GetVoxel(info, corner);
+	if (voxel && voxel->count > 0)
+	{
+		outSDF = voxel->sdfSum / (float)max(1u, voxel->count);
+		outNormal = voxel->normalSum / (float)max(1u, voxel->count);
+		outColor = voxel->colorSum / (float)max(1u, voxel->count);
+		return true;
+	}
+
+	// 26방향 이웃에서 채우기
+	for (int dz = -1; dz <= 1; ++dz)
+	{
+		for (int dy = -1; dy <= 1; ++dy)
+		{
+			for (int dx = -1; dx <= 1; ++dx)
+			{
+				if (dx == 0 && dy == 0 && dz == 0) continue; // 자기 자신 제외
+
+				int3 n = corner + make_int3(dx, dy, dz);
+				Voxel* nvoxel = VoxelHashMap::GetVoxel(info, n);
+				if (nvoxel && nvoxel->count > 0)
+				{
+					outSDF = nvoxel->sdfSum / (float)max(1u, nvoxel->count);
+					outNormal = nvoxel->normalSum / (float)max(1u, nvoxel->count);
+					outColor = nvoxel->colorSum / (float)max(1u, nvoxel->count);
+					return true;
+				}
+			}
+		}
+	}
+	outSDF = 0.0f;
+	outNormal = make_float3(0, 0, 0);
+	outColor = make_float3(0, 0, 0);
+	return false;
+}
+
+__device__ void VoxelHashMap::FillMissingCornersWithNearest(
+	int3 baseIndex,
+	float* sdf, float3* normal, float3* color, bool* cornerValid)
+{
+	// 8개 중 하나라도 있으면 없는 코너를 가장 가까운 코너로 채움
+	for (int i = 0; i < 8; ++i)
+	{
+		if (!cornerValid[i])
+		{
+			float minDist = 1e9f;
+			int bestJ = -1;
+			int3 ci = baseIndex + MC_CORNERS[i];
+			for (int j = 0; j < 8; ++j)
+			{
+				if (!cornerValid[j]) continue;
+				int3 cj = baseIndex + MC_CORNERS[j];
+				float d = length(make_float3(
+					float(ci.x - cj.x),
+					float(ci.y - cj.y),
+					float(ci.z - cj.z)));
+				if (d < minDist)
+				{
+					minDist = d;
+					bestJ = j;
+				}
+			}
+			if (bestJ >= 0)
+			{
+				//float bias = 1e-3f;
+				float bias = 0.25f;
+				sdf[i] = sdf[bestJ] + ((sdf[bestJ] >= 0) ? bias : -bias);
+				normal[i] = normal[bestJ];
+				color[i] = color[bestJ];
+				cornerValid[i] = true;
+			}
+		}
+	}
 }
 
 __global__ void Kernel_VoxelHashMap_Clear(VoxelHashMapInfo info)
@@ -1099,20 +1274,21 @@ __global__ void Kernel_VoxelHashMap_MarchingCubes(
 	if (tid >= *info.d_numberOfOccupiedVoxels) return;
 
 	int3 baseIndex = info.d_occupiedVoxelIndices[tid];
+
 	float sdf[8];
-	bool valid = true;
+	float3 normal[8], color[8];
+	bool cornerValid[8] = { false };
+	bool hasAnyCorner = false;
+
 	for (int i = 0; i < 8; ++i)
 	{
 		int3 corner = baseIndex + MC_CORNERS[i];
-		Voxel* voxel = VoxelHashMap::GetVoxel(info, corner);
-		if (!voxel || voxel->count == 0)
-		{
-			valid = false;
-			break;
-		}
-		sdf[i] = voxel->sdfSum / max(1u, voxel->count);
+		cornerValid[i] = VoxelHashMap::GetOrFillVoxelCorner(info, corner, sdf[i], normal[i], color[i]);
+		if (cornerValid[i]) hasAnyCorner = true;
 	}
-	if (!valid) return;
+	if (!hasAnyCorner) return;
+
+	VoxelHashMap::FillMissingCornersWithNearest(baseIndex, sdf, normal, color, cornerValid);
 
 	int cubeIndex = 0;
 	for (int i = 0; i < 8; ++i)
@@ -1132,12 +1308,12 @@ __global__ void Kernel_VoxelHashMap_MarchingCubes(
 		int3 i0 = baseIndex + MC_CORNERS[edge0];
 		int3 i1 = baseIndex + MC_CORNERS[edge1];
 
-		Voxel* voxel0 = VoxelHashMap::GetVoxel(info, i0);
-		Voxel* voxel1 = VoxelHashMap::GetVoxel(info, i1);
-		if (!voxel0 || !voxel1 || voxel0->count == 0 || voxel1->count == 0) continue;
-
-		float sdf0 = voxel0->sdfSum / max(1u, voxel0->count);
-		float sdf1 = voxel1->sdfSum / max(1u, voxel1->count);
+		float sdf0 = sdf[edge0];
+		float sdf1 = sdf[edge1];
+		float3 n0 = normal[edge0];
+		float3 n1 = normal[edge1];
+		float3 c0 = color[edge0];
+		float3 c1 = color[edge1];
 
 		float3 p0 = VoxelHashMap::IndexToPosition(i0, info.voxelSize);
 		float3 p1 = VoxelHashMap::IndexToPosition(i1, info.voxelSize);
@@ -1145,12 +1321,7 @@ __global__ void Kernel_VoxelHashMap_MarchingCubes(
 		float alpha = sdf0 / (sdf0 - sdf1 + 1e-6f);
 		alpha = fminf(fmaxf(alpha, 0.0f), 1.0f);
 		float3 interpolatedPosition = p0 + alpha * (p1 - p0);
-
-		float3 n0 = voxel0->normalSum / max(1u, voxel0->count);
-		float3 n1 = voxel1->normalSum / max(1u, voxel1->count);
 		float3 interpolatedNormal = normalize(n0 + alpha * (n1 - n0));
-		float3 c0 = voxel0->colorSum / max(1u, voxel0->count);
-		float3 c1 = voxel1->colorSum / max(1u, voxel1->count);
 		float3 interpolatedColor = c0 + alpha * (c1 - c0);
 
 		uint64_t edgeKey = VoxelHashMap::EncodeEdgeKey(i0, i1);
@@ -1188,5 +1359,84 @@ __global__ void Kernel_VoxelHashMap_MarchingCubes(
 		if (a == b || b == c || c == a) continue;
 		int t = atomicAdd(d_triangleCounter, 1);
 		d_indices[t] = make_uint3(a, b, c);
+	}
+}
+
+__global__ void Kernel_VoxelHashMap_Dilation(
+	VoxelHashMapInfo info,
+	int3* d_newOccupiedIndices,
+	unsigned int* d_newOccupiedCount,
+	int dilationStep)
+{
+	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+	if (tid >= *info.d_numberOfOccupiedVoxels)
+		return;
+
+	int3 base = info.d_occupiedVoxelIndices[tid];
+	Voxel* baseVoxel = VoxelHashMap::GetVoxel(info, base);
+	if (!baseVoxel || baseVoxel->count == 0)
+		return;
+
+	float sdf = baseVoxel->sdfSum / (float)max(1u, baseVoxel->count);
+	const float threshold = info.voxelSize * 0.7f;
+
+	for (int dz = -dilationStep; dz <= dilationStep; ++dz)
+	{
+		for (int dy = -dilationStep; dy <= dilationStep; ++dy)
+		{
+			for (int dx = -dilationStep; dx <= dilationStep; ++dx)
+			{
+				if (dx == 0 && dy == 0 && dz == 0)
+					continue;
+
+				int3 neighbor = make_int3(base.x + dx, base.y + dy, base.z + dz);
+				Voxel* neighborVoxel = VoxelHashMap::GetVoxel(info, neighbor);
+				if (!neighborVoxel || neighborVoxel->count == 0)
+				{
+					VoxelKey key = VoxelHashMap::IndexToVoxelKey(neighbor);
+					size_t hashIdx = VoxelHashMap::hash(key, info.capacity);
+
+					for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+					{
+						size_t idx = (hashIdx + probe) % info.capacity;
+						VoxelHashEntry* entry = &info.entries[idx];
+
+						VoxelKey old = atomicCAS(
+							reinterpret_cast<unsigned long long*>(&entry->key),
+							EMPTY_KEY, key
+						);
+
+						if (old == EMPTY_KEY)
+						{
+							if (fabsf(sdf) < threshold)
+							{
+								entry->voxel.sdfSum = -sdf * baseVoxel->count;
+								entry->voxel.normalSum = -baseVoxel->normalSum;
+								entry->voxel.colorSum = baseVoxel->colorSum;
+								entry->voxel.count = baseVoxel->count;
+							}
+							else
+							{
+								// 그냥 복사
+								entry->voxel.sdfSum = baseVoxel->sdfSum;
+								entry->voxel.normalSum = baseVoxel->normalSum;
+								entry->voxel.colorSum = baseVoxel->colorSum;
+								entry->voxel.count = baseVoxel->count;
+							}
+
+							entry->voxel.coordinate = neighbor;
+
+							unsigned int occIdx = atomicAdd(d_newOccupiedCount, 1u);
+							d_newOccupiedIndices[occIdx] = neighbor;
+							break;
+						}
+						else if (old == key)
+						{
+							break;
+						}
+					}
+				}
+			}
+		}
 	}
 }
