@@ -143,6 +143,82 @@ HostPointCloud VoxelHashMap::Serialize_SDF()
 	return h_result;
 }
 
+bool VoxelHashMap::MarchingCubes(std::vector<float3>& outVertices, std::vector<float3>& outNormals, std::vector<float3>& outColors, std::vector<uint3>& outTriangles)
+{
+	if (info.h_numberOfOccupiedVoxels == 0)
+		return false;
+
+	const int maxTriangles = (info.h_numberOfOccupiedVoxels) * 5;
+	const int maxVertices = maxTriangles * 3;
+
+	float3* d_vertices = nullptr;
+	float3* d_normals = nullptr;
+	float3* d_colors = nullptr;
+	uint3* d_indices = nullptr;
+	uint64_t* d_edgeSlotKeys = nullptr;
+	int* d_edgeSlotValues = nullptr;
+	unsigned int* d_numVertices = nullptr;
+	unsigned int* d_numTriangles = nullptr;
+
+	int edgeSlotCapacity = maxVertices * 3;
+
+	cudaMalloc(&d_vertices, sizeof(float3) * maxVertices);
+	cudaMalloc(&d_normals, sizeof(float3) * maxVertices);
+	cudaMalloc(&d_colors, sizeof(float3) * maxVertices);
+	cudaMalloc(&d_indices, sizeof(uint3) * maxTriangles);
+	cudaMalloc(&d_edgeSlotKeys, sizeof(uint64_t) * edgeSlotCapacity);
+	cudaMalloc(&d_edgeSlotValues, sizeof(int) * edgeSlotCapacity);
+	cudaMalloc(&d_numVertices, sizeof(unsigned int));
+	cudaMalloc(&d_numTriangles, sizeof(unsigned int));
+
+	cudaMemset(d_numVertices, 0, sizeof(unsigned int));
+	cudaMemset(d_numTriangles, 0, sizeof(unsigned int));
+#define INVALID_EDGE_KEY 0xffffffffffffffffull
+	cudaMemset(d_edgeSlotKeys, 0xff, sizeof(uint64_t) * edgeSlotCapacity);
+	cudaMemset(d_edgeSlotValues, -1, sizeof(int) * edgeSlotCapacity);
+
+	LaunchKernel(Kernel_VoxelHashMap_MarchingCubes, info.h_numberOfOccupiedVoxels,
+		info,
+		d_vertices,
+		d_normals,
+		d_colors,
+		d_indices,
+		d_edgeSlotKeys,
+		d_edgeSlotValues,
+		edgeSlotCapacity,
+		d_numVertices,
+		d_numTriangles);
+
+	cudaDeviceSynchronize();
+
+	unsigned int h_numVertices = 0, h_numTriangles = 0;
+	cudaMemcpy(&h_numVertices, d_numVertices, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+	cudaMemcpy(&h_numTriangles, d_numTriangles, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+
+	printf("h_numVertices : %d, h_numTriangles : %d\n", h_numVertices, h_numTriangles);
+
+	outVertices.resize(h_numVertices);
+	outNormals.resize(h_numVertices);
+	outColors.resize(h_numVertices);
+	outTriangles.resize(h_numTriangles);
+
+	cudaMemcpy(outVertices.data(), d_vertices, sizeof(float3) * h_numVertices, cudaMemcpyDeviceToHost);
+	cudaMemcpy(outNormals.data(), d_normals, sizeof(float3) * h_numVertices, cudaMemcpyDeviceToHost);
+	cudaMemcpy(outColors.data(), d_colors, sizeof(float3) * h_numVertices, cudaMemcpyDeviceToHost);
+	cudaMemcpy(outTriangles.data(), d_indices, sizeof(uint3) * h_numTriangles, cudaMemcpyDeviceToHost);
+
+	cudaFree(d_vertices);
+	cudaFree(d_normals);
+	cudaFree(d_colors);
+	cudaFree(d_indices);
+	cudaFree(d_edgeSlotKeys);
+	cudaFree(d_edgeSlotValues);
+	cudaFree(d_numVertices);
+	cudaFree(d_numTriangles);
+
+	return true;
+}
+
 void VoxelHashMap::FindOverlap(int step, bool remove)
 {
 	LaunchKernel(Kernel_VoxelHashMap_FindOverlap, info.h_numberOfOccupiedVoxels, info, step, remove);
@@ -443,6 +519,24 @@ __device__ bool VoxelHashMap::isSimpleVoxel(VoxelHashMapInfo& info, int3 index)
 	return (count >= 1); // can be made stricter
 }
 
+__device__ uint64_t VoxelHashMap::EncodeEdgeKey(int3 v0, int3 v1)
+{
+	if ((v1.x < v0.x) || (v1.x == v0.x && v1.y < v0.y) || (v1.x == v0.x && v1.y == v0.y && v1.z < v0.z))
+	{
+		int3 tmp = v0; v0 = v1; v1 = tmp;
+	}
+	return (uint64_t(v0.x & 0x1FFFFF) << 42) |
+		(uint64_t(v0.y & 0x1FFFFF) << 21) |
+		(uint64_t(v0.z & 0x1FFFFF));
+}
+
+__device__ float3 VoxelHashMap::Interpolate(float3 p1, float3 p2, float sdf1, float sdf2)
+{
+	float alpha = sdf1 / (sdf1 - sdf2 + 1e-6f);
+	alpha = fminf(fmaxf(alpha, 0.0f), 1.0f);
+	return p1 + alpha * (p2 - p1);
+}
+
 __global__ void Kernel_VoxelHashMap_Clear(VoxelHashMapInfo info)
 {
 	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -520,8 +614,6 @@ __global__ void Kernel_VoxelHashMap_Occupy_SDF(
 {
 	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
 	if (tid >= numberOfPoints) return;
-
-	//printf("tid : %d\n", tid);
 
 	float3 p = positions[tid];
 	float3 n = normals[tid];
@@ -730,7 +822,7 @@ __global__ void Kernel_VoxelHashMap_SmoothSDF(
 	}
 
 	float sdfSmoothed = (1.0f - smoothingFactor) * sdfCenter + smoothingFactor * (sdfSum / sdfCount);
-	voxel->sdfSum = sdfSmoothed * voxel->count; // Keep sdfSum as accumulated
+	voxel->sdfSum = sdfSmoothed * voxel->count;
 }
 
 __global__ void Kernel_VoxelHashMap_FilterOppositeNormals(VoxelHashMapInfo info, float thresholdDotCos)
@@ -860,8 +952,6 @@ __global__ void Kernel_VoxelHashMap_FilterByNormalGradientWithOffset(
 		}
 	}
 
-	//if (neighborCount < 6) return; // 너무 적은 이웃은 무시
-
 	if (maxGradient > gradientThreshold)
 	{
 		if (remove)
@@ -873,7 +963,7 @@ __global__ void Kernel_VoxelHashMap_FilterByNormalGradientWithOffset(
 		}
 		else
 		{
-			voxel->colorSum = make_float3((float)voxel->count, 0, 0); // 빨간색으로 마킹
+			voxel->colorSum = make_float3((float)voxel->count, 0, 0);
 		}
 	}
 }
@@ -923,7 +1013,7 @@ __global__ void Kernel_VoxelHashMap_FilterBySDFGradient(
 		}
 		else
 		{
-			voxel->colorSum = make_float3((float)voxel->count, 0, 0); // 마킹 (빨간색)
+			voxel->colorSum = make_float3((float)voxel->count, 0, 0);
 		}
 	}
 }
@@ -963,12 +1053,8 @@ __global__ void Kernel_VoxelHashMap_FilterBySDFGradient_26(
 				float sdf1 = v1->sdfSum / (float)max(1u, v1->count);
 				float sdf2 = v2->sdfSum / (float)max(1u, v2->count);
 
-				//printf("%f, %f, %f\n", sdf1, sdf2, sdf1 - sdf2);
-
 				float3 unitDir = normalize(make_float3((float)dir.x, (float)dir.y, (float)dir.z) * info.voxelSize);
 				float delta = (sdf1 - sdf2) / (2.0f * info.voxelSize);
-
-				//printf("delta : %f\n", delta);
 
 				grad += unitDir * delta;
 				++validCount;
@@ -981,8 +1067,6 @@ __global__ void Kernel_VoxelHashMap_FilterBySDFGradient_26(
 	grad /= (float)validCount;
 	float gradMag = length(grad);
 
-	//printf("gradMag : %f\n", gradMag);
-
 	if (gradMag > gradientThreshold)
 	{
 		if (remove)
@@ -994,7 +1078,115 @@ __global__ void Kernel_VoxelHashMap_FilterBySDFGradient_26(
 		}
 		else
 		{
-			voxel->colorSum = make_float3((float)voxel->count, 0, 0); // 시각적 마킹 (빨간색)
+			voxel->colorSum = make_float3((float)voxel->count, 0, 0);
 		}
+	}
+}
+
+__global__ void Kernel_VoxelHashMap_MarchingCubes(
+	VoxelHashMapInfo info,
+	float3* d_vertices,
+	float3* d_normals,
+	float3* d_colors,
+	uint3* d_indices,
+	uint64_t* d_edgeSlotKeys,
+	int* d_edgeSlotValues,
+	int edgeSlotCapacity,
+	unsigned int* d_vertexCounter,
+	unsigned int* d_triangleCounter)
+{
+	int tid = blockIdx.x * blockDim.x + threadIdx.x;
+	if (tid >= *info.d_numberOfOccupiedVoxels) return;
+
+	int3 baseIndex = info.d_occupiedVoxelIndices[tid];
+	float sdf[8];
+	bool valid = true;
+	for (int i = 0; i < 8; ++i)
+	{
+		int3 corner = baseIndex + MC_CORNERS[i];
+		Voxel* voxel = VoxelHashMap::GetVoxel(info, corner);
+		if (!voxel || voxel->count == 0)
+		{
+			valid = false;
+			break;
+		}
+		sdf[i] = voxel->sdfSum / max(1u, voxel->count);
+	}
+	if (!valid) return;
+
+	int cubeIndex = 0;
+	for (int i = 0; i < 8; ++i)
+		if (sdf[i] < 0) cubeIndex |= (1 << i);
+
+	int edgeMask = MC_EDGE_TABLE[cubeIndex];
+	if (edgeMask == 0) return;
+
+	int vertexIndex[12];
+#pragma unroll
+	for (int e = 0; e < 12; ++e)
+	{
+		vertexIndex[e] = -1;
+		if (!(edgeMask & (1 << e))) continue;
+		int edge0 = MC_EDGE_CONNECTIONS[e][0];
+		int edge1 = MC_EDGE_CONNECTIONS[e][1];
+		int3 i0 = baseIndex + MC_CORNERS[edge0];
+		int3 i1 = baseIndex + MC_CORNERS[edge1];
+
+		Voxel* voxel0 = VoxelHashMap::GetVoxel(info, i0);
+		Voxel* voxel1 = VoxelHashMap::GetVoxel(info, i1);
+		if (!voxel0 || !voxel1 || voxel0->count == 0 || voxel1->count == 0) continue;
+
+		float sdf0 = voxel0->sdfSum / max(1u, voxel0->count);
+		float sdf1 = voxel1->sdfSum / max(1u, voxel1->count);
+
+		float3 p0 = VoxelHashMap::IndexToPosition(i0, info.voxelSize);
+		float3 p1 = VoxelHashMap::IndexToPosition(i1, info.voxelSize);
+
+		float alpha = sdf0 / (sdf0 - sdf1 + 1e-6f);
+		alpha = fminf(fmaxf(alpha, 0.0f), 1.0f);
+		float3 interpolatedPosition = p0 + alpha * (p1 - p0);
+
+		float3 n0 = voxel0->normalSum / max(1u, voxel0->count);
+		float3 n1 = voxel1->normalSum / max(1u, voxel1->count);
+		float3 interpolatedNormal = normalize(n0 + alpha * (n1 - n0));
+		float3 c0 = voxel0->colorSum / max(1u, voxel0->count);
+		float3 c1 = voxel1->colorSum / max(1u, voxel1->count);
+		float3 interpolatedColor = c0 + alpha * (c1 - c0);
+
+		uint64_t edgeKey = VoxelHashMap::EncodeEdgeKey(i0, i1);
+		int hash = (edgeKey ^ (edgeKey >> 32)) % edgeSlotCapacity;
+
+		for (int probe = 0; probe < 8; ++probe)
+		{
+			int slot = (hash + probe) % edgeSlotCapacity;
+			uint64_t old = atomicCAS(&d_edgeSlotKeys[slot], 0xffffffffffffffffull, edgeKey);
+			int vtxIdx;
+			if (old == 0xffffffffffffffffull)
+			{
+				vtxIdx = atomicAdd(d_vertexCounter, 1);
+				d_vertices[vtxIdx] = interpolatedPosition;
+				d_normals[vtxIdx] = interpolatedNormal;
+				d_colors[vtxIdx] = interpolatedColor;
+				d_edgeSlotValues[slot] = vtxIdx;
+			}
+			else if (old == edgeKey)
+			{
+				vtxIdx = d_edgeSlotValues[slot];
+			}
+			else continue;
+			vertexIndex[e] = vtxIdx;
+			break;
+		}
+	}
+
+	for (int i = 0; MC_TRI_TABLE[cubeIndex][i] != -1; i += 3)
+	{
+		int a = vertexIndex[MC_TRI_TABLE[cubeIndex][i + 0]];
+		int b = vertexIndex[MC_TRI_TABLE[cubeIndex][i + 1]];
+		int c = vertexIndex[MC_TRI_TABLE[cubeIndex][i + 2]];
+		if (a < 0 || b < 0 || c < 0) continue;
+		if (a == b || b == c || c == a) continue;
+		int t = atomicAdd(d_triangleCounter, 1);
+		d_indices[t] = make_uint3(a, b, c);
 	}
 }

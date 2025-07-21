@@ -49,6 +49,31 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     result.CompactValidPoints();
 #else
     vhm.Occupy_SDF(d_input, 3);
+    vector<float3> vertices;
+    vector<float3> normals;
+    vector<float3> colors;
+    vector<uint3> triangles;
+    vhm.MarchingCubes(vertices, normals, colors, triangles);
+    PLYFormat ply;
+    for (size_t i = 0; i < vertices.size(); i++)
+    {
+        auto& p = vertices[i];
+        auto& n = normals[i];
+        auto& c = colors[i];
+
+        ply.AddPoint(p.x, p.y, p.z);
+        ply.AddNormal(n.x, n.y, n.z);
+        ply.AddColor(c.x, c.y, c.z);
+    }
+    for (size_t i = 0; i < triangles.size(); i++)
+    {
+        auto& t = triangles[i];
+
+        ply.AddTriangleIndex(t.x);
+        ply.AddTriangleIndex(t.z);
+        ply.AddTriangleIndex(t.y);
+    }
+    ply.Serialize("../../res/3D/MarchingCubes.ply");
     //vhm.MarchingCubes("../../res/3D/MarchingCubes.ply");
     //vhm.FilterBySDFGradientWithOffset(3, 10.0f, false);
     //vhm.FindOverlap(3, true);

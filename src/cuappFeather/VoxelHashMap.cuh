@@ -56,6 +56,8 @@ struct VoxelHashMap
 	HostPointCloud Serialize();
 	HostPointCloud Serialize_SDF();
 
+	bool MarchingCubes(std::vector<float3>& outVertices, std::vector<float3>& outNormals, std::vector<float3>& outColors, std::vector<uint3>& outTriangles);
+
 	void FindOverlap(int step, bool remove);
 
 	void SmoothSDF(float smoothingFactor = 1.0f, int iterations = 1);
@@ -109,6 +111,10 @@ struct VoxelHashMap
 		float3& outColor);
 
 	__device__ static bool isSimpleVoxel(VoxelHashMapInfo& info, int3 index);
+
+	__device__ static uint64_t EncodeEdgeKey(int3 v0, int3 v1);
+
+	__device__ static float3 Interpolate(float3 p1, float3 p2, float sdf1, float sdf2);
 };
 
 __global__ void Kernel_VoxelHashMap_Clear(VoxelHashMapInfo info);
@@ -153,3 +159,15 @@ __global__ void Kernel_VoxelHashMap_FilterByNormalGradientWithOffset(VoxelHashMa
 __global__ void Kernel_VoxelHashMap_FilterBySDFGradient(VoxelHashMapInfo info, float gradientThreshold, bool remove);
 
 __global__ void Kernel_VoxelHashMap_FilterBySDFGradient_26(VoxelHashMapInfo info, int offset, float gradientThreshold, bool remove);
+
+__global__ void Kernel_VoxelHashMap_MarchingCubes(
+	VoxelHashMapInfo info,
+	float3* d_vertices,
+	float3* d_normals,
+	float3* d_colors,
+	uint3* d_indices,
+	uint64_t* d_edgeSlotKeys,
+	int* d_edgeSlotValues,
+	int edgeSlotCapacity,
+	unsigned int* d_vertexCounter,
+	unsigned int* d_triangleCounter);
