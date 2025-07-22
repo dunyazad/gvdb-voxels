@@ -16,6 +16,7 @@
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="main.cu" />
+    <CudaCompile Include="Mesh.cu" />
     <CudaCompile Include="PointCloud.cu" />
     <CudaCompile Include="SCVoxelHashMap.cu" />
     <CudaCompile Include="VoxelHashMap.cu" />
@@ -28,6 +29,7 @@
     <ClInclude Include="KDTree.hpp" />
     <ClInclude Include="main.cuh" />
     <ClInclude Include="marching_cubes_constants.cuh" />
+    <ClInclude Include="Mesh.cuh" />
     <ClInclude Include="Octree.cuh" />
     <ClInclude Include="PointCloud.cuh" />
     <ClInclude Include="SCVoxelHashMap.cuh" />

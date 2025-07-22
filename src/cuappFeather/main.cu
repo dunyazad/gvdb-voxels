@@ -118,7 +118,7 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     DevicePointCloud d_input(h_input);
 
     SCVoxelHashMap vhm;
-    vhm.Initialize(0.1f, d_input.numberOfPoints * 8, 32);
+    vhm.Initialize(0.3f, d_input.numberOfPoints * 8, 32);
 
     vhm.Occupy(d_input);
     

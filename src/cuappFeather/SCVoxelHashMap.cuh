@@ -50,6 +50,8 @@ struct SCVoxelHashMap
 
 	HostPointCloud Serialize();
 
+
+
 	__host__ __device__ static uint64_t expandBits(uint32_t v);
 	__host__ __device__ static uint32_t compactBits(uint64_t x);
 	__host__ __device__ static size_t hash(SCVoxelKey key, size_t capacity);
