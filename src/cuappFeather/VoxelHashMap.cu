@@ -143,6 +143,24 @@ HostPointCloud VoxelHashMap::Serialize_SDF()
 	return h_result;
 }
 
+HostPointCloud VoxelHashMap::Serialize_SDF_Tidy()
+{
+	DevicePointCloud d_result;
+
+	if (info.h_numberOfOccupiedVoxels == 0) return d_result;
+
+	d_result.Intialize(info.h_numberOfOccupiedVoxels);
+
+	LaunchKernel(Kernel_VoxelHashMap_Serialize_SDF_Tidy, info.h_numberOfOccupiedVoxels, info, d_result.positions, d_result.normals, d_result.colors);
+
+	cudaDeviceSynchronize();
+
+	HostPointCloud h_result(d_result);
+	d_result.Terminate();
+
+	return h_result;
+}
+
 void VoxelHashMap::Dilation(int iterations, int step)
 {
 	for (int iter = 0; iter < iterations; ++iter)
@@ -929,6 +947,60 @@ __global__ void Kernel_VoxelHashMap_Serialize_SDF(
 	d_colors[tid] = color;
 }
 
+__global__ void Kernel_VoxelHashMap_Serialize_SDF_Tidy(
+	VoxelHashMapInfo info,
+	float3* d_positions,
+	float3* d_normals,
+	float3* d_colors)
+{
+	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+	if (tid >= *info.d_numberOfOccupiedVoxels) return;
+
+	int3 voxelIndex = info.d_occupiedVoxelIndices[tid];
+	auto voxel = VoxelHashMap::GetVoxel(info, voxelIndex);
+	if (!voxel || voxel->count == 0) return;
+
+	float sdf = voxel->sdfSum / (float)max(1u, voxel->count);
+
+	bool zeroCrossing = false;
+	for (int dz = -1; dz <= 1; ++dz)
+	{
+		for (int dy = -1; dy <= 1; ++dy)
+		{
+			for (int dx = -1; dx <= 1; ++dx)
+			{
+				if (dx == 0 && dy == 0 && dz == 0) continue;
+				int3 neighborIndex = voxelIndex + make_int3(dx, dy, dz);
+				Voxel* nvoxel = VoxelHashMap::GetVoxel(info, neighborIndex);
+				if (nvoxel && nvoxel->count > 0)
+				{
+					float nsdf = nvoxel->sdfSum / (float)max(1u, nvoxel->count);
+					if ((0 > sdf && 0 < nsdf) || (0 < sdf && 0 > nsdf))
+					{
+						auto diff = sdf + nsdf;
+						if (info.voxelSize * 0.5f > diff)
+						{
+							zeroCrossing = true;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (!zeroCrossing)
+	{
+		d_positions[tid] = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+		d_normals[tid] = make_float3(0, 0, 0);
+		d_colors[tid] = make_float3(0, 0, 0);
+		return;
+	}
+
+	d_positions[tid] = VoxelHashMap::IndexToPosition(voxelIndex, info.voxelSize);
+	d_normals[tid] = voxel->normalSum / (float)max(1u, voxel->count);
+	d_colors[tid] = voxel->colorSum / (float)max(1u, voxel->count);
+}
+
 __global__ void Kernel_VoxelHashMap_FindOverlap(VoxelHashMapInfo info, int step, bool remove)
 {
 	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1286,9 +1358,17 @@ __global__ void Kernel_VoxelHashMap_MarchingCubes(
 		cornerValid[i] = VoxelHashMap::GetOrFillVoxelCorner(info, corner, sdf[i], normal[i], color[i]);
 		if (cornerValid[i]) hasAnyCorner = true;
 	}
-	if (!hasAnyCorner) return;
-
-	//VoxelHashMap::FillMissingCornersWithNearest(baseIndex, sdf, normal, color, cornerValid);
+	if (false == hasAnyCorner)
+	{
+		VoxelHashMap::FillMissingCornersWithNearest(baseIndex, sdf, normal, color, cornerValid);
+		VoxelHashMap::FillHardMissingCorner(sdf, normal, color, cornerValid);
+		for (int i = 0; i < 8; ++i)
+		{
+			int3 corner = baseIndex + MC_CORNERS[i];
+			if (cornerValid[i]) hasAnyCorner = true;
+		}
+	}
+	if (false == hasAnyCorner) return;
 
 	int cubeIndex = 0;
 	for (int i = 0; i < 8; ++i)
@@ -1330,9 +1410,9 @@ __global__ void Kernel_VoxelHashMap_MarchingCubes(
 		for (int probe = 0; probe < 8; ++probe)
 		{
 			int slot = (hash + probe) % edgeSlotCapacity;
-			uint64_t old = atomicCAS(&d_edgeSlotKeys[slot], 0xffffffffffffffffull, edgeKey);
+			uint64_t old = atomicCAS(&d_edgeSlotKeys[slot], UINT64_MAX, edgeKey);
 			int vtxIdx;
-			if (old == 0xffffffffffffffffull)
+			if (old == UINT64_MAX)
 			{
 				vtxIdx = atomicAdd(d_vertexCounter, 1);
 				d_vertices[vtxIdx] = interpolatedPosition;

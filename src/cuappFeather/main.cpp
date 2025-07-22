@@ -134,7 +134,7 @@ bool ForceGPUPerformance()
 //}
 #pragma endregion
 
-const string resource_file_name = "0_Initial";
+const string resource_file_name = "0_Initial_Noise";
 //const string resource_file_name = "Compound_Full";
 //const string resource_file_name = "Bridge";
 //const string resource_file_name = "Reintegrate";
@@ -461,20 +461,20 @@ int main(int argc, char** argv)
 			auto result = ProcessPointCloud(h_pointCloud);
 			ApplyPointCloudToEntity(entity, result);
 
-			//PLYFormat ply;
-			//for (size_t i = 0; i < result.numberOfPoints; i++)
-			//{
-			//	auto& p = result.positions[i];
-			//	if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
+			PLYFormat ply;
+			for (size_t i = 0; i < result.numberOfPoints; i++)
+			{
+				auto& p = result.positions[i];
+				if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
 
-			//	auto& n = result.normals[i];
-			//	auto& c = result.colors[i];
+				auto& n = result.normals[i];
+				auto& c = result.colors[i];
 
-			//	ply.AddPoint(p.x, p.y, p.z);
-			//	ply.AddNormal(n.x, n.y, n.z);
-			//	ply.AddColor(c.x, c.y, c.z);
-			//}
-			//ply.Serialize("../../res/3D/VoxelHashMap.ply");
+				ply.AddPoint(p.x, p.y, p.z);
+				ply.AddNormal(n.x, n.y, n.z);
+				ply.AddColor(c.x, c.y, c.z);
+			}
+			ply.Serialize("../../res/3D/VoxelHashMap.ply");
 
 			result.Terminate();
 			h_pointCloud.Terminate();

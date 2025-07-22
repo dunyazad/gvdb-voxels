@@ -55,6 +55,7 @@ struct VoxelHashMap
 
 	HostPointCloud Serialize();
 	HostPointCloud Serialize_SDF();
+	HostPointCloud Serialize_SDF_Tidy();
 
 	void Dilation(int iterations, int step);
 
@@ -154,6 +155,12 @@ __global__ void Kernel_VoxelHashMap_Serialize(
 	float3* colors);
 
 __global__ void Kernel_VoxelHashMap_Serialize_SDF(
+	VoxelHashMapInfo info,
+	float3* positions,
+	float3* normals,
+	float3* colors);
+
+__global__ void Kernel_VoxelHashMap_Serialize_SDF_Tidy(
 	VoxelHashMapInfo info,
 	float3* positions,
 	float3* normals,

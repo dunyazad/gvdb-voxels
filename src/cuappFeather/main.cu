@@ -48,9 +48,24 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     HostPointCloud result = vhm.Serialize();
     result.CompactValidPoints();
 #else
-    vhm.Occupy_SDF(d_input, 4);
+    vhm.Occupy_SDF(d_input, 5);
 
     //vhm.Dilation(3, 1);
+
+    auto hpcd = vhm.Serialize_SDF_Tidy();
+
+    PLYFormat plyVoxel;
+    for (size_t i = 0; i < hpcd.numberOfPoints; i++)
+    {
+        auto& p = hpcd.positions[i];
+        if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
+        auto& n = hpcd.normals[i];
+        auto& c = hpcd.colors[i];
+
+        plyVoxel.AddCube(p.x, p.y, p.z, n.x, n.y, n.z, c.x, c.y, c.z, 1.0f, 0.2f);
+    }
+    plyVoxel.Serialize("../../res/3D/VoxelHashMapVoxel.ply");
+
     
     vector<float3> vertices;
     vector<float3> normals;
@@ -84,8 +99,8 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     //vhm.SmoothSDF(3);
     //vhm.FilterOppositeNormals();
     //vhm.FilterByNormalGradient(0.1f, false);
-    HostPointCloud result = vhm.Serialize();
-    //result.CompactValidPoints();
+    HostPointCloud result = vhm.Serialize_SDF();
+    result.CompactValidPoints();
 #endif
     
     d_input.Terminate();
