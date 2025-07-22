@@ -95,7 +95,8 @@ struct VoxelHashMap
 
 	__device__ static Voxel* GetVoxel(VoxelHashMapInfo& info, const int3& index);
 
-	__device__ static bool isZeroCrossing(VoxelHashMapInfo& info, int3 index, float sdfCenter);
+	__device__ static Voxel* InsertVoxel(
+		VoxelHashMapInfo& info, const int3& index, float sdf, float3 normal, float3 color);
 
 	__device__ static bool computeInterpolatedSurfacePoint_6(
 		VoxelHashMapInfo& info,

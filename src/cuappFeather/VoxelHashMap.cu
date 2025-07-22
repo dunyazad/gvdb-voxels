@@ -96,7 +96,7 @@ void VoxelHashMap::Occupy_SDF(float3* d_positions, float3* d_normals, float3* d_
 void VoxelHashMap::Occupy_SDF(const DevicePointCloud& d_input, int offset)
 {
 	CUDA_TS(Occupy_SDF)
-		int count = (offset * 2 + 1) * (offset * 2 + 1) * (offset * 2 + 1);
+	int count = (offset * 2 + 1) * (offset * 2 + 1) * (offset * 2 + 1);
 
 	CheckOccupiedIndicesLength(d_input.numberOfPoints * count);
 	LaunchKernel(Kernel_VoxelHashMap_Occupy_SDF, d_input.numberOfPoints, info, d_input.positions, d_input.normals, d_input.colors, d_input.numberOfPoints, offset);
@@ -433,30 +433,52 @@ __device__ Voxel* VoxelHashMap::GetVoxel(VoxelHashMapInfo& info, const int3& ind
 	return nullptr;
 }
 
-__device__ bool VoxelHashMap::isZeroCrossing(VoxelHashMapInfo& info, int3 index, float sdfCenter)
+__device__ Voxel* VoxelHashMap::InsertVoxel(
+	VoxelHashMapInfo& info, const int3& index, float sdf, float3 normal, float3 color)
 {
-	const int3 dirs[6] = {
-		make_int3(1, 0, 0), make_int3(-1, 0, 0),
-		make_int3(0, 1, 0), make_int3(0, -1, 0),
-		make_int3(0, 0, 1), make_int3(0, 0, -1),
-	};
+	VoxelKey key = VoxelHashMap::IndexToVoxelKey(index);
+	size_t hashIdx = VoxelHashMap::hash(key, info.capacity);
 
-	for (int i = 0; i < 6; ++i)
+	for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 	{
-		int3 neighbor = index + dirs[i];
-		auto neighborVoxel = GetVoxel(info, neighbor);
-		if (nullptr != neighborVoxel)
+		size_t slot = (hashIdx + probe) % info.capacity;
+		VoxelHashEntry* entry = &info.entries[slot];
+
+		VoxelKey old = atomicCAS(
+			reinterpret_cast<unsigned long long*>(&entry->key),
+			EMPTY_KEY, key);
+
+		if (old == EMPTY_KEY || old == key)
 		{
-			float sdfNeighbor = neighborVoxel->sdfSum / (float)max(1u, neighborVoxel->count);
-			if ((sdfCenter > 0 && sdfNeighbor < 0) || (sdfCenter < 0 && sdfNeighbor > 0))
+			float prev = atomicCAS(reinterpret_cast<int*>(&entry->voxel.sdfSum),
+				__float_as_int(FLT_MAX),
+				__float_as_int(sdf));
+
+			if (__int_as_float(prev) != FLT_MAX)
 			{
-				return true;
+				atomicAdd(&entry->voxel.sdfSum, sdf);
 			}
-			break;
+			atomicAdd(&entry->voxel.normalSum.x, normal.x);
+			atomicAdd(&entry->voxel.normalSum.y, normal.y);
+			atomicAdd(&entry->voxel.normalSum.z, normal.z);
+
+			atomicAdd(&entry->voxel.colorSum.x, color.x);
+			atomicAdd(&entry->voxel.colorSum.y, color.y);
+			atomicAdd(&entry->voxel.colorSum.z, color.z);
+
+			unsigned int count = atomicAdd(&entry->voxel.count, 1u);
+			if (count == 0)
+			{
+				unsigned int occIdx = atomicAdd(info.d_numberOfOccupiedVoxels, 1u);
+				if (occIdx < info.h_occupiedCapacity)
+					info.d_occupiedVoxelIndices[occIdx] = index;
+			}
+
+			entry->voxel.coordinate = index;
+			return &entry->voxel;
 		}
 	}
-
-	return false;
+	return nullptr;
 }
 
 __device__ bool VoxelHashMap::computeInterpolatedSurfacePoint_6(
@@ -821,58 +843,16 @@ __global__ void Kernel_VoxelHashMap_Occupy_SDF(
 			for (int dx = -offset; dx <= offset; ++dx)
 			{
 				int3 index = make_int3(baseIndex.x + dx, baseIndex.y + dy, baseIndex.z + dz);
-				VoxelKey key = VoxelHashMap::IndexToVoxelKey(index);
 				float3 center = VoxelHashMap::IndexToPosition(index, info.voxelSize);
 
 				float3 dir = center - p;
 				float dist = length(dir);
-				if (dist < 1e-6f) continue;
+				if ((dist < 1e-6f) || (info.voxelSize * (float)offset < dist)) continue;
 
 				float sign = (dot(n, dir) >= 0.0f) ? 1.0f : -1.0f;
 				float sdf = dist * sign;
 
-				size_t h = VoxelHashMap::hash(key, info.capacity);
-
-				for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
-				{
-					size_t slot = (h + probe) % info.capacity;
-					VoxelHashEntry* entry = &info.entries[slot];
-
-					VoxelKey old = atomicCAS(reinterpret_cast<VoxelKey*>(&entry->key), EMPTY_KEY, key);
-
-					if (old == EMPTY_KEY || old == key)
-					{
-						float prev = atomicCAS(reinterpret_cast<int*>(&entry->voxel.sdfSum),
-							__float_as_int(FLT_MAX),
-							__float_as_int(sdf));
-
-						if (__int_as_float(prev) != FLT_MAX)
-						{
-							atomicAdd(&entry->voxel.sdfSum, sdf);
-						}
-						atomicAdd(&entry->voxel.normalSum.x, n.x);
-						atomicAdd(&entry->voxel.normalSum.y, n.y);
-						atomicAdd(&entry->voxel.normalSum.z, n.z);
-
-						atomicAdd(&entry->voxel.colorSum.x, c.x);
-						atomicAdd(&entry->voxel.colorSum.y, c.y);
-						atomicAdd(&entry->voxel.colorSum.z, c.z);
-
-						if (atomicCAS(&entry->voxel.count, 0u, 1u) == 0u)
-						{
-							unsigned int occindex = atomicAdd(info.d_numberOfOccupiedVoxels, 1);
-							if (occindex < info.h_occupiedCapacity)
-								info.d_occupiedVoxelIndices[occindex] = index;
-						}
-						else
-						{
-							atomicAdd(&entry->voxel.count, 1u);
-						}
-
-						entry->voxel.coordinate = index;
-						break;
-					}
-				}
+				VoxelHashMap::InsertVoxel(info, index, sdf, n, c);
 			}
 		}
 	}
@@ -934,13 +914,13 @@ __global__ void Kernel_VoxelHashMap_Serialize_SDF(
 	float3 pos, normal, color;
 	bool valid = VoxelHashMap::computeInterpolatedSurfacePoint_26(info, voxelIndex, sdf, pos, normal, color);
 
-	if (!valid)
-	{
-		d_positions[tid] = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
-		d_normals[tid] = make_float3(0, 0, 0);
-		d_colors[tid] = make_float3(0, 0, 0);
-		return;
-	}
+	//if (!valid)
+	//{
+	//	d_positions[tid] = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+	//	d_normals[tid] = make_float3(0, 0, 0);
+	//	d_colors[tid] = make_float3(0, 0, 0);
+	//	return;
+	//}
 
 	d_positions[tid] = pos;
 	d_normals[tid] = normal;
@@ -954,31 +934,44 @@ __global__ void Kernel_VoxelHashMap_Serialize_SDF_Tidy(
 	float3* d_colors)
 {
 	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
-	if (tid >= *info.d_numberOfOccupiedVoxels) return;
+	if (tid >= *info.d_numberOfOccupiedVoxels)
+	{
+		return;
+	}
 
 	int3 voxelIndex = info.d_occupiedVoxelIndices[tid];
-	auto voxel = VoxelHashMap::GetVoxel(info, voxelIndex);
-	if (!voxel || voxel->count == 0) return;
+	Voxel* voxel = VoxelHashMap::GetVoxel(info, voxelIndex);
+	if (!voxel || voxel->count == 0)
+	{
+		return;
+	}
 
 	float sdf = voxel->sdfSum / (float)max(1u, voxel->count);
 
+	// Zero-crossing detection
 	bool zeroCrossing = false;
+	const float zeroCrossingThreshold = info.voxelSize;
+
 	for (int dz = -1; dz <= 1; ++dz)
 	{
 		for (int dy = -1; dy <= 1; ++dy)
 		{
 			for (int dx = -1; dx <= 1; ++dx)
 			{
-				if (dx == 0 && dy == 0 && dz == 0) continue;
+				if (dx == 0 && dy == 0 && dz == 0)
+				{
+					continue;
+				}
 				int3 neighborIndex = voxelIndex + make_int3(dx, dy, dz);
 				Voxel* nvoxel = VoxelHashMap::GetVoxel(info, neighborIndex);
 				if (nvoxel && nvoxel->count > 0)
 				{
 					float nsdf = nvoxel->sdfSum / (float)max(1u, nvoxel->count);
-					if ((0 > sdf && 0 < nsdf) || (0 < sdf && 0 > nsdf))
+					// Detect sign change
+					if ((sdf < 0.0f && nsdf > 0.0f) || (sdf > 0.0f && nsdf < 0.0f))
 					{
-						auto diff = sdf + nsdf;
-						if (info.voxelSize * 0.5f > diff)
+						float diff = fabsf(sdf - nsdf);
+						if (diff < zeroCrossingThreshold)
 						{
 							zeroCrossing = true;
 						}
@@ -988,17 +981,33 @@ __global__ void Kernel_VoxelHashMap_Serialize_SDF_Tidy(
 		}
 	}
 
-	if (!zeroCrossing)
-	{
-		d_positions[tid] = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
-		d_normals[tid] = make_float3(0, 0, 0);
-		d_colors[tid] = make_float3(0, 0, 0);
-		return;
-	}
+	//if (!zeroCrossing)
+	//{
+	//	d_positions[tid] = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+	//	d_normals[tid] = make_float3(0, 0, 0);
+	//	d_colors[tid] = make_float3(0, 0, 0);
+	//	return;
+	//}
 
 	d_positions[tid] = VoxelHashMap::IndexToPosition(voxelIndex, info.voxelSize);
 	d_normals[tid] = voxel->normalSum / (float)max(1u, voxel->count);
-	d_colors[tid] = voxel->colorSum / (float)max(1u, voxel->count);
+	//d_colors[tid] = voxel->colorSum / (float)max(1u, voxel->count);
+
+	if (zeroCrossing)
+	{
+		d_colors[tid] = voxel->colorSum / (float)max(1u, voxel->count);
+	}
+	else
+	{
+		if (sdf < 0)
+		{
+			d_colors[tid] = make_float3(1.0f, 0.0f, 0.0f);
+		}
+		else if (sdf > 0)
+		{
+			d_colors[tid] = make_float3(0.0f, 1.0f, 0.0f);
+		}
+	}
 }
 
 __global__ void Kernel_VoxelHashMap_FindOverlap(VoxelHashMapInfo info, int step, bool remove)
