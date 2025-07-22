@@ -977,8 +977,11 @@ __global__ void Kernel_VoxelHashMap_Serialize_SDF_Tidy(
 						}
 					}
 				}
+				if (zeroCrossing) break;
 			}
+			if (zeroCrossing) break;
 		}
+		if (zeroCrossing) break;
 	}
 
 	//if (!zeroCrossing)
@@ -989,13 +992,15 @@ __global__ void Kernel_VoxelHashMap_Serialize_SDF_Tidy(
 	//	return;
 	//}
 
-	d_positions[tid] = VoxelHashMap::IndexToPosition(voxelIndex, info.voxelSize);
-	d_normals[tid] = voxel->normalSum / (float)max(1u, voxel->count);
+	//d_positions[tid] = VoxelHashMap::IndexToPosition(voxelIndex, info.voxelSize);
+	//d_normals[tid] = voxel->normalSum / (float)max(1u, voxel->count);
 	//d_colors[tid] = voxel->colorSum / (float)max(1u, voxel->count);
 
 	if (zeroCrossing)
 	{
 		d_colors[tid] = voxel->colorSum / (float)max(1u, voxel->count);
+		d_positions[tid] = VoxelHashMap::IndexToPosition(voxelIndex, info.voxelSize);
+		d_normals[tid] = voxel->normalSum / (float)max(1u, voxel->count);
 	}
 	else
 	{

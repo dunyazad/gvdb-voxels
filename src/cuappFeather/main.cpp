@@ -134,7 +134,8 @@ bool ForceGPUPerformance()
 //}
 #pragma endregion
 
-const string resource_file_name = "0_Initial_Noise";
+const string resource_file_name = "0_Initial";
+//const string resource_file_name = "0_Initial_Noise";
 //const string resource_file_name = "Compound_Full";
 //const string resource_file_name = "Bridge";
 //const string resource_file_name = "Reintegrate";

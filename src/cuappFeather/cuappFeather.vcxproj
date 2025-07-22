@@ -17,6 +17,7 @@
   <ItemGroup>
     <CudaCompile Include="main.cu" />
     <CudaCompile Include="PointCloud.cu" />
+    <CudaCompile Include="SCVoxelHashMap.cu" />
     <CudaCompile Include="VoxelHashMap.cu" />
   </ItemGroup>
   <ItemGroup>
@@ -29,6 +30,7 @@
     <ClInclude Include="marching_cubes_constants.cuh" />
     <ClInclude Include="Octree.cuh" />
     <ClInclude Include="PointCloud.cuh" />
+    <ClInclude Include="SCVoxelHashMap.cuh" />
     <ClInclude Include="TSDF.hpp" />
     <ClInclude Include="VoxelHashMap.cuh" />
   </ItemGroup>

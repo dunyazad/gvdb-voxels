@@ -4,6 +4,7 @@
     <CudaCompile Include="main.cu" />
     <CudaCompile Include="PointCloud.cu" />
     <CudaCompile Include="VoxelHashMap.cu" />
+    <CudaCompile Include="SCVoxelHashMap.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\External\glad\src\glad.c" />
@@ -21,6 +22,7 @@
     <ClInclude Include="cuda_common.cuh" />
     <ClInclude Include="Octree.cuh" />
     <ClInclude Include="PointCloud.cuh" />
+    <ClInclude Include="SCVoxelHashMap.cuh" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HashMap.hpp" />
