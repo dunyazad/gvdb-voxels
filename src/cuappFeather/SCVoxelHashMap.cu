@@ -115,7 +115,7 @@ HostPointCloud SCVoxelHashMap::Serialize()
 	return h_result;
 }
 
-HostMesh SCVoxelHashMap::MarchingCubes()
+HostMesh SCVoxelHashMap::MarchingCubes(float isoValue)
 {
 	HostMesh h_result;
 	if (info.h_numberOfOccupiedVoxels == 0) return h_result;
@@ -143,13 +143,13 @@ HostMesh SCVoxelHashMap::MarchingCubes()
 	uint3* d_faces = nullptr;
 	unsigned int* d_numberOfFaces = nullptr;
 
-	cudaMalloc(&d_faces, sizeof(uint3) * info.h_numberOfOccupiedVoxels * 3 * 4);
+	cudaMalloc(&d_faces, sizeof(uint3) * info.h_numberOfOccupiedVoxels * 3 * 5);
 	cudaMalloc(&d_numberOfFaces, sizeof(unsigned int));
 	cudaMemset(d_numberOfFaces, 0, sizeof(unsigned int));
 	CUDA_SYNC();
 
 	LaunchKernel(Kernel_SCVoxelHashMap_MarchingCubes, info.h_numberOfOccupiedVoxels,
-		info, d_faces, d_numberOfFaces);
+		info, isoValue, d_faces, d_numberOfFaces);
 	CUDA_SYNC();
 
 	unsigned int h_numberOfFaces = 0;
@@ -333,6 +333,7 @@ __global__ void Kernel_SCVoxelHashMap_Clear(SCVoxelHashMapInfo info)
 
 	info.entries[idx].key = EMPTY_KEY;
 	info.entries[idx].voxel = {};
+	info.entries[idx].voxel.zeroCrossingPointIndex = make_uint3(UINT32_MAX);
 }
 
 __global__ void Kernel_SCVoxelHashMap_Occupy(
@@ -396,68 +397,6 @@ __device__ bool SCVoxelHashMap::CheckZeroCrossing(SCVoxelHashMapInfo& info,
 	outColor = oc + ratio * (nc - oc);
 
 	return true;
-}
-
-__global__ void Kernel_SCVoxelHashMap_Serialize(
-	SCVoxelHashMapInfo info,
-	float3* d_positions,
-	float3* d_normals,
-	float3* d_colors)
-{
-	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
-	if (tid >= *info.d_numberOfOccupiedVoxels) return;
-
-	int3 voxelIndex = info.d_occupiedVoxelIndices[tid];
-	auto voxel = SCVoxelHashMap::GetVoxel(info, voxelIndex);
-	if (!voxel || voxel->count == 0) return;
-
-	float sdf = voxel->sdfSum / (float)max(1u, voxel->count);
-
-	float3 voxelPosition = SCVoxelHashMap::IndexToPosition(voxelIndex, info.voxelSize);
-	float3 voxelNormal = voxel->normalSum / (float)max(1u, voxel->count);
-	float3 voxelColor = voxel->colorSum / (float)max(1u, voxel->count);
-
-	// X Axis
-	{
-		auto neighborIndex = voxelIndex;
-		neighborIndex.x += 1;
-		if (false == SCVoxelHashMap::CheckZeroCrossing(
-			info, sdf, voxelPosition, voxelNormal, voxelColor, neighborIndex,
-			d_positions[tid * 3 + 0], d_normals[tid * 3 + 0], d_colors[tid * 3 + 0]))
-		{
-			d_positions[tid * 3 + 0] = make_float3(FLT_MAX);
-			d_normals[tid * 3 + 0] = make_float3(FLT_MAX);
-			d_colors[tid * 3 + 0] = make_float3(FLT_MAX);
-		}
-	}
-
-	// Y Axis
-	{
-		auto neighborIndex = voxelIndex;
-		neighborIndex.y += 1;
-		if (false == SCVoxelHashMap::CheckZeroCrossing(
-			info, sdf, voxelPosition, voxelNormal, voxelColor, neighborIndex,
-			d_positions[tid * 3 + 1], d_normals[tid * 3 + 1], d_colors[tid * 3 + 1]))
-		{
-			d_positions[tid * 3 + 1] = make_float3(FLT_MAX);
-			d_normals[tid * 3 + 1] = make_float3(FLT_MAX);
-			d_colors[tid * 3 + 1] = make_float3(FLT_MAX);
-		}
-	}
-
-	// Z Axis
-	{
-		auto neighborIndex = voxelIndex;
-		neighborIndex.z += 1;
-		if (false == SCVoxelHashMap::CheckZeroCrossing(
-			info, sdf, voxelPosition, voxelNormal, voxelColor, neighborIndex,
-			d_positions[tid * 3 + 2], d_normals[tid * 3 + 2], d_colors[tid * 3 + 2]))
-		{
-			d_positions[tid * 3 + 2] = make_float3(FLT_MAX);
-			d_normals[tid * 3 + 2] = make_float3(FLT_MAX);
-			d_colors[tid * 3 + 2] = make_float3(FLT_MAX);
-		}
-	}
 }
 
 __global__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
@@ -538,7 +477,108 @@ __global__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 	}
 }
 
-__global__ void Kernel_SCVoxelHashMap_MarchingCubes(SCVoxelHashMapInfo info, uint3* d_faces, unsigned int* d_numberOfFaces)
+__device__ float SCVoxelHashMap::GetSDFValue(SCVoxelHashMapInfo info, float isoValue, const int3& voxelIndex)
+{
+	auto voxel = SCVoxelHashMap::GetVoxel(info, voxelIndex);
+	if (!voxel || voxel->count == 0) return FLT_MAX;
+	return voxel->sdfSum / (float)max(1u, voxel->count);
+}
+
+__device__ unsigned int SCVoxelHashMap::BuildCubeIndex(SCVoxelHashMapInfo info, float isoValue, const int3& voxelIndex)
+{
+	unsigned int cubeIndex = 0;
+
+	const int3 cornerOffsets[8] =
+	{
+		make_int3(0, 0, 0), // 0
+		make_int3(1, 0, 0), // 1
+		make_int3(1, 1, 0), // 2
+		make_int3(0, 1, 0), // 3
+		make_int3(0, 0, 1), // 4
+		make_int3(1, 0, 1), // 5
+		make_int3(1, 1, 1), // 6
+		make_int3(0, 1, 1)  // 7
+	};
+
+	for (int i = 0; i < 8; ++i)
+	{
+		int3 corner = voxelIndex + cornerOffsets[i];
+		float sdf = GetSDFValue(info, isoValue, corner);
+		if (sdf < isoValue)
+		{
+			cubeIndex |= (1u << i);
+		}
+	}
+	return cubeIndex;
+}
+
+__device__ unsigned int SCVoxelHashMap::GetZeroCrossingIndex(
+	SCVoxelHashMapInfo& info, const int3& baseIndex, const SCVoxel* baseVoxel, int edge)
+{
+	switch (edge)
+	{
+	case 0:  // (0,0,0) - x
+		return baseVoxel->zeroCrossingPointIndex.x;
+	case 1:  // (1,0,0) - y
+	{
+		SCVoxel* v = SCVoxelHashMap::GetVoxel(info, baseIndex + make_int3(1, 0, 0));
+		return v ? v->zeroCrossingPointIndex.y : UINT32_MAX;
+	}
+	case 2:  // (0,1,0) - x
+	{
+		SCVoxel* v = SCVoxelHashMap::GetVoxel(info, baseIndex + make_int3(0, 1, 0));
+		return v ? v->zeroCrossingPointIndex.x : UINT32_MAX;
+	}
+	case 3:  // (0,0,0) - y
+	{
+		return baseVoxel->zeroCrossingPointIndex.y;
+	}
+	case 4:  // (0,0,1) - x
+	{
+		SCVoxel* v = SCVoxelHashMap::GetVoxel(info, baseIndex + make_int3(0, 0, 1));
+		return v ? v->zeroCrossingPointIndex.x : UINT32_MAX;
+	}
+	case 5:  // (1,0,1) - y
+	{
+		SCVoxel* v = SCVoxelHashMap::GetVoxel(info, baseIndex + make_int3(1, 0, 1));
+		return v ? v->zeroCrossingPointIndex.y : UINT32_MAX;
+	}
+	case 6:  // (0,1,1) - x
+	{
+		SCVoxel* v = SCVoxelHashMap::GetVoxel(info, baseIndex + make_int3(0, 1, 1));
+		return v ? v->zeroCrossingPointIndex.x : UINT32_MAX;
+	}
+	case 7:  // (0,0,1) - y
+	{
+		SCVoxel* v = SCVoxelHashMap::GetVoxel(info, baseIndex + make_int3(0, 0, 1));
+		return v ? v->zeroCrossingPointIndex.y : UINT32_MAX;
+	}
+	case 8:  // (0,0,0) - z
+	{
+		return baseVoxel->zeroCrossingPointIndex.z;
+	}
+	case 9:  // (1,0,0) - z
+	{
+		SCVoxel* v = SCVoxelHashMap::GetVoxel(info, baseIndex + make_int3(1, 0, 0));
+		return v ? v->zeroCrossingPointIndex.z : UINT32_MAX;
+	}
+	case 10: // (1,1,0) - z
+	{
+		SCVoxel* v = SCVoxelHashMap::GetVoxel(info, baseIndex + make_int3(1, 1, 0));
+		return v ? v->zeroCrossingPointIndex.z : UINT32_MAX;
+	}
+	case 11: // (0,1,0) - z
+	{
+		SCVoxel* v = SCVoxelHashMap::GetVoxel(info, baseIndex + make_int3(0, 1, 0));
+		return v ? v->zeroCrossingPointIndex.z : UINT32_MAX;
+	}
+	default:
+		return UINT32_MAX;
+	}
+}
+
+__global__ void Kernel_SCVoxelHashMap_MarchingCubes(
+	SCVoxelHashMapInfo info, float isoValue, uint3* d_faces, unsigned int* d_numberOfFaces)
 {
 	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
 	if (tid >= *info.d_numberOfOccupiedVoxels) return;
@@ -547,11 +587,37 @@ __global__ void Kernel_SCVoxelHashMap_MarchingCubes(SCVoxelHashMapInfo info, uin
 	auto voxel = SCVoxelHashMap::GetVoxel(info, voxelIndex);
 	if (!voxel || voxel->count == 0) return;
 
-	if (UINT32_MAX != voxel->zeroCrossingPointIndex.x &&
-		UINT32_MAX != voxel->zeroCrossingPointIndex.y &&
-		UINT32_MAX != voxel->zeroCrossingPointIndex.z)
+	auto cubeIndex = SCVoxelHashMap::BuildCubeIndex(info, isoValue, voxelIndex);
+
+	for (int i = 0; MC_TRI_TABLE[cubeIndex][i] != -1; i += 3)
 	{
-		auto index = atomicAdd(d_numberOfFaces, 1u);
-		d_faces[index] = voxel->zeroCrossingPointIndex;
+		int e0 = MC_TRI_TABLE[cubeIndex][i + 0];
+		int e1 = MC_TRI_TABLE[cubeIndex][i + 1];
+		int e2 = MC_TRI_TABLE[cubeIndex][i + 2];
+
+		unsigned int v0 = SCVoxelHashMap::GetZeroCrossingIndex(info, voxelIndex, voxel, e0);
+		unsigned int v1 = SCVoxelHashMap::GetZeroCrossingIndex(info, voxelIndex, voxel, e1);
+		unsigned int v2 = SCVoxelHashMap::GetZeroCrossingIndex(info, voxelIndex, voxel, e2);
+
+		if (v0 == UINT32_MAX || v1 == UINT32_MAX || v2 == UINT32_MAX)
+		{
+			printf("Triangle dropped: e0=%d e1=%d e2=%d, v0=%u v1=%u v2=%u, base=(%d,%d,%d)\n",
+				e0, e1, e2, v0, v1, v2, voxelIndex.x, voxelIndex.y, voxelIndex.z);
+		}
+
+		if (v0 != UINT32_MAX && v1 != UINT32_MAX && v2 != UINT32_MAX)
+		{
+			unsigned int fidx = atomicAdd(d_numberOfFaces, 1u);
+			d_faces[fidx] = make_uint3(v0, v2, v1);
+		}
 	}
+
+
+	//if (UINT32_MAX != voxel->zeroCrossingPointIndex.x &&
+	//	UINT32_MAX != voxel->zeroCrossingPointIndex.y &&
+	//	UINT32_MAX != voxel->zeroCrossingPointIndex.z)
+	//{
+	//	auto index = atomicAdd(d_numberOfFaces, 1u);
+	//	d_faces[index] = voxel->zeroCrossingPointIndex;
+	//}
 }

@@ -120,7 +120,7 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     SCVoxelHashMap vhm;
     vhm.Initialize(0.1f, d_input.numberOfPoints * 8, 32);
 
-    vhm.Occupy(d_input);
+    vhm.Occupy(d_input, 3);
     
     HostPointCloud result = vhm.Serialize();
     //result.CompactValidPoints();

@@ -52,7 +52,7 @@ struct SCVoxelHashMap
 
 	HostPointCloud Serialize();
 
-	HostMesh MarchingCubes();
+	HostMesh MarchingCubes(float isoValue = 0.0f);
 
 	__host__ __device__ static uint64_t expandBits(uint32_t v);
 	__host__ __device__ static uint32_t compactBits(uint64_t x);
@@ -71,6 +71,13 @@ struct SCVoxelHashMap
 	__device__ static bool CheckZeroCrossing(SCVoxelHashMapInfo& info,
 		float osdf, const float3& op, const float3& on, const float3& oc,
 		const int3& index, float3& outPosition, float3& outNormal, float3& outColor);
+
+	__device__ static float GetSDFValue(SCVoxelHashMapInfo info, float isoValue, const int3& voxelIndex);
+
+	__device__ static unsigned int BuildCubeIndex(SCVoxelHashMapInfo info, float isoValue, const int3& voxelIndex);
+
+	__device__ static unsigned int GetZeroCrossingIndex(
+		SCVoxelHashMapInfo& info,const int3& baseIndex, const SCVoxel* baseVoxel, int edge);
 };
 
 
@@ -83,12 +90,11 @@ __global__ void Kernel_SCVoxelHashMap_Occupy(
 	float3* d_colors,
 	unsigned int numberOfPoints,
 	int offset);
-__global__ void Kernel_SCVoxelHashMap_Serialize(
-	SCVoxelHashMapInfo info, float3* positions, float3* normals, float3* colors);
 __global__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 	SCVoxelHashMapInfo info,
 	float3* d_positions,
 	float3* d_normals,
 	float3* d_colors,
 	unsigned int* d_numberOfPoints);
-__global__ void Kernel_SCVoxelHashMap_MarchingCubes(SCVoxelHashMapInfo info, uint3* d_faces, unsigned int* d_numberOfFaces);
+__global__ void Kernel_SCVoxelHashMap_MarchingCubes(
+	SCVoxelHashMapInfo info, float isoValue, uint3* d_faces, unsigned int* d_numberOfFaces);
