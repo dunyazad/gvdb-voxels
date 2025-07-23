@@ -118,12 +118,12 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     DevicePointCloud d_input(h_input);
 
     SCVoxelHashMap vhm;
-    vhm.Initialize(0.3f, d_input.numberOfPoints * 8, 32);
+    vhm.Initialize(0.1f, d_input.numberOfPoints * 8, 32);
 
     vhm.Occupy(d_input);
     
     HostPointCloud result = vhm.Serialize();
-    result.CompactValidPoints();
+    //result.CompactValidPoints();
 
     //PLYFormat plyVoxel;
     //for (size_t i = 0; i < hpcd.numberOfPoints; i++)
@@ -136,6 +136,28 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     //    plyVoxel.AddCube(p.x, p.y, p.z, n.x, n.y, n.z, c.x, c.y, c.z, 1.0f, 0.2f);
     //}
     //plyVoxel.Serialize("../../res/3D/VoxelHashMapVoxel.ply");
+
+    HostMesh mesh = vhm.MarchingCubes();
+
+    PLYFormat plyMesh;
+    for (size_t i = 0; i < mesh.numberOfPoints; i++)
+    {
+        auto& p = mesh.positions[i];
+        if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
+        auto& n = mesh.normals[i];
+        auto& c = mesh.colors[i];
+
+        plyMesh.AddPoint(p.x, p.y, p.z);
+        plyMesh.AddNormal(n.x, n.y, n.z);
+        plyMesh.AddColor(c.x, c.y, c.z);
+    }
+    for (size_t i = 0; i < mesh.numberOfFaces; i++)
+    {
+        auto& index = mesh.faces[i];
+
+        plyMesh.AddFace(index.x, index.y, index.z);
+    }
+    plyMesh.Serialize("../../res/3D/MarchingCubes_TempMesh.ply");
 
     d_input.Terminate();
 

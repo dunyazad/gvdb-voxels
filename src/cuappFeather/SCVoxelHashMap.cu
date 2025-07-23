@@ -104,6 +104,8 @@ HostPointCloud SCVoxelHashMap::Serialize()
 
 	h_result.Intialize(h_numberOfPoints);
 	CUDA_COPY_D2H(h_result.positions, d_positions, sizeof(float3) * h_numberOfPoints);
+	CUDA_COPY_D2H(h_result.normals, d_normals, sizeof(float3) * h_numberOfPoints);
+	CUDA_COPY_D2H(h_result.colors, d_colors, sizeof(float3) * h_numberOfPoints);
 
 	cudaFree(d_positions);
 	cudaFree(d_normals);
@@ -115,15 +117,59 @@ HostPointCloud SCVoxelHashMap::Serialize()
 
 HostMesh SCVoxelHashMap::MarchingCubes()
 {
-	DeviceMesh d_result;
-	if (info.h_numberOfOccupiedVoxels == 0) return d_result;
+	HostMesh h_result;
+	if (info.h_numberOfOccupiedVoxels == 0) return h_result;
 
-	d_result.Intialize(info.h_numberOfOccupiedVoxels * 3 * 4, info.h_numberOfOccupiedVoxels * 4);
+	float3* d_positions = nullptr;
+	float3* d_normals = nullptr;
+	float3* d_colors = nullptr;
+	unsigned int* d_numberOfPoints = nullptr;
 
+	cudaMalloc(&d_positions, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
+	cudaMalloc(&d_normals, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
+	cudaMalloc(&d_colors, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
+	cudaMalloc(&d_numberOfPoints, sizeof(unsigned int));
+	cudaMemset(d_numberOfPoints, 0, sizeof(unsigned int));
+	CUDA_SYNC();
 
+	LaunchKernel(Kernel_SCVoxelHashMap_CreateZeroCrossingPoints, info.h_numberOfOccupiedVoxels,
+		info, d_positions, d_normals, d_colors, d_numberOfPoints);
+	CUDA_SYNC();
 
-	HostMesh h_result(d_result);
-	d_result.Terminate();
+	unsigned int h_numberOfPoints = 0;
+	CUDA_COPY_D2H(&h_numberOfPoints, d_numberOfPoints, sizeof(unsigned int));
+	CUDA_SYNC();
+
+	uint3* d_faces = nullptr;
+	unsigned int* d_numberOfFaces = nullptr;
+
+	cudaMalloc(&d_faces, sizeof(uint3) * info.h_numberOfOccupiedVoxels * 3 * 4);
+	cudaMalloc(&d_numberOfFaces, sizeof(unsigned int));
+	cudaMemset(d_numberOfFaces, 0, sizeof(unsigned int));
+	CUDA_SYNC();
+
+	LaunchKernel(Kernel_SCVoxelHashMap_MarchingCubes, info.h_numberOfOccupiedVoxels,
+		info, d_faces, d_numberOfFaces);
+	CUDA_SYNC();
+
+	unsigned int h_numberOfFaces = 0;
+	CUDA_COPY_D2H(&h_numberOfFaces, d_numberOfFaces, sizeof(unsigned int));
+	CUDA_SYNC();
+
+	h_result.Intialize(h_numberOfPoints, h_numberOfFaces);
+	CUDA_COPY_D2H(h_result.positions, d_positions, sizeof(float3) * h_numberOfPoints);
+	CUDA_COPY_D2H(h_result.normals, d_normals, sizeof(float3) * h_numberOfPoints);
+	CUDA_COPY_D2H(h_result.colors, d_colors, sizeof(float3) * h_numberOfPoints);
+	CUDA_COPY_D2H(h_result.faces, d_faces, sizeof(float3) * h_numberOfFaces);
+	CUDA_SYNC();
+
+	cudaFree(d_positions);
+	cudaFree(d_normals);
+	cudaFree(d_colors);
+	cudaFree(d_numberOfPoints);
+
+	cudaFree(d_faces);
+	cudaFree(d_numberOfFaces);
 
 	return h_result;
 }
@@ -449,6 +495,7 @@ __global__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 			d_positions[index] = position;
 			d_normals[index] = normal;
 			d_colors[index] = color;
+			voxel->zeroCrossingPointIndex.x = index;
 		}
 	}
 
@@ -467,6 +514,7 @@ __global__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 			d_positions[index] = position;
 			d_normals[index] = normal;
 			d_colors[index] = color;
+			voxel->zeroCrossingPointIndex.y = index;
 		}
 	}
 
@@ -485,6 +533,25 @@ __global__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 			d_positions[index] = position;
 			d_normals[index] = normal;
 			d_colors[index] = color;
+			voxel->zeroCrossingPointIndex.z = index;
 		}
+	}
+}
+
+__global__ void Kernel_SCVoxelHashMap_MarchingCubes(SCVoxelHashMapInfo info, uint3* d_faces, unsigned int* d_numberOfFaces)
+{
+	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+	if (tid >= *info.d_numberOfOccupiedVoxels) return;
+
+	int3 voxelIndex = info.d_occupiedVoxelIndices[tid];
+	auto voxel = SCVoxelHashMap::GetVoxel(info, voxelIndex);
+	if (!voxel || voxel->count == 0) return;
+
+	if (UINT32_MAX != voxel->zeroCrossingPointIndex.x &&
+		UINT32_MAX != voxel->zeroCrossingPointIndex.y &&
+		UINT32_MAX != voxel->zeroCrossingPointIndex.z)
+	{
+		auto index = atomicAdd(d_numberOfFaces, 1u);
+		d_faces[index] = voxel->zeroCrossingPointIndex;
 	}
 }

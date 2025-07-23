@@ -91,3 +91,4 @@ __global__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 	float3* d_normals,
 	float3* d_colors,
 	unsigned int* d_numberOfPoints);
+__global__ void Kernel_SCVoxelHashMap_MarchingCubes(SCVoxelHashMapInfo info, uint3* d_faces, unsigned int* d_numberOfFaces);
