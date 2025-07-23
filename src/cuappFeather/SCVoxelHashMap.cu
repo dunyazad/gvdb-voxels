@@ -160,7 +160,7 @@ HostMesh SCVoxelHashMap::MarchingCubes(float isoValue)
 	CUDA_COPY_D2H(h_result.positions, d_positions, sizeof(float3) * h_numberOfPoints);
 	CUDA_COPY_D2H(h_result.normals, d_normals, sizeof(float3) * h_numberOfPoints);
 	CUDA_COPY_D2H(h_result.colors, d_colors, sizeof(float3) * h_numberOfPoints);
-	CUDA_COPY_D2H(h_result.faces, d_faces, sizeof(float3) * h_numberOfFaces);
+	CUDA_COPY_D2H(h_result.faces, d_faces, sizeof(uint3) * h_numberOfFaces);
 	CUDA_SYNC();
 
 	cudaFree(d_positions);
