@@ -119,7 +119,7 @@ struct BitVolume
         const int blocks = (numPoints + threads - 1) / threads;
 
         Kernel_OccupyFromPoints << <blocks, threads >> > (info, d_points, numPoints);
-        cudaDeviceSynchronize();  // 필요시
+        CUDA_SYNC();  // 필요시
     }
 
     void OccupyFromEigenPoints(float3 volumeMin, const Eigen::Vector3f* d_points, int numPoints)
@@ -129,7 +129,7 @@ struct BitVolume
         const int threads = 256;
         const int blocks = (numPoints + threads - 1) / threads;
         Kernel_OccupyFromEigenPoints << <blocks, threads >> > (info, d_points, numPoints);
-        cudaDeviceSynchronize();
+        CUDA_SYNC();
     }
 
     void SerializeToFloat3(float3* d_output, unsigned int* d_outputCount)
@@ -140,7 +140,7 @@ struct BitVolume
         cudaMemset(d_outputCount, 0, sizeof(unsigned int));
 
         Kernel_SerializeToFloat3 << <blocks, threads >> > (info, d_output, d_outputCount);
-        cudaDeviceSynchronize();  // optional
+        CUDA_SYNC();  // optional
     }
 
     __device__ static float getVoxelCornerValue(const BitVolumeInfo& info, dim3 base, int dx, int dy, int dz)
@@ -218,14 +218,14 @@ struct BitVolume
         CUDA_TE(MarchingCubes);
 
         unsigned int vertexCount = 0, faceCount = 0;
-        cudaMemcpy(&vertexCount, d_vCount, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-        cudaMemcpy(&faceCount, d_fCount, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+        CUDA_COPY_D2H(&vertexCount, d_vCount, sizeof(unsigned int));
+        CUDA_COPY_D2H(&faceCount, d_fCount, sizeof(unsigned int));
 
         vertices.resize(vertexCount);
         faces.resize(faceCount);
 
-        cudaMemcpy(vertices.data(), d_vertices, vertexCount * sizeof(float3), cudaMemcpyDeviceToHost);
-        cudaMemcpy(faces.data(), d_faces, faceCount * sizeof(int3), cudaMemcpyDeviceToHost);
+        CUDA_COPY_D2H(vertices.data(), d_vertices, vertexCount * sizeof(float3));
+        CUDA_COPY_D2H(faces.data(), d_faces, faceCount * sizeof(int3));
 
         cudaFree(d_vertices);
         cudaFree(d_faces);

@@ -14,9 +14,9 @@ HostPointCloud& HostPointCloud::operator=(const DevicePointCloud& other)
 	Terminate();
 	Intialize(other.numberOfPoints);
 
-	cudaMemcpy(positions, other.positions, sizeof(float3) * other.numberOfPoints, cudaMemcpyDeviceToHost);
-	cudaMemcpy(normals, other.normals, sizeof(float3) * other.numberOfPoints, cudaMemcpyDeviceToHost);
-	cudaMemcpy(colors, other.colors, sizeof(float3) * other.numberOfPoints, cudaMemcpyDeviceToHost);
+	CUDA_COPY_D2H(positions, other.positions, sizeof(float3) * other.numberOfPoints);
+	CUDA_COPY_D2H(normals, other.normals, sizeof(float3) * other.numberOfPoints);
+	CUDA_COPY_D2H(colors, other.colors, sizeof(float3) * other.numberOfPoints);
 
 	return *this;
 }
@@ -83,10 +83,10 @@ DevicePointCloud& DevicePointCloud::operator=(const HostPointCloud& other)
 	Terminate();
 	Intialize(other.numberOfPoints);
 
-	cudaMemcpy(positions, other.positions, sizeof(float3) * other.numberOfPoints, cudaMemcpyHostToDevice);
-	cudaMemcpy(normals, other.normals, sizeof(float3) * other.numberOfPoints, cudaMemcpyHostToDevice);
-	cudaMemcpy(colors, other.colors, sizeof(float3) * other.numberOfPoints, cudaMemcpyHostToDevice);
-	cudaDeviceSynchronize();
+	CUDA_COPY_H2D(positions, other.positions, sizeof(float3) * other.numberOfPoints);
+	CUDA_COPY_H2D(normals, other.normals, sizeof(float3) * other.numberOfPoints);
+	CUDA_COPY_H2D(colors, other.colors, sizeof(float3) * other.numberOfPoints);
+	CUDA_SYNC();
 
 	return *this;
 }
@@ -114,7 +114,7 @@ void DevicePointCloud::Terminate()
 		colors = nullptr;
 		numberOfPoints = 0;
 
-		cudaDeviceSynchronize();
+		CUDA_SYNC();
 	}
 }
 
@@ -159,7 +159,7 @@ void DevicePointCloud::CompactValidPoints()
 		d_valid_count, numberOfPoints);
 
 	unsigned int valid_count = 0;
-	cudaMemcpy(&valid_count, d_valid_count, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+	CUDA_COPY_D2H(&valid_count, d_valid_count, sizeof(unsigned int));
 
 	cudaFree(positions);
 	cudaFree(normals);
@@ -171,5 +171,5 @@ void DevicePointCloud::CompactValidPoints()
 	numberOfPoints = valid_count;
 
 	cudaFree(d_valid_count);
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 }

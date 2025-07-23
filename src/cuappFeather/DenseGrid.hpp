@@ -127,20 +127,19 @@ struct DenseGrid
             cudaMalloc(&info.d_occupiedVoxelIndices, sizeof(uint3) * numberOfVoxelsToOccupy);
             cudaMalloc(&info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
             unsigned int zero = 0;
-            cudaMemcpy(info.d_numberOfOccupiedVoxels, &zero, sizeof(unsigned int), cudaMemcpyHostToDevice);
+            CUDA_COPY_H2D(info.d_numberOfOccupiedVoxels, &zero, sizeof(unsigned int));
             info.h_occupiedCapacity = numberOfVoxelsToOccupy;
         }
         else
         {
-            cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+            CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
             unsigned int required = info.h_numberOfOccupiedVoxels + numberOfVoxelsToOccupy;
             if (required > info.h_occupiedCapacity)
             {
                 required = min(required, info.numberOfVoxels);
                 uint3* d_new = nullptr;
                 cudaMalloc(&d_new, sizeof(uint3) * required);
-                cudaMemcpy(d_new, info.d_occupiedVoxelIndices,
-                    sizeof(uint3) * info.h_numberOfOccupiedVoxels, cudaMemcpyDeviceToDevice);
+                CUDA_COPY_D2D(d_new, info.d_occupiedVoxelIndices, sizeof(uint3) * info.h_numberOfOccupiedVoxels);
                 cudaFree(info.d_occupiedVoxelIndices);
                 info.d_occupiedVoxelIndices = d_new;
                 info.h_occupiedCapacity = required;
@@ -154,7 +153,7 @@ struct DenseGrid
     {
         CheckOccupiedIndicesLength(numberOfPositions);
         LaunchKernel(Kernel_OccupyDenseGrid, numberOfPositions, info, d_positions, numberOfPositions, d_voxels);
-        cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+        CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
         printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
     }
 
@@ -163,8 +162,7 @@ struct DenseGrid
         if (info.h_numberOfOccupiedVoxels == 0) return;
 
         uint3* h_occupiedVoxelIndices = new uint3[info.h_numberOfOccupiedVoxels];
-        cudaMemcpy(h_occupiedVoxelIndices, info.d_occupiedVoxelIndices,
-            sizeof(uint3) * info.h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
+        CUDA_COPY_D2H(h_occupiedVoxelIndices, info.d_occupiedVoxelIndices, sizeof(uint3) * info.h_numberOfOccupiedVoxels);
 
         PLYFormat ply;
         for (unsigned int i = 0; i < info.h_numberOfOccupiedVoxels; ++i)

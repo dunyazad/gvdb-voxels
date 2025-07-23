@@ -392,7 +392,7 @@ void cuMain(
     //        thrust::raw_pointer_cast(d_normals.data()),
     //        thrust::raw_pointer_cast(d_colors.data()),
     //        d_points.size());
-    //    cudaDeviceSynchronize();
+    //    CUDA_SYNC();
     //    CUDA_TE(Occupy);
 
     //    tsdf.Serialize("../../res/3D/tsdf.ply");
@@ -421,7 +421,7 @@ void cuMain(
     //        thrust::raw_pointer_cast(d_normals.data()),
     //        thrust::raw_pointer_cast(d_colors.data()),
     //        d_points.size());
-    //    cudaDeviceSynchronize();
+    //    CUDA_SYNC();
     //    CUDA_TE(Occupy);
 
     //    //dg.Serialize("../../res/3D/denseGrid.ply");
@@ -441,11 +441,11 @@ void cuMain(
         //    int blocks = ((1 << 26) + threads - 1) / threads;
 
         //    Kernel_GenerateLUT << <blocks, threads >> > (d_lut);
-        //    cudaDeviceSynchronize();
+        //    CUDA_SYNC();
 
         //    // ¿˙¿Â
         //    bool* h_lut = new bool[1 << 26];
-        //    cudaMemcpy(h_lut, d_lut, sizeof(bool) * (1 << 26), cudaMemcpyDeviceToHost);
+        //    CUDA_COPY_D2H(h_lut, d_lut, sizeof(bool) * (1 << 26));
 
         //    std::ofstream fout("../../res/3D/simple_point_lut_cuda.bin", std::ios::binary);
         //    fout.write(reinterpret_cast<const char*>(h_lut), (1 << 26));
@@ -470,9 +470,9 @@ void cuMain(
         //cudaMalloc(&pointCloud.d_normals, sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints);
         //cudaMalloc(&pointCloud.d_colors, sizeof(Eigen::Vector3b) * pointCloud.numberOfPoints);
 
-        //cudaMemcpy(pointCloud.d_points, host_points.data(), sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
-        //cudaMemcpy(pointCloud.d_normals, host_normals.data(), sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
-        //cudaMemcpy(pointCloud.d_colors, host_colors.data(), sizeof(Eigen::Vector3b) * pointCloud.numberOfPoints, cudaMemcpyHostToDevice);
+        //CUDA_COPY_H2D(pointCloud.d_points, host_points.data(), sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints);
+        //CUDA_COPY_H2D(pointCloud.d_normals, host_normals.data(), sizeof(Eigen::Vector3f) * pointCloud.numberOfPoints);
+        //CUDA_COPY_H2D(pointCloud.d_colors, host_colors.data(), sizeof(Eigen::Vector3b) * pointCloud.numberOfPoints);
 
 
 
@@ -483,13 +483,13 @@ void cuMain(
 
         //CUDA_TS(BitVolume_Initialize);
         //bitVolume.Initialize(dim3(1000, 1000, 1000), 0.1f);
-        //cudaDeviceSynchronize();
+        //CUDA_SYNC();
         //CUDA_TE(BitVolume_Initialize);
 
 
         //CUDA_TS(BitVolume_Occupy);
         //bitVolume.OccupyFromEigenPoints(make_float3(-20, -70, -40), pointCloud.d_points, pointCloud.numberOfPoints);
-        //cudaDeviceSynchronize();
+        //CUDA_SYNC();
         //CUDA_TE(BitVolume_Occupy);
 
 
@@ -499,7 +499,7 @@ void cuMain(
         //float3* d_points = nullptr;
         //cudaMalloc(&d_points, sizeof(float3) * pointCloud.numberOfPoints);
         //bitVolume.SerializeToFloat3(d_points, d_numberOfPoints);
-        //cudaDeviceSynchronize();
+        //CUDA_SYNC();
 
         //CUDA_TS(BitVolume_MarchingCubes);
         //std::vector<float3> vertices;
@@ -524,10 +524,10 @@ void cuMain(
         //CUDA_TE(BitVolume_MarchingCubes);
 
         //unsigned int h_numberOfPoints = 0;
-        //cudaMemcpy(&h_numberOfPoints, d_numberOfPoints, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+        //CUDA_COPY_D2H(&h_numberOfPoints, d_numberOfPoints, sizeof(unsigned int));
 
         //float3* h_points = new float3[pointCloud.numberOfPoints];
-        //cudaMemcpy(h_points, d_points, sizeof(float3) * h_numberOfPoints, cudaMemcpyDeviceToHost);
+        //CUDA_COPY_D2H(h_points, d_points, sizeof(float3) * h_numberOfPoints);
 
 
         //PLYFormat ply;

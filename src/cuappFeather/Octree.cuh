@@ -212,7 +212,7 @@ std::vector<OctreeNode> BuildMortonOctree(const float3* d_inputPoints, int N, fl
         thrust::raw_pointer_cast(mortonCodes.data()),
         N, voxelSize, minBound
         );
-    cudaDeviceSynchronize();
+    CUDA_SYNC();
 
     thrust::device_vector<float3> sortedPoints(d_inputPoints, d_inputPoints + N);
     thrust::sort_by_key(mortonCodes.begin(), mortonCodes.end(), sortedPoints.begin());
@@ -232,15 +232,15 @@ std::vector<OctreeNode> BuildMortonOctree(const float3* d_inputPoints, int N, fl
         thrust::raw_pointer_cast(voxelCenters.data()),
         numLeaves, voxelSize, minBound
         );
-    cudaDeviceSynchronize();
+    CUDA_SYNC();
 
     std::vector<float3> h_centers(numLeaves);
     std::vector<uint64_t> h_codes(numLeaves);
     std::vector<int> h_counts(numLeaves);
 
-    cudaMemcpy(h_centers.data(), thrust::raw_pointer_cast(voxelCenters.data()), sizeof(float3) * numLeaves, cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_codes.data(), thrust::raw_pointer_cast(uniqueCodes.data()), sizeof(uint64_t) * numLeaves, cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_counts.data(), thrust::raw_pointer_cast(counts.data()), sizeof(int) * numLeaves, cudaMemcpyDeviceToHost);
+    CUDA_COPY_D2H(h_centers.data(), thrust::raw_pointer_cast(voxelCenters.data()), sizeof(float3) * numLeaves);
+    CUDA_COPY_D2H(h_codes.data(), thrust::raw_pointer_cast(uniqueCodes.data()), sizeof(uint64_t) * numLeaves);
+    CUDA_COPY_D2H(h_counts.data(), thrust::raw_pointer_cast(counts.data()), sizeof(int) * numLeaves);
 
     std::vector<OctreeNode> octree = BuildOctreeFromMortonCodes(h_codes, h_counts);
 
@@ -313,7 +313,7 @@ std::vector<OctreeNode> BuildMortonOctree(const float3* d_inputPoints, int N, fl
 //        thrust::raw_pointer_cast(mortonCodes.data()),
 //        N, voxelSize, bbox.minBound
 //        );
-//    cudaDeviceSynchronize();
+//    CUDA_SYNC();
 //
 //    // 2. Á¤·Ä
 //    thrust::device_vector<float3> sortedPoints(d_inputPoints, d_inputPoints + N);
@@ -339,11 +339,11 @@ std::vector<OctreeNode> BuildMortonOctree(const float3* d_inputPoints, int N, fl
 //        voxelSize,
 //        bbox.minBound
 //        );
-//    cudaDeviceSynchronize();
+//    CUDA_SYNC();
 //
 //    std::vector<float3> h_centers(numLeaves);
-//    cudaMemcpy(h_centers.data(), thrust::raw_pointer_cast(voxelCenters.data()),
-//        sizeof(float3) * numLeaves, cudaMemcpyDeviceToHost);
+//    CUDA_COPY_D2H(h_centers.data(), thrust::raw_pointer_cast(voxelCenters.data()),
+//        sizeof(float3) * numLeaves);
 //
 //    PLYFormat ply;
 //    for (size_t i = 0; i < h_centers.size(); i++)

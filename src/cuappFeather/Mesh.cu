@@ -14,13 +14,13 @@ HostMesh& HostMesh::operator=(const DeviceMesh& other)
 	Terminate();
 	Intialize(other.numberOfPoints, other.numberOfFaces);
 
-	cudaMemcpy(positions, other.positions, sizeof(float3) * other.numberOfPoints, cudaMemcpyDeviceToHost);
-	cudaMemcpy(normals, other.normals, sizeof(float3) * other.numberOfPoints, cudaMemcpyDeviceToHost);
-	cudaMemcpy(colors, other.colors, sizeof(float3) * other.numberOfPoints, cudaMemcpyDeviceToHost);
+	CUDA_COPY_D2H(positions, other.positions, sizeof(float3) * other.numberOfPoints);
+	CUDA_COPY_D2H(normals, other.normals, sizeof(float3) * other.numberOfPoints);
+	CUDA_COPY_D2H(colors, other.colors, sizeof(float3) * other.numberOfPoints);
 
-	cudaMemcpy(faces, other.faces, sizeof(uint3) * other.numberOfFaces, cudaMemcpyDeviceToHost);
+	CUDA_COPY_D2H(faces, other.faces, sizeof(uint3) * other.numberOfFaces);
 
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 
 	return *this;
 }
@@ -95,13 +95,13 @@ DeviceMesh& DeviceMesh::operator=(const HostMesh& other)
 	Terminate();
 	Intialize(other.numberOfPoints, other.numberOfFaces);
 
-	cudaMemcpy(positions, other.positions, sizeof(float3) * other.numberOfPoints, cudaMemcpyHostToDevice);
-	cudaMemcpy(normals, other.normals, sizeof(float3) * other.numberOfPoints, cudaMemcpyHostToDevice);
-	cudaMemcpy(colors, other.colors, sizeof(float3) * other.numberOfPoints, cudaMemcpyHostToDevice);
+	CUDA_COPY_H2D(positions, other.positions, sizeof(float3) * other.numberOfPoints);
+	CUDA_COPY_H2D(normals, other.normals, sizeof(float3) * other.numberOfPoints);
+	CUDA_COPY_H2D(colors, other.colors, sizeof(float3) * other.numberOfPoints);
 
-	cudaMemcpy(faces, other.faces, sizeof(uint3) * other.numberOfFaces, cudaMemcpyHostToDevice);
+	CUDA_COPY_H2D(faces, other.faces, sizeof(uint3) * other.numberOfFaces);
 
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 
 	return *this;
 }
@@ -137,7 +137,7 @@ void DeviceMesh::Terminate()
 		faces = nullptr;
 		numberOfFaces = 0;
 
-		//cudaDeviceSynchronize();
+		//CUDA_SYNC();
 	}
 }
 
@@ -182,7 +182,7 @@ void DeviceMesh::CompactValidPoints()
 	//	d_valid_count, numberOfPoints);
 
 	//unsigned int valid_count = 0;
-	//cudaMemcpy(&valid_count, d_valid_count, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+	//CUDA_COPY_D2H(&valid_count, d_valid_count, sizeof(unsigned int));
 
 	//cudaFree(positions);
 	//cudaFree(normals);
@@ -194,5 +194,5 @@ void DeviceMesh::CompactValidPoints()
 	//numberOfPoints = valid_count;
 
 	//cudaFree(d_valid_count);
-	//cudaDeviceSynchronize();
+	//CUDA_SYNC();
 }

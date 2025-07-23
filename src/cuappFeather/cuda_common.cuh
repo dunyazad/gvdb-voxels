@@ -37,3 +37,23 @@
     cudaEventDestroy(time_##name##_start);\
     cudaEventDestroy(time_##name##_stop);
 #endif
+
+#ifndef CUDA_SYNC
+#define CUDA_SYNC() cudaDeviceSynchronize();
+#endif
+
+#ifndef CUDA_COPY_D2D
+#define CUDA_COPY_D2D(to, from, size) cudaMemcpy(to, from, size, cudaMemcpyDeviceToDevice);
+#endif
+
+#ifndef CUDA_COPY_D2H
+#define CUDA_COPY_D2H(to, from, size) cudaMemcpy(to, from, size, cudaMemcpyDeviceToHost);
+#endif
+
+#ifndef CUDA_COPY_H2D
+#define CUDA_COPY_H2D(to, from, size) cudaMemcpy(to, from, size, cudaMemcpyHostToDevice);
+#endif
+
+#ifndef CUDA_COPY_H2H
+#define CUDA_COPY_H2H(to, from, size) cudaMemcpy(to, from, size, cudaMemcpyHostToHost);
+#endif

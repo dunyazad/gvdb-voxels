@@ -103,20 +103,19 @@ struct TSDF
             cudaMalloc(&info.d_occupiedVoxelIndices, sizeof(uint3) * numberOfVoxelsToOccupy);
             cudaMalloc(&info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
             unsigned int zero = 0;
-            cudaMemcpy(info.d_numberOfOccupiedVoxels, &zero, sizeof(unsigned int), cudaMemcpyHostToDevice);
+            CUDA_COPY_H2D(info.d_numberOfOccupiedVoxels, &zero, sizeof(unsigned int));
             info.h_occupiedCapacity = numberOfVoxelsToOccupy;
         }
         else
         {
-            cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+            CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
             unsigned int required = info.h_numberOfOccupiedVoxels + numberOfVoxelsToOccupy;
             if (required > info.h_occupiedCapacity)
             {
                 required = min(required, info.numberOfVoxels);
                 uint3* d_new = nullptr;
                 cudaMalloc(&d_new, sizeof(uint3) * required);
-                cudaMemcpy(d_new, info.d_occupiedVoxelIndices,
-                    sizeof(uint3) * info.h_numberOfOccupiedVoxels, cudaMemcpyDeviceToDevice);
+                CUDA_COPY_D2D(d_new, info.d_occupiedVoxelIndices, sizeof(uint3) * info.h_numberOfOccupiedVoxels);
                 cudaFree(info.d_occupiedVoxelIndices);
                 info.d_occupiedVoxelIndices = d_new;
                 info.h_occupiedCapacity = required;
@@ -130,7 +129,7 @@ struct TSDF
     {
         CheckOccupiedIndicesLength(numberOfPositions);
         LaunchKernel(Kernel_OccupyTSDF, numberOfPositions, info, d_positions, d_normals, d_colors, numberOfPositions);
-        cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+        CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
         printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
     }
 
@@ -151,11 +150,11 @@ struct TSDF
         float3* h_normals = new float3[info.h_numberOfOccupiedVoxels];
         float3* h_colors = new float3[info.h_numberOfOccupiedVoxels];
 
-        cudaMemcpy(h_positions, d_positions, sizeof(float3) * info.h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
-        cudaMemcpy(h_normals, d_normals, sizeof(float3) * info.h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
-        cudaMemcpy(h_colors, d_colors, sizeof(float3) * info.h_numberOfOccupiedVoxels, cudaMemcpyDeviceToHost);
+        CUDA_COPY_D2H(h_positions, d_positions, sizeof(float3) * info.h_numberOfOccupiedVoxels);
+        CUDA_COPY_D2H(h_normals, d_normals, sizeof(float3) * info.h_numberOfOccupiedVoxels);
+        CUDA_COPY_D2H(h_colors, d_colors, sizeof(float3) * info.h_numberOfOccupiedVoxels);
 
-        cudaDeviceSynchronize();
+        CUDA_SYNC();
 
         cudaFree(d_positions);
         cudaFree(d_normals);

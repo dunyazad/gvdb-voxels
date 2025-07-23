@@ -9,7 +9,7 @@ void SCVoxelHashMap::Initialize(float voxelSize, size_t capacity, unsigned int m
 
 	LaunchKernel(Kernel_SCVoxelHashMap_Clear, (unsigned int)info.capacity, info);
 
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 }
 
 void SCVoxelHashMap::Terminate()
@@ -39,22 +39,21 @@ void SCVoxelHashMap::CheckOccupiedIndicesLength(unsigned int numberOfVoxelsToOcc
 		cudaMalloc(&info.d_occupiedVoxelIndices, sizeof(uint3) * numberOfVoxelsToOccupy);
 		cudaMalloc(&info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
 		unsigned int zero = 0;
-		cudaMemcpy(info.d_numberOfOccupiedVoxels, &zero, sizeof(unsigned int), cudaMemcpyHostToDevice);
-		cudaDeviceSynchronize();
+		CUDA_COPY_H2D(info.d_numberOfOccupiedVoxels, &zero, sizeof(unsigned int));
+		CUDA_SYNC();
 		info.h_occupiedCapacity = numberOfVoxelsToOccupy;
 	}
 	else
 	{
-		cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-		cudaDeviceSynchronize();
+		CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
+		CUDA_SYNC();
 		unsigned int required = info.h_numberOfOccupiedVoxels + numberOfVoxelsToOccupy;
 		if (required > info.h_occupiedCapacity)
 		{
 			int3* d_new = nullptr;
 			cudaMalloc(&d_new, sizeof(int3) * required);
-			cudaMemcpy(d_new, info.d_occupiedVoxelIndices,
-				sizeof(uint3) * info.h_numberOfOccupiedVoxels, cudaMemcpyDeviceToDevice);
-			cudaDeviceSynchronize();
+			CUDA_COPY_D2D(d_new, info.d_occupiedVoxelIndices, sizeof(uint3) * info.h_numberOfOccupiedVoxels);
+			CUDA_SYNC();
 			cudaFree(info.d_occupiedVoxelIndices);
 			info.d_occupiedVoxelIndices = d_new;
 			info.h_occupiedCapacity = required;
@@ -73,8 +72,8 @@ void SCVoxelHashMap::Occupy(const DevicePointCloud& d_input, int offset)
 
 	CheckOccupiedIndicesLength(d_input.numberOfPoints * count);
 	LaunchKernel(Kernel_SCVoxelHashMap_Occupy, d_input.numberOfPoints, info, d_input.positions, d_input.normals, d_input.colors, d_input.numberOfPoints, offset);
-	cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-	cudaDeviceSynchronize();
+	CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
+	CUDA_SYNC();
 
 	printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
 	CUDA_TE(SCVoxelHashMap_Occupy);
@@ -82,17 +81,48 @@ void SCVoxelHashMap::Occupy(const DevicePointCloud& d_input, int offset)
 
 HostPointCloud SCVoxelHashMap::Serialize()
 {
-	DevicePointCloud d_result;
+	HostPointCloud h_result;
+	if (info.h_numberOfOccupiedVoxels == 0) return h_result;
 
+	float3* d_positions = nullptr;
+	float3* d_normals = nullptr;
+	float3* d_colors = nullptr;
+	unsigned int* d_numberOfPoints = nullptr;
+
+	cudaMalloc(&d_positions, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
+	cudaMalloc(&d_normals, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
+	cudaMalloc(&d_colors, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
+	cudaMalloc(&d_numberOfPoints, sizeof(unsigned int));
+
+	LaunchKernel(Kernel_SCVoxelHashMap_CreateZeroCrossingPoints, info.h_numberOfOccupiedVoxels,
+		info, d_positions, d_normals, d_colors, d_numberOfPoints);
+	CUDA_SYNC();
+
+	unsigned int h_numberOfPoints = 0;
+	CUDA_COPY_D2H(&h_numberOfPoints, d_numberOfPoints, sizeof(unsigned int));
+	CUDA_SYNC();
+
+	h_result.Intialize(h_numberOfPoints);
+	CUDA_COPY_D2H(h_result.positions, d_positions, sizeof(float3) * h_numberOfPoints);
+
+	cudaFree(d_positions);
+	cudaFree(d_normals);
+	cudaFree(d_colors);
+	cudaFree(d_numberOfPoints);
+
+	return h_result;
+}
+
+HostMesh SCVoxelHashMap::MarchingCubes()
+{
+	DeviceMesh d_result;
 	if (info.h_numberOfOccupiedVoxels == 0) return d_result;
 
-	d_result.Intialize(info.h_numberOfOccupiedVoxels * 3);
+	d_result.Intialize(info.h_numberOfOccupiedVoxels * 3 * 4, info.h_numberOfOccupiedVoxels * 4);
 
-	LaunchKernel(Kernel_SCVoxelHashMap_Serialize, info.h_numberOfOccupiedVoxels, info, d_result.positions, d_result.normals, d_result.colors);
 
-	cudaDeviceSynchronize();
 
-	HostPointCloud h_result(d_result);
+	HostMesh h_result(d_result);
 	d_result.Terminate();
 
 	return h_result;
@@ -380,6 +410,81 @@ __global__ void Kernel_SCVoxelHashMap_Serialize(
 			d_positions[tid * 3 + 2] = make_float3(FLT_MAX);
 			d_normals[tid * 3 + 2] = make_float3(FLT_MAX);
 			d_colors[tid * 3 + 2] = make_float3(FLT_MAX);
+		}
+	}
+}
+
+__global__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
+	SCVoxelHashMapInfo info,
+	float3* d_positions,
+	float3* d_normals,
+	float3* d_colors,
+	unsigned int* d_numberOfPoints)
+{
+	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+	if (tid >= *info.d_numberOfOccupiedVoxels) return;
+
+	int3 voxelIndex = info.d_occupiedVoxelIndices[tid];
+	auto voxel = SCVoxelHashMap::GetVoxel(info, voxelIndex);
+	if (!voxel || voxel->count == 0) return;
+
+	float sdf = voxel->sdfSum / (float)max(1u, voxel->count);
+
+	float3 voxelPosition = SCVoxelHashMap::IndexToPosition(voxelIndex, info.voxelSize);
+	float3 voxelNormal = voxel->normalSum / (float)max(1u, voxel->count);
+	float3 voxelColor = voxel->colorSum / (float)max(1u, voxel->count);
+
+	// X Axis
+	{
+		auto neighborIndex = voxelIndex;
+		neighborIndex.x += 1;
+		float3 position;
+		float3 normal;
+		float3 color;
+		if (true == SCVoxelHashMap::CheckZeroCrossing(
+			info, sdf, voxelPosition, voxelNormal, voxelColor, neighborIndex,
+			position, normal, color))
+		{
+			auto index = atomicAdd(d_numberOfPoints, 1u);
+			d_positions[index] = position;
+			d_normals[index] = normal;
+			d_colors[index] = color;
+		}
+	}
+
+	// Y Axis
+	{
+		auto neighborIndex = voxelIndex;
+		neighborIndex.y += 1;
+		float3 position;
+		float3 normal;
+		float3 color;
+		if (true == SCVoxelHashMap::CheckZeroCrossing(
+			info, sdf, voxelPosition, voxelNormal, voxelColor, neighborIndex,
+			position, normal, color))
+		{
+			auto index = atomicAdd(d_numberOfPoints, 1u);
+			d_positions[index] = position;
+			d_normals[index] = normal;
+			d_colors[index] = color;
+		}
+	}
+
+	// Z Axis
+	{
+		auto neighborIndex = voxelIndex;
+		neighborIndex.z += 1;
+		float3 position;
+		float3 normal;
+		float3 color;
+		if (true == SCVoxelHashMap::CheckZeroCrossing(
+			info, sdf, voxelPosition, voxelNormal, voxelColor, neighborIndex,
+			position, normal, color))
+		{
+			auto index = atomicAdd(d_numberOfPoints, 1u);
+			d_positions[index] = position;
+			d_normals[index] = normal;
+			d_colors[index] = color;
 		}
 	}
 }

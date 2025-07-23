@@ -9,7 +9,7 @@ void VoxelHashMap::Initialize(float voxelSize, size_t capacity, unsigned int max
 
 	LaunchKernel(Kernel_VoxelHashMap_Clear, (unsigned int)info.capacity, info);
 
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 }
 
 void VoxelHashMap::Terminate()
@@ -39,22 +39,21 @@ void VoxelHashMap::CheckOccupiedIndicesLength(unsigned int numberOfVoxelsToOccup
 		cudaMalloc(&info.d_occupiedVoxelIndices, sizeof(uint3) * numberOfVoxelsToOccupy);
 		cudaMalloc(&info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
 		unsigned int zero = 0;
-		cudaMemcpy(info.d_numberOfOccupiedVoxels, &zero, sizeof(unsigned int), cudaMemcpyHostToDevice);
-		cudaDeviceSynchronize();
+		CUDA_COPY_H2D(info.d_numberOfOccupiedVoxels, &zero, sizeof(unsigned int));
+		CUDA_SYNC();
 		info.h_occupiedCapacity = numberOfVoxelsToOccupy;
 	}
 	else
 	{
-		cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-		cudaDeviceSynchronize();
+		CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
+		CUDA_SYNC();
 		unsigned int required = info.h_numberOfOccupiedVoxels + numberOfVoxelsToOccupy;
 		if (required > info.h_occupiedCapacity)
 		{
 			int3* d_new = nullptr;
 			cudaMalloc(&d_new, sizeof(int3) * required);
-			cudaMemcpy(d_new, info.d_occupiedVoxelIndices,
-				sizeof(uint3) * info.h_numberOfOccupiedVoxels, cudaMemcpyDeviceToDevice);
-			cudaDeviceSynchronize();
+			CUDA_COPY_D2D(d_new, info.d_occupiedVoxelIndices, sizeof(uint3) * info.h_numberOfOccupiedVoxels);
+			CUDA_SYNC();
 			cudaFree(info.d_occupiedVoxelIndices);
 			info.d_occupiedVoxelIndices = d_new;
 			info.h_occupiedCapacity = required;
@@ -68,8 +67,8 @@ void VoxelHashMap::Occupy(float3* d_positions, float3* d_normals, float3* d_colo
 {
 	CheckOccupiedIndicesLength(numberOfPoints);
 	LaunchKernel(Kernel_VoxelHashMap_Occupy, numberOfPoints, info, d_positions, d_normals, d_colors, numberOfPoints);
-	cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-	cudaDeviceSynchronize();
+	CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
+	CUDA_SYNC();
 	printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
 }
 
@@ -77,8 +76,8 @@ void VoxelHashMap::Occupy(const DevicePointCloud& d_input)
 {
 	CheckOccupiedIndicesLength(d_input.numberOfPoints);
 	LaunchKernel(Kernel_VoxelHashMap_Occupy, d_input.numberOfPoints, info, d_input.positions, d_input.normals, d_input.colors, d_input.numberOfPoints);
-	cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-	cudaDeviceSynchronize();
+	CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
+	CUDA_SYNC();
 	printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
 }
 
@@ -88,8 +87,8 @@ void VoxelHashMap::Occupy_SDF(float3* d_positions, float3* d_normals, float3* d_
 
 	CheckOccupiedIndicesLength(numberOfPoints * count);
 	LaunchKernel(Kernel_VoxelHashMap_Occupy_SDF, numberOfPoints, info, d_positions, d_normals, d_colors, numberOfPoints, offset);
-	cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-	cudaDeviceSynchronize();
+	CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
+	CUDA_SYNC();
 	printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
 }
 
@@ -100,8 +99,8 @@ void VoxelHashMap::Occupy_SDF(const DevicePointCloud& d_input, int offset)
 
 	CheckOccupiedIndicesLength(d_input.numberOfPoints * count);
 	LaunchKernel(Kernel_VoxelHashMap_Occupy_SDF, d_input.numberOfPoints, info, d_input.positions, d_input.normals, d_input.colors, d_input.numberOfPoints, offset);
-	cudaMemcpy(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-	cudaDeviceSynchronize();
+	CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
+	CUDA_SYNC();
 
 	printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
 	CUDA_TE(Occupy_SDF)
@@ -117,7 +116,7 @@ HostPointCloud VoxelHashMap::Serialize()
 
 	LaunchKernel(Kernel_VoxelHashMap_Serialize, info.h_numberOfOccupiedVoxels, info, d_result.positions, d_result.normals, d_result.colors);
 
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 
 	HostPointCloud h_result(d_result);
 	d_result.Terminate();
@@ -135,7 +134,7 @@ HostPointCloud VoxelHashMap::Serialize_SDF()
 
 	LaunchKernel(Kernel_VoxelHashMap_Serialize_SDF, info.h_numberOfOccupiedVoxels, info, d_result.positions, d_result.normals, d_result.colors);
 
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 
 	HostPointCloud h_result(d_result);
 	d_result.Terminate();
@@ -153,7 +152,7 @@ HostPointCloud VoxelHashMap::Serialize_SDF_Tidy()
 
 	LaunchKernel(Kernel_VoxelHashMap_Serialize_SDF_Tidy, info.h_numberOfOccupiedVoxels, info, d_result.positions, d_result.normals, d_result.colors);
 
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 
 	HostPointCloud h_result(d_result);
 	d_result.Terminate();
@@ -179,19 +178,17 @@ void VoxelHashMap::Dilation(int iterations, int step)
 
 		// d_newOccupiedCount → host 복사
 		unsigned int h_newOccupied = 0;
-		cudaMemcpy(&h_newOccupied, d_newOccupiedCount, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+		CUDA_COPY_D2H(&h_newOccupied, d_newOccupiedCount, sizeof(unsigned int));
 
 		if (h_newOccupied > 0)
 		{
 			// 기존 occupiedIndices 확장
 			CheckOccupiedIndicesLength(info.h_numberOfOccupiedVoxels + h_newOccupied);
-			cudaMemcpy(
+			CUDA_COPY_D2D(
 				info.d_occupiedVoxelIndices + info.h_numberOfOccupiedVoxels,
-				d_newOccupiedIndices,
-				sizeof(int3) * h_newOccupied, cudaMemcpyDeviceToDevice
-			);
+				d_newOccupiedIndices, sizeof(int3) * h_newOccupied);
 			info.h_numberOfOccupiedVoxels += h_newOccupied;
-			cudaMemcpy(info.d_numberOfOccupiedVoxels, &info.h_numberOfOccupiedVoxels, sizeof(unsigned int), cudaMemcpyHostToDevice);
+			CUDA_COPY_H2D(info.d_numberOfOccupiedVoxels, &info.h_numberOfOccupiedVoxels, sizeof(unsigned int));
 		}
 
 		cudaFree(d_newOccupiedIndices);
@@ -248,11 +245,11 @@ bool VoxelHashMap::MarchingCubes(std::vector<float3>& outVertices, std::vector<f
 		d_numVertices,
 		d_numTriangles);
 
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 
 	unsigned int h_numVertices = 0, h_numTriangles = 0;
-	cudaMemcpy(&h_numVertices, d_numVertices, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-	cudaMemcpy(&h_numTriangles, d_numTriangles, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+	CUDA_COPY_D2H(&h_numVertices, d_numVertices, sizeof(unsigned int));
+	CUDA_COPY_D2H(&h_numTriangles, d_numTriangles, sizeof(unsigned int));
 
 	printf("h_numVertices : %d, h_numTriangles : %d\n", h_numVertices, h_numTriangles);
 
@@ -261,10 +258,10 @@ bool VoxelHashMap::MarchingCubes(std::vector<float3>& outVertices, std::vector<f
 	outColors.resize(h_numVertices);
 	outTriangles.resize(h_numTriangles);
 
-	cudaMemcpy(outVertices.data(), d_vertices, sizeof(float3) * h_numVertices, cudaMemcpyDeviceToHost);
-	cudaMemcpy(outNormals.data(), d_normals, sizeof(float3) * h_numVertices, cudaMemcpyDeviceToHost);
-	cudaMemcpy(outColors.data(), d_colors, sizeof(float3) * h_numVertices, cudaMemcpyDeviceToHost);
-	cudaMemcpy(outTriangles.data(), d_indices, sizeof(uint3) * h_numTriangles, cudaMemcpyDeviceToHost);
+	CUDA_COPY_D2H(outVertices.data(), d_vertices, sizeof(float3) * h_numVertices);
+	CUDA_COPY_D2H(outNormals.data(), d_normals, sizeof(float3) * h_numVertices);
+	CUDA_COPY_D2H(outColors.data(), d_colors, sizeof(float3) * h_numVertices);
+	CUDA_COPY_D2H(outTriangles.data(), d_indices, sizeof(uint3) * h_numTriangles);
 
 	cudaFree(d_vertices);
 	cudaFree(d_normals);
@@ -281,7 +278,7 @@ bool VoxelHashMap::MarchingCubes(std::vector<float3>& outVertices, std::vector<f
 void VoxelHashMap::FindOverlap(int step, bool remove)
 {
 	LaunchKernel(Kernel_VoxelHashMap_FindOverlap, info.h_numberOfOccupiedVoxels, info, step, remove);
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 }
 
 void VoxelHashMap::SmoothSDF(float smoothingFactor, int iterations)
@@ -289,40 +286,40 @@ void VoxelHashMap::SmoothSDF(float smoothingFactor, int iterations)
 	for (int i = 0; i < iterations; ++i)
 	{
 		LaunchKernel(Kernel_VoxelHashMap_SmoothSDF, info.h_numberOfOccupiedVoxels, info, smoothingFactor);
-		cudaDeviceSynchronize();
+		CUDA_SYNC();
 	}
 }
 
 void VoxelHashMap::FilterOppositeNormals()
 {
 	LaunchKernel(Kernel_VoxelHashMap_FilterOppositeNormals, info.h_numberOfOccupiedVoxels, info, 0.8f);
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 }
 
 void VoxelHashMap::FilterByNormalGradient(float gradientThreshold, bool remove)
 {
 	//LaunchKernel(Kernel_VoxelHashMap_FilterByNormalGradient, info.h_numberOfOccupiedVoxels, info, 1.5f);
 	LaunchKernel(Kernel_VoxelHashMap_FilterByNormalGradient, info.h_numberOfOccupiedVoxels, info, gradientThreshold, remove);
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 }
 
 void VoxelHashMap::FilterByNormalGradientWithOffset(int offset, float gradientThreshold, bool remove)
 {
 	//LaunchKernel(Kernel_VoxelHashMap_FilterByNormalGradient, info.h_numberOfOccupiedVoxels, info, 1.5f);
 	LaunchKernel(Kernel_VoxelHashMap_FilterByNormalGradientWithOffset, info.h_numberOfOccupiedVoxels, info, offset, gradientThreshold, remove);
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 }
 
 void VoxelHashMap::FilterBySDFGradient(float sdfThreshold, bool remove)
 {
 	LaunchKernel(Kernel_VoxelHashMap_FilterBySDFGradient, info.h_numberOfOccupiedVoxels, info, sdfThreshold, remove);
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 }
 
 void VoxelHashMap::FilterBySDFGradientWithOffset(int offset, float sdfThreshold, bool remove)
 {
 	LaunchKernel(Kernel_VoxelHashMap_FilterBySDFGradient_26, info.h_numberOfOccupiedVoxels, info, offset, sdfThreshold, remove);
-	cudaDeviceSynchronize();
+	CUDA_SYNC();
 }
 
 __host__ __device__ uint64_t VoxelHashMap::expandBits(uint32_t v)

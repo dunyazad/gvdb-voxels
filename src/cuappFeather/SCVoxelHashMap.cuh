@@ -1,7 +1,7 @@
 #include <cuda_common.cuh>
 
 #include <PointCloud.cuh>
-
+#include <Mesh.cuh>
 
 using SCVoxelKey = uint64_t;
 #ifndef EMPTY_KEY
@@ -11,11 +11,13 @@ using SCVoxelKey = uint64_t;
 
 struct SCVoxel
 {
-	int3 coordinate = make_int3(INT32_MAX, INT32_MAX, INT32_MAX);
-	float3 normalSum = make_float3(0, 0, 0);
-	float3 colorSum = make_float3(0, 0, 0);
+	int3 coordinate = make_int3(INT32_MAX);
+	float3 normalSum = make_float3(0.0f);
+	float3 colorSum = make_float3(0.0f);
 	float sdfSum = FLT_MAX;
 	unsigned int count = 0;
+
+	uint3 zeroCrossingPointIndex = make_uint3(UINT32_MAX);
 };
 
 struct SCVoxelHashEntry
@@ -50,7 +52,7 @@ struct SCVoxelHashMap
 
 	HostPointCloud Serialize();
 
-
+	HostMesh MarchingCubes();
 
 	__host__ __device__ static uint64_t expandBits(uint32_t v);
 	__host__ __device__ static uint32_t compactBits(uint64_t x);
@@ -76,10 +78,16 @@ struct SCVoxelHashMap
 __global__ void Kernel_SCVoxelHashMap_Clear(SCVoxelHashMapInfo info);
 __global__ void Kernel_SCVoxelHashMap_Occupy(
 	SCVoxelHashMapInfo info,
-	float3* positions,
-	float3* normals,
-	float3* colors,
+	float3* d_positions,
+	float3* d_normals,
+	float3* d_colors,
 	unsigned int numberOfPoints,
 	int offset);
 __global__ void Kernel_SCVoxelHashMap_Serialize(
 	SCVoxelHashMapInfo info, float3* positions, float3* normals, float3* colors);
+__global__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
+	SCVoxelHashMapInfo info,
+	float3* d_positions,
+	float3* d_normals,
+	float3* d_colors,
+	unsigned int* d_numberOfPoints);
