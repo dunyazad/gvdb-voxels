@@ -15,6 +15,8 @@ using namespace std;
 #include "nvapi510/include/nvapi.h"
 #include "nvapi510/include/NvApiDriverSettings.h"
 
+//#define SAVE_VOXEL_HASHMAP_POINT_CLOUD
+
 bool ForceGPUPerformance()
 {
 	NvAPI_Status status;
@@ -134,11 +136,12 @@ bool ForceGPUPerformance()
 //}
 #pragma endregion
 
-const string resource_file_name = "0_Initial";
+//const string resource_file_name = "0_Initial";
 //const string resource_file_name = "0_Initial_Noise";
 //const string resource_file_name = "Compound_Full";
 //const string resource_file_name = "Bridge";
 //const string resource_file_name = "Reintegrate";
+const string resource_file_name = "KOL";
 const string resource_file_name_ply = "../../res/3D/" + resource_file_name + ".ply";
 const string resource_file_name_alp = "../../res/3D/" + resource_file_name + ".alp";
 
@@ -462,6 +465,7 @@ int main(int argc, char** argv)
 			auto result = ProcessPointCloud(h_pointCloud);
 			ApplyPointCloudToEntity(entity, result);
 
+#ifdef SAVE_VOXEL_HASHMAP_POINT_CLOUD
 			PLYFormat ply;
 			for (size_t i = 0; i < result.numberOfPoints; i++)
 			{
@@ -476,6 +480,7 @@ int main(int argc, char** argv)
 				ply.AddColor(c.x, c.y, c.z);
 			}
 			ply.Serialize("../../res/3D/VoxelHashMap.ply");
+#endif // SAVE_VOXEL_HASHMAP_POINT_CLOUD
 
 			result.Terminate();
 			h_pointCloud.Terminate();

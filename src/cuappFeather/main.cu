@@ -126,18 +126,20 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     //result.CompactValidPoints();
 
     //PLYFormat plyVoxel;
-    //for (size_t i = 0; i < hpcd.numberOfPoints; i++)
+    //for (size_t i = 0; i < result.numberOfPoints; i++)
     //{
-    //    auto& p = hpcd.positions[i];
+    //    auto& p = result.positions[i];
     //    if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
-    //    auto& n = hpcd.normals[i];
-    //    auto& c = hpcd.colors[i];
+    //    auto& n = result.normals[i];
+    //    auto& c = result.colors[i];
 
     //    plyVoxel.AddCube(p.x, p.y, p.z, n.x, n.y, n.z, c.x, c.y, c.z, 1.0f, 0.2f);
     //}
     //plyVoxel.Serialize("../../res/3D/VoxelHashMapVoxel.ply");
 
+    CUDA_TS(MarchingCubes);
     HostMesh mesh = vhm.MarchingCubes();
+    CUDA_TE(MarchingCubes);
 
     PLYFormat plyMesh;
     for (size_t i = 0; i < mesh.numberOfPoints; i++)
@@ -157,7 +159,7 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
 
         plyMesh.AddFace(index.x, index.y, index.z);
     }
-    plyMesh.Serialize("../../res/3D/MarchingCubes_TempMesh.ply");
+    plyMesh.Serialize("../../res/3D/MarchingCubes.ply");
 
     d_input.Terminate();
 

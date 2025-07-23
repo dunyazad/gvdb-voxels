@@ -599,11 +599,11 @@ __global__ void Kernel_SCVoxelHashMap_MarchingCubes(
 		unsigned int v1 = SCVoxelHashMap::GetZeroCrossingIndex(info, voxelIndex, voxel, e1);
 		unsigned int v2 = SCVoxelHashMap::GetZeroCrossingIndex(info, voxelIndex, voxel, e2);
 
-		if (v0 == UINT32_MAX || v1 == UINT32_MAX || v2 == UINT32_MAX)
-		{
-			printf("Triangle dropped: e0=%d e1=%d e2=%d, v0=%u v1=%u v2=%u, base=(%d,%d,%d)\n",
-				e0, e1, e2, v0, v1, v2, voxelIndex.x, voxelIndex.y, voxelIndex.z);
-		}
+		//if (v0 == UINT32_MAX || v1 == UINT32_MAX || v2 == UINT32_MAX)
+		//{
+		//	printf("Triangle dropped: e0=%d e1=%d e2=%d, v0=%u v1=%u v2=%u, base=(%d,%d,%d)\n",
+		//		e0, e1, e2, v0, v1, v2, voxelIndex.x, voxelIndex.y, voxelIndex.z);
+		//}
 
 		if (v0 != UINT32_MAX && v1 != UINT32_MAX && v2 != UINT32_MAX)
 		{
