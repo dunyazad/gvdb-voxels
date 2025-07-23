@@ -27,6 +27,7 @@
 #include <KDTree.hpp>
 #include <VoxelHashMap.cuh>
 #include <SCVoxelHashMap.cuh>
+#include <HalfEdgeMesh.cuh>
 #include <TSDF.hpp>
 
 //HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
@@ -138,7 +139,7 @@ HostPointCloud ProcessPointCloud(const HostPointCloud& h_input)
     //plyVoxel.Serialize("../../res/3D/VoxelHashMapVoxel.ply");
 
     CUDA_TS(MarchingCubes);
-    HostMesh mesh = vhm.MarchingCubes();
+    HostHalfEdgeMesh mesh = vhm.MarchingCubes();
     CUDA_TE(MarchingCubes);
 
     PLYFormat plyMesh;

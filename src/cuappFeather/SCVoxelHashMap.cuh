@@ -1,7 +1,7 @@
 #include <cuda_common.cuh>
 
 #include <PointCloud.cuh>
-#include <Mesh.cuh>
+#include <HalfEdgeMesh.cuh>
 
 using SCVoxelKey = uint64_t;
 #ifndef EMPTY_KEY
@@ -52,7 +52,7 @@ struct SCVoxelHashMap
 
 	HostPointCloud Serialize();
 
-	HostMesh MarchingCubes(float isoValue = 0.0f);
+	HostHalfEdgeMesh MarchingCubes(float isoValue = 0.0f);
 
 	__host__ __device__ static uint64_t expandBits(uint32_t v);
 	__host__ __device__ static uint32_t compactBits(uint64_t x);

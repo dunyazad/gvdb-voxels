@@ -115,9 +115,9 @@ HostPointCloud SCVoxelHashMap::Serialize()
 	return h_result;
 }
 
-HostMesh SCVoxelHashMap::MarchingCubes(float isoValue)
+HostHalfEdgeMesh SCVoxelHashMap::MarchingCubes(float isoValue)
 {
-	HostMesh h_result;
+	HostHalfEdgeMesh h_result;
 	if (info.h_numberOfOccupiedVoxels == 0) return h_result;
 
 	float3* d_positions = nullptr;
@@ -156,7 +156,7 @@ HostMesh SCVoxelHashMap::MarchingCubes(float isoValue)
 	CUDA_COPY_D2H(&h_numberOfFaces, d_numberOfFaces, sizeof(unsigned int));
 	CUDA_SYNC();
 
-	h_result.Intialize(h_numberOfPoints, h_numberOfFaces);
+	h_result.Initialize(h_numberOfPoints, h_numberOfFaces);
 	CUDA_COPY_D2H(h_result.positions, d_positions, sizeof(float3) * h_numberOfPoints);
 	CUDA_COPY_D2H(h_result.normals, d_normals, sizeof(float3) * h_numberOfPoints);
 	CUDA_COPY_D2H(h_result.colors, d_colors, sizeof(float3) * h_numberOfPoints);

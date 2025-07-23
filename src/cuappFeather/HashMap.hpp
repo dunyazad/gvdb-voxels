@@ -1,10 +1,27 @@
 #pragma once
 
 #include <cuda_common.cuh>
+#include <stdint.h>
+#include <stddef.h>
+#include <assert.h>
 
-#define EMPTY_KEY -1
-#define VALID_KEY(k) ((k) != EMPTY_KEY)
+// Type-safe EMPTY_KEY definition
+template<typename Key>
+__host__ __device__ inline Key empty_key();
 
+template<>
+__host__ __device__ inline int empty_key<int>()
+{
+    return -1;
+}
+
+template<>
+__host__ __device__ inline uint64_t empty_key<uint64_t>()
+{
+    return 0xFFFFFFFFFFFFFFFFULL;
+}
+
+// Hash entry structure
 template<typename Key, typename Value>
 struct HashEntry
 {
@@ -23,6 +40,17 @@ struct HashMapInfo
     Key* d_occupiedKeys = nullptr;
 };
 
+// CUDA error check macro (for robustness)
+#define CUDA_CHECK(call) \
+    do { \
+        cudaError_t err = call; \
+        if (err != cudaSuccess) \
+        { \
+            printf("CUDA error %s (%d): %s:%d\n", cudaGetErrorString(err), err, __FILE__, __LINE__); \
+            assert(false); \
+        } \
+    } while (0)
+
 template<typename Key, typename Value>
 struct HashMap
 {
@@ -33,34 +61,33 @@ struct HashMap
         info.capacity = capacity;
         info.maxProbe = maxProbe;
 
-        cudaMalloc(&info.entries, sizeof(HashEntry<Key, Value>) * info.capacity);
-        cudaMemset(info.entries, 0xFF, sizeof(HashEntry<Key, Value>) * info.capacity);
+        CUDA_CHECK(cudaMalloc(&info.entries, sizeof(HashEntry<Key, Value>) * info.capacity));
+        CUDA_CHECK(cudaMemset(info.entries, 0xFF, sizeof(HashEntry<Key, Value>) * info.capacity));
     }
 
     void Terminate()
     {
-        if (nullptr != info.entries)
+        if (info.entries != nullptr)
         {
-            cudaFree(info.entries);
+            CUDA_CHECK(cudaFree(info.entries));
+            info.entries = nullptr;
         }
     }
 
-    void Clear()
+    void Clear(int value = 0xFF)
     {
-        if (nullptr != info.entries)
+        if (info.entries != nullptr)
         {
-            cudaMemset(info.entries, 0xFF, sizeof(HashEntry<Key, Value>) * info.capacity);
+            CUDA_CHECK(cudaMemset(info.entries, value, sizeof(HashEntry<Key, Value>) * info.capacity));
         }
     }
 
-    __device__ __host__
-        inline size_t hash(Key key, size_t capacity) const
+    __host__ __device__ inline size_t hash(Key key, size_t capacity) const
     {
         return static_cast<size_t>(key) % capacity;
     }
 
-    __device__
-        bool insert(HashMapInfo<Key, Value> info, Key key, Value value)
+    __device__ bool insert(const HashMapInfo<Key, Value>& info, Key key, const Value& value)
     {
         size_t idx = hash(key, info.capacity);
 
@@ -68,9 +95,9 @@ struct HashMap
         {
             size_t slot = (idx + i) % info.capacity;
             Key* slot_key = &info.entries[slot].key;
-            Key prev_key = atomicCAS(slot_key, EMPTY_KEY, key);
+            Key prev_key = atomicCAS(slot_key, empty_key<Key>(), key);
 
-            if (prev_key == EMPTY_KEY || prev_key == key)
+            if (prev_key == empty_key<Key>() || prev_key == key)
             {
                 info.entries[slot].value = value;
                 return true;
@@ -79,8 +106,7 @@ struct HashMap
         return false;
     }
 
-    __device__
-        bool find(HashMapInfo<Key, Value> info, Key key, Value* outValue)
+    __device__ bool find(const HashMapInfo<Key, Value>& info, Key key, Value* outValue)
     {
         size_t idx = hash(key, info.capacity);
 
@@ -94,7 +120,7 @@ struct HashMap
                 *outValue = info.entries[slot].value;
                 return true;
             }
-            if (k == EMPTY_KEY)
+            if (k == empty_key<Key>())
             {
                 return false;
             }
@@ -102,3 +128,5 @@ struct HashMap
         return false;
     }
 };
+
+#undef CUDA_CHECK
