@@ -149,9 +149,9 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
     CUDA_TE(MarchingCubes);
     h_mesh.CopyFromDevice(d_mesh);
 
-    h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh.ply", false);
+    //h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh.ply", false);
 
-    PLYFormat plyMesh;
+ /*   PLYFormat plyMesh;
     for (size_t i = 0; i < h_mesh.numberOfPoints; i++)
     {
         auto& p = h_mesh.positions[i];
@@ -169,7 +169,7 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
 
         plyMesh.AddFace(index.x, index.y, index.z);
     }
-    plyMesh.Serialize("../../res/3D/MarchingCubes.ply");
+    plyMesh.Serialize("../../res/3D/MarchingCubes.ply");*/
 
     //PLYFormat hePLY;
     //for (unsigned int i = 0; i < mesh.numberOfPoints; ++i)

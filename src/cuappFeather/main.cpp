@@ -554,76 +554,76 @@ int main(int argc, char** argv)
 				return (seed & 0xFFFFFF) / static_cast<float>(0xFFFFFF);
 			};
 
-			//auto result = cudaInstance.ProcessPointCloud(h_pointCloud);
+			auto result = cudaInstance.ProcessPointCloud(h_pointCloud);
 			//ApplyPointCloudToEntity(entity, result);
 
 			cudaInstance.ProcessHalfEdgeMesh("../../res/3D/HostHalfEdgeMesh.ply");
 
-			{
-				auto& mesh = cudaInstance.h_mesh;
-				auto& he = mesh.halfEdges[halfEdgeIndex];
-				auto vi = he.vertexIndex;
-				vertexIndex = vi;
-				initialPosition.x = mesh.positions[vi].x;
-				initialPosition.y = mesh.positions[vi].y;
-				initialPosition.z = mesh.positions[vi].z;
-				mesh.colors[vi].x = 1.0f;
-				mesh.colors[vi].y = 0.0f;
-				mesh.colors[vi].z = 0.0f;
+			//{
+			//	auto& mesh = cudaInstance.h_mesh;
+			//	auto& he = mesh.halfEdges[halfEdgeIndex];
+			//	auto vi = he.vertexIndex;
+			//	vertexIndex = vi;
+			//	initialPosition.x = mesh.positions[vi].x;
+			//	initialPosition.y = mesh.positions[vi].y;
+			//	initialPosition.z = mesh.positions[vi].z;
+			//	mesh.colors[vi].x = 1.0f;
+			//	mesh.colors[vi].y = 0.0f;
+			//	mesh.colors[vi].z = 0.0f;
 
 
 
-				{
-					unsigned int startEdge = halfEdgeIndex;
-					unsigned int currEdge = startEdge;
-					oneRing.clear();
-					oneRingPositions.clear();
-					std::unordered_set<unsigned int> visited;
+			//	{
+			//		unsigned int startEdge = halfEdgeIndex;
+			//		unsigned int currEdge = startEdge;
+			//		oneRing.clear();
+			//		oneRingPositions.clear();
+			//		std::unordered_set<unsigned int> visited;
 
-					do
-					{
-						unsigned int nextEdge = mesh.halfEdges[currEdge].nextIndex;
-						unsigned int neighborVertex = mesh.halfEdges[nextEdge].vertexIndex;
+			//		do
+			//		{
+			//			unsigned int nextEdge = mesh.halfEdges[currEdge].nextIndex;
+			//			unsigned int neighborVertex = mesh.halfEdges[nextEdge].vertexIndex;
 
-						if (visited.find(neighborVertex) == visited.end())
-						{
-							oneRing.push_back(neighborVertex);
-							oneRingPositions.push_back(mesh.positions[neighborVertex]);
-							visited.insert(neighborVertex);
-						}
+			//			if (visited.find(neighborVertex) == visited.end())
+			//			{
+			//				oneRing.push_back(neighborVertex);
+			//				oneRingPositions.push_back(mesh.positions[neighborVertex]);
+			//				visited.insert(neighborVertex);
+			//			}
 
-						unsigned int oppEdge = mesh.halfEdges[currEdge].oppositeIndex;
-						if (oppEdge == UINT32_MAX)
-							break; // boundary에 도달
+			//			unsigned int oppEdge = mesh.halfEdges[currEdge].oppositeIndex;
+			//			if (oppEdge == UINT32_MAX)
+			//				break; // boundary에 도달
 
-						currEdge = mesh.halfEdges[oppEdge].nextIndex;
-					} while (currEdge != startEdge && currEdge != UINT32_MAX);
-				}
-				//{
-				//	auto ne = mesh.halfEdges[he.nextIndex];
-				//	auto ni = ne.vertexIndex;
-				//	auto nne = mesh.halfEdges[ne.nextIndex];
-				//	auto nni = nne.vertexIndex;
+			//			currEdge = mesh.halfEdges[oppEdge].nextIndex;
+			//		} while (currEdge != startEdge && currEdge != UINT32_MAX);
+			//	}
+			//	//{
+			//	//	auto ne = mesh.halfEdges[he.nextIndex];
+			//	//	auto ni = ne.vertexIndex;
+			//	//	auto nne = mesh.halfEdges[ne.nextIndex];
+			//	//	auto nni = nne.vertexIndex;
 
-				//	oneRing.push_back(vi);
-				//	oneRing.push_back(ni);
-				//	oneRing.push_back(nni);
+			//	//	oneRing.push_back(vi);
+			//	//	oneRing.push_back(ni);
+			//	//	oneRing.push_back(nni);
 
-				//	oneRingPositions.push_back(mesh.positions[vi]);
-				//	oneRingPositions.push_back(mesh.positions[ni]);
-				//	oneRingPositions.push_back(mesh.positions[nni]);
-				//}
+			//	//	oneRingPositions.push_back(mesh.positions[vi]);
+			//	//	oneRingPositions.push_back(mesh.positions[ni]);
+			//	//	oneRingPositions.push_back(mesh.positions[nni]);
+			//	//}
 
-				/*auto currentHalfEdgeIndex = he.oppositeIndex;
-				auto initialHalfEdgeIndex = currentHalfEdgeIndex;
-				do {
-					oneRing.push_back(currentHalfEdgeIndex);
-					oneRingPositions.push_back(mesh.positions[mesh.halfEdges[currentHalfEdgeIndex].vertexIndex]);
+			//	/*auto currentHalfEdgeIndex = he.oppositeIndex;
+			//	auto initialHalfEdgeIndex = currentHalfEdgeIndex;
+			//	do {
+			//		oneRing.push_back(currentHalfEdgeIndex);
+			//		oneRingPositions.push_back(mesh.positions[mesh.halfEdges[currentHalfEdgeIndex].vertexIndex]);
 
-					currentHalfEdgeIndex = mesh.halfEdges[currentHalfEdgeIndex].oppositeIndex;
-					currentHalfEdgeIndex = mesh.halfEdges[currentHalfEdgeIndex].nextIndex;
-				} while (currentHalfEdgeIndex != halfEdgeIndex && initialHalfEdgeIndex != currentHalfEdgeIndex);*/
-			}
+			//		currentHalfEdgeIndex = mesh.halfEdges[currentHalfEdgeIndex].oppositeIndex;
+			//		currentHalfEdgeIndex = mesh.halfEdges[currentHalfEdgeIndex].nextIndex;
+			//	} while (currentHalfEdgeIndex != halfEdgeIndex && initialHalfEdgeIndex != currentHalfEdgeIndex);*/
+			//}
 
 			//cudaInstance.h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh_compare.ply");
 
