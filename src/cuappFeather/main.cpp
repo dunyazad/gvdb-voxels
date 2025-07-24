@@ -17,6 +17,12 @@ using namespace std;
 
 CUDAInstance cudaInstance;
 
+MiniMath::V3 initialPosition;
+unsigned int halfEdgeIndex = 2000;
+unsigned int vertexIndex = 0;
+vector<unsigned int> oneRing;
+vector<float3> oneRingPositions;
+
 //#define SAVE_VOXEL_HASHMAP_POINT_CLOUD
 
 bool ForceGPUPerformance()
@@ -157,7 +163,6 @@ void ApplyPointCloudToEntity(Entity entity, const DevicePointCloud& d_pointCloud
 	HostPointCloud h_pointCloud(d_pointCloud);
 	ApplyPointCloudToEntity(entity, h_pointCloud);
 }
-
 void ApplyPointCloudToEntity(Entity entity, const HostPointCloud& h_pointCloud)
 {
 	auto renderable = Feather.GetComponent<Renderable>(entity);
@@ -201,6 +206,64 @@ void ApplyPointCloudToEntity(Entity entity, const HostPointCloud& h_pointCloud)
 		renderable->AddInstanceTransform(model);
 	}
 	renderable->EnableInstancing(h_pointCloud.numberOfPoints);
+}
+
+void ApplyHalfEdgeMeshToEntity(Entity entity, const HostHalfEdgeMesh& h_mesh);
+void ApplyHalfEdgeMeshToEntity(Entity entity, const DeviceHalfEdgeMesh& d_mesh);
+
+void ApplyHalfEdgeMeshToEntity(Entity entity, const HostHalfEdgeMesh& h_mesh)
+{
+	auto renderable = Feather.GetComponent<Renderable>(entity);
+	if (nullptr == renderable)
+	{
+		renderable = Feather.CreateComponent<Renderable>(entity);
+		renderable->Initialize(Renderable::GeometryMode::Triangles);
+		renderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Default.vs"), File("../../res/Shaders/Default.fs")));
+		renderable->AddShader(Feather.CreateShader("TwoSide", File("../../res/Shaders/TwoSide.vs"), File("../../res/Shaders/TwoSide.fs")));
+		renderable->SetActiveShaderIndex(0);
+	}
+	else
+	{
+		renderable->Clear();
+	}
+
+	// 필수: 최소한 하나라도 vertex/face가 있어야 함
+	if (h_mesh.numberOfPoints == 0 || h_mesh.numberOfFaces == 0)
+	{
+		printf("Mesh is empty\n");
+		return;
+	}
+
+	// 정점 입력
+	for (unsigned int i = 0; i < h_mesh.numberOfPoints; ++i)
+	{
+		renderable->AddVertex({ h_mesh.positions[i].x, h_mesh.positions[i].y, h_mesh.positions[i].z });
+		if (h_mesh.normals) renderable->AddNormal({ h_mesh.normals[i].x, h_mesh.normals[i].y, h_mesh.normals[i].z });
+		if (h_mesh.colors) renderable->AddColor({ h_mesh.colors[i].x, h_mesh.colors[i].y, h_mesh.colors[i].z, 1.0f });
+	}
+
+	// 인덱스 입력
+	for (unsigned int i = 0; i < h_mesh.numberOfFaces; ++i)
+	{
+		const auto& tri = h_mesh.faces[i];
+		// index 범위 체크
+		if (tri.x >= h_mesh.numberOfPoints || tri.y >= h_mesh.numberOfPoints || tri.z >= h_mesh.numberOfPoints)
+		{
+			printf("Face %d has out-of-range index: %d %d %d (max: %d)\n", i, tri.x, tri.y, tri.z, h_mesh.numberOfPoints - 1);
+			continue; // 잘못된 face는 무시
+		}
+		renderable->AddIndex(tri.x);
+		renderable->AddIndex(tri.y);
+		renderable->AddIndex(tri.z);
+	}
+}
+void ApplyHalfEdgeMeshToEntity(Entity entity, const DeviceHalfEdgeMesh& d_mesh)
+{
+	// 디바이스에서 호스트로 복사 후 기존 함수 사용
+	HostHalfEdgeMesh h_mesh(d_mesh);
+	ApplyHalfEdgeMeshToEntity(entity, h_mesh);
+
+	h_mesh.Terminate();
 }
 
 #pragma once
@@ -275,11 +338,25 @@ int main(int argc, char** argv)
 			auto renderable = Feather.GetComponent<Renderable>(entity);
 			if (event.button == 0 && event.action == 0)
 			{
-				printf("LButton Released\n");
-
 				auto ray = manipulator->GetCamera()->ScreenPointToRay(event.xpos, event.ypos, w->GetWidth(), w->GetHeight());
-				printf("From : %.4f, %.4f, %.4f, Direction : %.4f, %.4f, %.4f\n",
-					ray.origin.x, ray.origin.y, ray.origin.z, ray.direction.x, ray.direction.y, ray.direction.z);
+				//printf("From : %.4f, %.4f, %.4f, Direction : %.4f, %.4f, %.4f\n",
+				//	ray.origin.x, ray.origin.y, ray.origin.z, ray.direction.x, ray.direction.y, ray.direction.z);
+
+				int hitIndex = -1;
+				float outHit = FLT_MAX;
+				cudaInstance.h_mesh.PickFace(
+					make_float3(ray.origin.x, ray.origin.y, ray.origin.z),
+					make_float3(ray.direction.x, ray.direction.y, ray.direction.z),
+					hitIndex, outHit);
+
+				printf("[h_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
+
+				cudaInstance.d_mesh.PickFace(
+					make_float3(ray.origin.x, ray.origin.y, ray.origin.z),
+					make_float3(ray.direction.x, ray.direction.y, ray.direction.z),
+					hitIndex, outHit);
+
+				printf("[d_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
 			}
 			});
 
@@ -387,7 +464,7 @@ int main(int argc, char** argv)
 				h_pointCloud.normals[i] = make_float3(p.normal.x, p.normal.y, p.normal.z);
 				h_pointCloud.colors[i] = make_float3(p.color.x, p.color.y, p.color.z);
 			}
-			ApplyPointCloudToEntity(entity, h_pointCloud);
+			//ApplyPointCloudToEntity(entity, h_pointCloud);
 
 			alog("ALP %llu points loaded\n", alp.GetPoints().size());
 
@@ -419,6 +496,8 @@ int main(int argc, char** argv)
 
 			Feather.CreateEventCallback<KeyEvent>(entity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
 				auto renderable = Feather.GetComponent<Renderable>(entity);
+				if (nullptr == renderable) return;
+
 				if (GLFW_KEY_M == event.keyCode)
 				{
 					renderable->NextDrawingMode();
@@ -475,8 +554,133 @@ int main(int argc, char** argv)
 				return (seed & 0xFFFFFF) / static_cast<float>(0xFFFFFF);
 			};
 
-			auto result = cudaInstance.ProcessPointCloud(h_pointCloud);
-			ApplyPointCloudToEntity(entity, result);
+			//auto result = cudaInstance.ProcessPointCloud(h_pointCloud);
+			//ApplyPointCloudToEntity(entity, result);
+
+			cudaInstance.ProcessHalfEdgeMesh("../../res/3D/HostHalfEdgeMesh.ply");
+
+			{
+				auto& mesh = cudaInstance.h_mesh;
+				auto& he = mesh.halfEdges[halfEdgeIndex];
+				auto vi = he.vertexIndex;
+				vertexIndex = vi;
+				initialPosition.x = mesh.positions[vi].x;
+				initialPosition.y = mesh.positions[vi].y;
+				initialPosition.z = mesh.positions[vi].z;
+				mesh.colors[vi].x = 1.0f;
+				mesh.colors[vi].y = 0.0f;
+				mesh.colors[vi].z = 0.0f;
+
+
+
+				{
+					unsigned int startEdge = halfEdgeIndex;
+					unsigned int currEdge = startEdge;
+					oneRing.clear();
+					oneRingPositions.clear();
+					std::unordered_set<unsigned int> visited;
+
+					do
+					{
+						unsigned int nextEdge = mesh.halfEdges[currEdge].nextIndex;
+						unsigned int neighborVertex = mesh.halfEdges[nextEdge].vertexIndex;
+
+						if (visited.find(neighborVertex) == visited.end())
+						{
+							oneRing.push_back(neighborVertex);
+							oneRingPositions.push_back(mesh.positions[neighborVertex]);
+							visited.insert(neighborVertex);
+						}
+
+						unsigned int oppEdge = mesh.halfEdges[currEdge].oppositeIndex;
+						if (oppEdge == UINT32_MAX)
+							break; // boundary에 도달
+
+						currEdge = mesh.halfEdges[oppEdge].nextIndex;
+					} while (currEdge != startEdge && currEdge != UINT32_MAX);
+				}
+				//{
+				//	auto ne = mesh.halfEdges[he.nextIndex];
+				//	auto ni = ne.vertexIndex;
+				//	auto nne = mesh.halfEdges[ne.nextIndex];
+				//	auto nni = nne.vertexIndex;
+
+				//	oneRing.push_back(vi);
+				//	oneRing.push_back(ni);
+				//	oneRing.push_back(nni);
+
+				//	oneRingPositions.push_back(mesh.positions[vi]);
+				//	oneRingPositions.push_back(mesh.positions[ni]);
+				//	oneRingPositions.push_back(mesh.positions[nni]);
+				//}
+
+				/*auto currentHalfEdgeIndex = he.oppositeIndex;
+				auto initialHalfEdgeIndex = currentHalfEdgeIndex;
+				do {
+					oneRing.push_back(currentHalfEdgeIndex);
+					oneRingPositions.push_back(mesh.positions[mesh.halfEdges[currentHalfEdgeIndex].vertexIndex]);
+
+					currentHalfEdgeIndex = mesh.halfEdges[currentHalfEdgeIndex].oppositeIndex;
+					currentHalfEdgeIndex = mesh.halfEdges[currentHalfEdgeIndex].nextIndex;
+				} while (currentHalfEdgeIndex != halfEdgeIndex && initialHalfEdgeIndex != currentHalfEdgeIndex);*/
+			}
+
+			//cudaInstance.h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh_compare.ply");
+
+			auto meshEntity = Feather.CreateEntity("MarchingCubesMesh");
+			ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
+
+			{
+				auto& mesh = cudaInstance.h_mesh;
+
+				auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
+				auto renderable = Feather.GetComponent<Renderable>(meshEntity);
+
+				for (size_t i = 0; i < oneRing.size(); i++)
+				{
+					auto hi = oneRing[i];
+					auto vi = mesh.halfEdges[hi].vertexIndex;
+
+					renderable->SetVertex(hi, MiniMath::V3(oneRingPositions[i].x, oneRingPositions[i].y, oneRingPositions[i].z + 0.1f));
+					renderable->SetColor(hi, { 0.0f, 0.0f, 1.0f, 1.0f });
+				}
+
+				renderable->SetVertex(vertexIndex, MiniMath::V3(initialPosition.x, initialPosition.y, initialPosition.z + 1.1f));
+				renderable->SetColor(vertexIndex, { 1.0f, 0.0f, 0.0f, 1.0f });
+			}
+
+			Feather.CreateEventCallback<KeyEvent>(meshEntity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
+				auto renderable = Feather.GetComponent<Renderable>(entity);
+				if (nullptr == renderable) return;
+
+				if (0 == event.action)
+				{
+					if (GLFW_KEY_GRAVE_ACCENT == event.keyCode)
+					{
+						renderable->NextDrawingMode();
+					}
+					else if (GLFW_KEY_1 == event.keyCode)
+					{
+						renderable->SetActiveShaderIndex(0);
+					}
+					else if (GLFW_KEY_2 == event.keyCode)
+					{
+						renderable->SetActiveShaderIndex(1);
+					}
+				}
+				});
+
+			printf("numPoints: %d, numFaces: %d\n", cudaInstance.h_mesh.numberOfPoints, cudaInstance.h_mesh.numberOfFaces);
+			for (unsigned int i = 0; i < cudaInstance.h_mesh.numberOfFaces; ++i)
+			{
+				auto tri = cudaInstance.h_mesh.faces[i];
+				if (tri.x >= cudaInstance.h_mesh.numberOfPoints ||
+					tri.y >= cudaInstance.h_mesh.numberOfPoints ||
+					tri.z >= cudaInstance.h_mesh.numberOfPoints)
+				{
+					printf("Invalid face[%u]: %u %u %u\n", i, tri.x, tri.y, tri.z);
+				}
+			}
 
 #ifdef SAVE_VOXEL_HASHMAP_POINT_CLOUD
 			PLYFormat ply;
@@ -495,7 +699,7 @@ int main(int argc, char** argv)
 			ply.Serialize("../../res/3D/VoxelHashMap.ply");
 #endif // SAVE_VOXEL_HASHMAP_POINT_CLOUD
 
-			result.Terminate();
+			//result.Terminate();
 			h_pointCloud.Terminate();
 
 			//for (size_t i = 0; i < host_colors.size(); i++)
@@ -547,18 +751,45 @@ int main(int argc, char** argv)
 				renderable->AddVertex({ x, Y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
 				renderable->AddVertex({ x, Y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
 			}
-		}
+			}
 #pragma endregion
 #endif
-	});
+		});
 
 	Feather.AddOnUpdateCallback([](f32 timeDelta) {
-	
+		{
+			auto& mesh = cudaInstance.h_mesh;
+
+			auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
+			auto renderable = Feather.GetComponent<Renderable>(meshEntity);
+
+			static float delta = 0;
+			delta += timeDelta * 0.01f;
+			float diff = sinf(delta * MiniMath::PI / 180.0f);
+			//renderable->SetVertex(vertexIndex, initialPosition + MiniMath::V3(0.0f, 0.0f, diff));
+			//renderable->SetColor(vertexIndex, {1.0f, 0.0f, 0.0f, 1.0f});
+
+			for (size_t i = 0; i < oneRing.size(); i++)
+			{
+				auto hi = oneRing[i];
+				auto vi = mesh.halfEdges[hi].vertexIndex;
+
+				//renderable->SetVertex(hi, MiniMath::V3(oneRingPositions[i].x, oneRingPositions[i].y, oneRingPositions[i].z + diff));
+				renderable->SetColor(hi, { 0.0f, 0.0f, 1.0f, 1.0f });
+			}
+
+			//auto& mesh = cudaInstance.h_mesh;
+			//auto& he = mesh.halfEdges[10000];
+			//auto vi = he.vertexIndex;
+			//mesh.colors[vi].x = 1.0f;
+			//mesh.colors[vi].y = 0.0f;
+			//mesh.colors[vi].z = 0.0f;
+		}
 		});
 
 	Feather.Run();
 
 	Feather.Terminate();
-	
+
 	return 0;
-}
+	}

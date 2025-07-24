@@ -54,6 +54,11 @@ struct HostHalfEdgeMesh
     void CopyToDevice(DeviceHalfEdgeMesh& deviceMesh) const;
 
     void BuildHalfEdges();
+
+    bool SerializePLY(const string& filename, bool useAlpha = false);
+    bool DeserializePLY(const string& filename);
+
+    bool PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const;
 };
 
 struct DeviceHalfEdgeMesh

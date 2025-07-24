@@ -110,6 +110,13 @@ CUDAInstance::~CUDAInstance()
 {
     vhm.Terminate();
     d_input.Terminate();
+    h_mesh.Terminate();
+    d_mesh.Terminate();
+}
+
+void CUDAInstance::ProcessHalfEdgeMesh(const string& filename)
+{
+    h_mesh.DeserializePLY(filename);
 }
 
 HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
@@ -138,25 +145,27 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
     //plyVoxel.Serialize("../../res/3D/VoxelHashMapVoxel.ply");
 
     CUDA_TS(MarchingCubes);
-    DeviceHalfEdgeMesh d_mesh = vhm.MarchingCubes();
+    vhm.MarchingCubes(d_mesh);
     CUDA_TE(MarchingCubes);
-    HostHalfEdgeMesh mesh = d_mesh;
+    h_mesh.CopyFromDevice(d_mesh);
+
+    h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh.ply", false);
 
     PLYFormat plyMesh;
-    for (size_t i = 0; i < mesh.numberOfPoints; i++)
+    for (size_t i = 0; i < h_mesh.numberOfPoints; i++)
     {
-        auto& p = mesh.positions[i];
+        auto& p = h_mesh.positions[i];
         if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
-        auto& n = mesh.normals[i];
-        auto& c = mesh.colors[i];
+        auto& n = h_mesh .normals[i];
+        auto& c = h_mesh .colors[i];
 
         plyMesh.AddPoint(p.x, p.y, p.z);
         plyMesh.AddNormal(n.x, n.y, n.z);
         plyMesh.AddColor(c.x, c.y, c.z);
     }
-    for (size_t i = 0; i < mesh.numberOfFaces; i++)
+    for (size_t i = 0; i < h_mesh.numberOfFaces; i++)
     {
-        auto& index = mesh.faces[i];
+        auto& index = h_mesh.faces[i];
 
         plyMesh.AddFace(index.x, index.y, index.z);
     }

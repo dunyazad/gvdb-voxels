@@ -1,6 +1,8 @@
 #include <HalfEdgeMesh.cuh>
 #include <Mesh.cuh>
 
+#include <set>
+
 HostHalfEdgeMesh::HostHalfEdgeMesh() {}
 
 HostHalfEdgeMesh::HostHalfEdgeMesh(const HostHalfEdgeMesh& other)
@@ -181,6 +183,128 @@ void HostHalfEdgeMesh::BuildHalfEdges()
             }
         }
     }
+}
+
+bool HostHalfEdgeMesh::SerializePLY(const std::string& filename, bool useAlpha)
+{
+    PLYFormat ply;
+
+    // 1. Points
+    for (unsigned int i = 0; i < numberOfPoints; ++i)
+    {
+        ply.AddPoint(positions[i].x, positions[i].y, positions[i].z);
+        if (normals) ply.AddNormal(normals[i].x, normals[i].y, normals[i].z);
+        if (colors)
+        {
+            if (useAlpha)
+                ply.AddColor(colors[i].x, colors[i].y, colors[i].z, 1.0f);
+            else
+                ply.AddColor(colors[i].x, colors[i].y, colors[i].z);
+        }
+    }
+
+    // 2. Faces using halfEdgeFaces (robust even for non-contiguous memory or non-trivial face topologies)
+    for (unsigned int f = 0; f < numberOfFaces; ++f)
+    {
+        unsigned int he0 = halfEdgeFaces[f].halfEdgeIndex;
+        if (he0 == UINT32_MAX) continue; // skip if uninitialized
+        const HalfEdge& e0 = halfEdges[he0];
+        const HalfEdge& e1 = halfEdges[e0.nextIndex];
+        const HalfEdge& e2 = halfEdges[e1.nextIndex];
+        // e0.faceIndex == e1.faceIndex == e2.faceIndex == f
+
+        ply.AddFace(e0.vertexIndex, e1.vertexIndex, e2.vertexIndex);
+    }
+
+    return ply.Serialize(filename);
+}
+
+bool HostHalfEdgeMesh::DeserializePLY(const std::string& filename)
+{
+    PLYFormat ply;
+    if (!ply.Deserialize(filename))
+        return false;
+
+    unsigned int n = static_cast<unsigned int>(ply.GetPoints().size() / 3);
+    unsigned int nf = static_cast<unsigned int>(ply.GetTriangleIndices().size() / 3);
+    Terminate();
+    Initialize(n, nf);
+
+    // Points
+    const auto& pts = ply.GetPoints();
+    for (unsigned int i = 0; i < n; ++i)
+    {
+        positions[i].x = pts[i * 3 + 0];
+        positions[i].y = pts[i * 3 + 1];
+        positions[i].z = pts[i * 3 + 2];
+    }
+
+    // Normals
+    if (normals && !ply.GetNormals().empty())
+    {
+        const auto& ns = ply.GetNormals();
+        for (unsigned int i = 0; i < n; ++i)
+        {
+            normals[i].x = ns[i * 3 + 0];
+            normals[i].y = ns[i * 3 + 1];
+            normals[i].z = ns[i * 3 + 2];
+        }
+    }
+
+    // Colors
+    if (colors && !ply.GetColors().empty())
+    {
+        const auto& cs = ply.GetColors();
+        size_t stride = cs.size() / n == 4 ? 4 : 3;
+        for (unsigned int i = 0; i < n; ++i)
+        {
+            colors[i].x = cs[i * stride + 0];
+            colors[i].y = cs[i * stride + 1];
+            colors[i].z = cs[i * stride + 2];
+        }
+    }
+
+    // Faces
+    const auto& idx = ply.GetTriangleIndices();
+    for (unsigned int i = 0; i < nf; ++i)
+    {
+        faces[i].x = idx[i * 3 + 0];
+        faces[i].y = idx[i * 3 + 1];
+        faces[i].z = idx[i * 3 + 2];
+    }
+
+    // HalfEdge 구조 생성
+    BuildHalfEdges();
+
+    return true;
+}
+
+bool HostHalfEdgeMesh::PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const
+{
+    float minT = std::numeric_limits<float>::max();
+    int minIdx = -1;
+
+    for (unsigned int i = 0; i < numberOfFaces; ++i)
+    {
+        const uint3& tri = faces[i];
+        const float3& v0 = positions[tri.x];
+        const float3& v1 = positions[tri.y];
+        const float3& v2 = positions[tri.z];
+
+        float t, u, v;
+        if (DeviceHalfEdgeMesh::RayTriangleIntersect(rayOrigin, rayDir, v0, v1, v2, t, u, v))
+        {
+            if (t < minT)
+            {
+                minT = t;
+                minIdx = static_cast<int>(i);
+            }
+        }
+    }
+
+    outHitIndex = minIdx;
+    outHitT = minT;
+    return (minIdx >= 0);
 }
 
 DeviceHalfEdgeMesh::DeviceHalfEdgeMesh() {}
@@ -366,8 +490,10 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
     if (numberOfPoints == 0 || numberOfFaces == 0) return;
 
     float3* positionsA = positions;
-    float3* positionsB;
+    float3* positionsB = nullptr;
     cudaMalloc(&positionsB, sizeof(float3) * numberOfPoints);
+
+    float3* toFree = positionsB;
 
     for (unsigned int it = 0; it < iterations; ++it)
     {
@@ -380,8 +506,10 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
     if (positionsA != positions)
     {
         CUDA_COPY_D2D(positions, positionsA, sizeof(float3) * numberOfPoints);
+        CUDA_SYNC();
     }
-    cudaFree(positionsB);
+
+    cudaFree(toFree);
 }
 
 void DeviceHalfEdgeMesh::LaplacianSmoothingNRing(unsigned int iterations, float lambda, int nRing)
@@ -584,29 +712,26 @@ __global__ void Kernel_LaplacianSmooth(
         return;
     }
 
-    float3 accum = make_float3(0, 0, 0);
+    float3 sum = make_float3(0, 0, 0);
     int n = 0;
     unsigned int curr = startHe;
     do
     {
-        unsigned int nextHe = halfEdges[curr].nextIndex;
-        unsigned int neighbor = halfEdges[nextHe].vertexIndex;
+        unsigned int neighbor = halfEdges[curr].vertexIndex;
         if (neighbor < numberOfPoints)
         {
-            accum += positions_in[neighbor];
+            sum += positions_in[neighbor];
             n++;
         }
         unsigned int opp = halfEdges[curr].oppositeIndex;
         if (opp == UINT32_MAX)
-        {
             break;
-        }
         curr = halfEdges[opp].nextIndex;
     } while (curr != startHe);
 
     if (n > 0)
     {
-        float3 center = accum / float(n);
+        float3 center = sum / float(n);
         float3 orig = positions_in[vtx];
         positions_out[vtx] = orig + (center - orig) * lambda;
     }

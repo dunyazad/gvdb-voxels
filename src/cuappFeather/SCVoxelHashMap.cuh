@@ -52,7 +52,7 @@ struct SCVoxelHashMap
 
 	HostPointCloud Serialize();
 
-	DeviceHalfEdgeMesh MarchingCubes(float isoValue = 0.0f);
+	void MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue = 0.0f);
 
 	__host__ __device__ static uint64_t expandBits(uint32_t v);
 	__host__ __device__ static uint32_t compactBits(uint64_t x);

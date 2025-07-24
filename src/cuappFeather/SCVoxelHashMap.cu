@@ -115,12 +115,12 @@ HostPointCloud SCVoxelHashMap::Serialize()
 	return h_result;
 }
 
-DeviceHalfEdgeMesh SCVoxelHashMap::MarchingCubes(float isoValue)
+void SCVoxelHashMap::MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue)
 {
-	DeviceHalfEdgeMesh dhem;
 	unsigned int maxPoints = info.h_numberOfOccupiedVoxels * 3;
 	unsigned int maxFaces = info.h_numberOfOccupiedVoxels * 15;
-	dhem.Initialize(maxPoints, maxFaces);
+	mesh.Terminate();
+	mesh.Initialize(maxPoints, maxFaces);
 
 	unsigned int* d_numberOfPoints = nullptr;
 	unsigned int* d_numberOfFaces = nullptr;
@@ -130,37 +130,29 @@ DeviceHalfEdgeMesh SCVoxelHashMap::MarchingCubes(float isoValue)
 	cudaMemset(d_numberOfFaces, 0, sizeof(unsigned int));
 	CUDA_SYNC();
 
-	// 1. zero-crossing points 생성
 	LaunchKernel(Kernel_SCVoxelHashMap_CreateZeroCrossingPoints, info.h_numberOfOccupiedVoxels,
-		info, dhem.positions, dhem.normals, dhem.colors, d_numberOfPoints);
+		info, mesh.positions, mesh.normals, mesh.colors, d_numberOfPoints);
 	CUDA_SYNC();
 
-	// 2. Marching Cubes triangles 생성
 	LaunchKernel(Kernel_SCVoxelHashMap_MarchingCubes, info.h_numberOfOccupiedVoxels,
-		info, isoValue, dhem.faces, d_numberOfFaces);
+		info, isoValue, mesh.faces, d_numberOfFaces);
 	CUDA_SYNC();
 
-	// 3. 실제 점/페이스 개수 읽기
 	unsigned int h_numberOfPoints = 0, h_numberOfFaces = 0;
 	CUDA_COPY_D2H(&h_numberOfPoints, d_numberOfPoints, sizeof(unsigned int));
 	CUDA_COPY_D2H(&h_numberOfFaces, d_numberOfFaces, sizeof(unsigned int));
 	CUDA_SYNC();
 
-	// 4. numberOfPoints/numberOfFaces 업데이트
-	dhem.numberOfPoints = h_numberOfPoints;
-	dhem.numberOfFaces = h_numberOfFaces;
+	mesh.numberOfPoints = h_numberOfPoints;
+	mesh.numberOfFaces = h_numberOfFaces;
 
-	// 5. GPU에서 halfedge build
-	dhem.BuildHalfEdges();
+	mesh.BuildHalfEdges();
 
-	// 6. (option) 라플라시안 스무딩 등 수행
-	//dhem.LaplacianSmoothing(3, 1.0f);
-	//dhem.LaplacianSmoothingNRing(2, 0.15f, 1);
+	//mesh.LaplacianSmoothing(1, 1.0f);
+	//mesh.LaplacianSmoothingNRing(2, 0.15f, 1);
 
 	cudaFree(d_numberOfPoints);
 	cudaFree(d_numberOfFaces);
-
-	return dhem;
 }
 
 __host__ __device__ uint64_t SCVoxelHashMap::expandBits(uint32_t v)

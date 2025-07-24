@@ -70,9 +70,9 @@ public:
 
     DevicePointCloud d_input;
     SCVoxelHashMap vhm;
+    HostHalfEdgeMesh h_mesh;
+    DeviceHalfEdgeMesh d_mesh;
 
-    HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input);
-
+    HostPointCloud ProcessPointCloud(const HostPointCloud& h_input);
+    void ProcessHalfEdgeMesh(const string& filename);
 };
-
-void cuMain(float voxelSize, std::vector<float3>& host_points, std::vector<float3>& host_normals, std::vector<uchar3>& host_colors, float3 center);
