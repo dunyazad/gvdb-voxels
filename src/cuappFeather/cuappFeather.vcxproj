@@ -15,6 +15,7 @@
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <CudaCompile Include="BitVolume.cu" />
     <CudaCompile Include="HalfEdgeMesh.cu" />
     <CudaCompile Include="main.cu" />
     <CudaCompile Include="Mesh.cu" />
@@ -23,19 +24,17 @@
     <CudaCompile Include="VoxelHashMap.cu" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="BitVolume.hpp" />
+    <ClInclude Include="BitVolume.cuh" />
     <ClInclude Include="cuda_common.cuh" />
     <ClInclude Include="cuda_vector_math.cuh" />
     <ClInclude Include="DenseGrid.hpp" />
     <ClInclude Include="HalfEdgeMesh.cuh" />
-    <ClInclude Include="KDTree.hpp" />
     <ClInclude Include="main.cuh" />
     <ClInclude Include="marching_cubes_constants.cuh" />
     <ClInclude Include="Mesh.cuh" />
     <ClInclude Include="Octree.cuh" />
     <ClInclude Include="PointCloud.cuh" />
     <ClInclude Include="SCVoxelHashMap.cuh" />
-    <ClInclude Include="TSDF.hpp" />
     <ClInclude Include="VoxelHashMap.cuh" />
   </ItemGroup>
   <ItemGroup>

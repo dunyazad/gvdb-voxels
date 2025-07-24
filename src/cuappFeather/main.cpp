@@ -15,6 +15,8 @@ using namespace std;
 #include "nvapi510/include/nvapi.h"
 #include "nvapi510/include/NvApiDriverSettings.h"
 
+CUDAInstance cudaInstance;
+
 //#define SAVE_VOXEL_HASHMAP_POINT_CLOUD
 
 bool ForceGPUPerformance()
@@ -266,8 +268,19 @@ int main(int argc, char** argv)
 			Feather.GetComponent<CameraManipulatorTrackball>(entity)->OnMousePosition(event);
 			});
 
-		Feather.CreateEventCallback<MouseButtonEvent>(cam, [](Entity entity, const MouseButtonEvent& event) {
-			Feather.GetComponent<CameraManipulatorTrackball>(entity)->OnMouseButton(event);
+		Feather.CreateEventCallback<MouseButtonEvent>(cam, [w](Entity entity, const MouseButtonEvent& event) {
+			auto manipulator = Feather.GetComponent<CameraManipulatorTrackball>(entity);
+			manipulator->OnMouseButton(event);
+
+			auto renderable = Feather.GetComponent<Renderable>(entity);
+			if (event.button == 0 && event.action == 0)
+			{
+				printf("LButton Released\n");
+
+				auto ray = manipulator->GetCamera()->ScreenPointToRay(event.xpos, event.ypos, w->GetWidth(), w->GetHeight());
+				printf("From : %.4f, %.4f, %.4f, Direction : %.4f, %.4f, %.4f\n",
+					ray.origin.x, ray.origin.y, ray.origin.z, ray.direction.x, ray.direction.y, ray.direction.z);
+			}
 			});
 
 		Feather.CreateEventCallback<MouseWheelEvent>(cam, [](Entity entity, const MouseWheelEvent& event) {
@@ -462,7 +475,7 @@ int main(int argc, char** argv)
 				return (seed & 0xFFFFFF) / static_cast<float>(0xFFFFFF);
 			};
 
-			auto result = ProcessPointCloud(h_pointCloud);
+			auto result = cudaInstance.ProcessPointCloud(h_pointCloud);
 			ApplyPointCloudToEntity(entity, result);
 
 #ifdef SAVE_VOXEL_HASHMAP_POINT_CLOUD

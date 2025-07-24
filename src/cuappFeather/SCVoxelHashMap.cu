@@ -115,63 +115,52 @@ HostPointCloud SCVoxelHashMap::Serialize()
 	return h_result;
 }
 
-HostHalfEdgeMesh SCVoxelHashMap::MarchingCubes(float isoValue)
+DeviceHalfEdgeMesh SCVoxelHashMap::MarchingCubes(float isoValue)
 {
-	HostHalfEdgeMesh h_result;
-	if (info.h_numberOfOccupiedVoxels == 0) return h_result;
+	DeviceHalfEdgeMesh dhem;
+	unsigned int maxPoints = info.h_numberOfOccupiedVoxels * 3;
+	unsigned int maxFaces = info.h_numberOfOccupiedVoxels * 15;
+	dhem.Initialize(maxPoints, maxFaces);
 
-	float3* d_positions = nullptr;
-	float3* d_normals = nullptr;
-	float3* d_colors = nullptr;
 	unsigned int* d_numberOfPoints = nullptr;
-
-	cudaMalloc(&d_positions, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
-	cudaMalloc(&d_normals, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
-	cudaMalloc(&d_colors, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
-	cudaMalloc(&d_numberOfPoints, sizeof(unsigned int));
-	cudaMemset(d_numberOfPoints, 0, sizeof(unsigned int));
-	CUDA_SYNC();
-
-	LaunchKernel(Kernel_SCVoxelHashMap_CreateZeroCrossingPoints, info.h_numberOfOccupiedVoxels,
-		info, d_positions, d_normals, d_colors, d_numberOfPoints);
-	CUDA_SYNC();
-
-	unsigned int h_numberOfPoints = 0;
-	CUDA_COPY_D2H(&h_numberOfPoints, d_numberOfPoints, sizeof(unsigned int));
-	CUDA_SYNC();
-
-	uint3* d_faces = nullptr;
 	unsigned int* d_numberOfFaces = nullptr;
-
-	cudaMalloc(&d_faces, sizeof(uint3) * info.h_numberOfOccupiedVoxels * 3 * 5);
+	cudaMalloc(&d_numberOfPoints, sizeof(unsigned int));
 	cudaMalloc(&d_numberOfFaces, sizeof(unsigned int));
+	cudaMemset(d_numberOfPoints, 0, sizeof(unsigned int));
 	cudaMemset(d_numberOfFaces, 0, sizeof(unsigned int));
 	CUDA_SYNC();
 
-	LaunchKernel(Kernel_SCVoxelHashMap_MarchingCubes, info.h_numberOfOccupiedVoxels,
-		info, isoValue, d_faces, d_numberOfFaces);
+	// 1. zero-crossing points 생성
+	LaunchKernel(Kernel_SCVoxelHashMap_CreateZeroCrossingPoints, info.h_numberOfOccupiedVoxels,
+		info, dhem.positions, dhem.normals, dhem.colors, d_numberOfPoints);
 	CUDA_SYNC();
 
-	unsigned int h_numberOfFaces = 0;
+	// 2. Marching Cubes triangles 생성
+	LaunchKernel(Kernel_SCVoxelHashMap_MarchingCubes, info.h_numberOfOccupiedVoxels,
+		info, isoValue, dhem.faces, d_numberOfFaces);
+	CUDA_SYNC();
+
+	// 3. 실제 점/페이스 개수 읽기
+	unsigned int h_numberOfPoints = 0, h_numberOfFaces = 0;
+	CUDA_COPY_D2H(&h_numberOfPoints, d_numberOfPoints, sizeof(unsigned int));
 	CUDA_COPY_D2H(&h_numberOfFaces, d_numberOfFaces, sizeof(unsigned int));
 	CUDA_SYNC();
 
-	h_result.Initialize(h_numberOfPoints, h_numberOfFaces);
-	CUDA_COPY_D2H(h_result.positions, d_positions, sizeof(float3) * h_numberOfPoints);
-	CUDA_COPY_D2H(h_result.normals, d_normals, sizeof(float3) * h_numberOfPoints);
-	CUDA_COPY_D2H(h_result.colors, d_colors, sizeof(float3) * h_numberOfPoints);
-	CUDA_COPY_D2H(h_result.faces, d_faces, sizeof(uint3) * h_numberOfFaces);
-	CUDA_SYNC();
+	// 4. numberOfPoints/numberOfFaces 업데이트
+	dhem.numberOfPoints = h_numberOfPoints;
+	dhem.numberOfFaces = h_numberOfFaces;
 
-	cudaFree(d_positions);
-	cudaFree(d_normals);
-	cudaFree(d_colors);
+	// 5. GPU에서 halfedge build
+	dhem.BuildHalfEdges();
+
+	// 6. (option) 라플라시안 스무딩 등 수행
+	//dhem.LaplacianSmoothing(3, 1.0f);
+	//dhem.LaplacianSmoothingNRing(2, 0.15f, 1);
+
 	cudaFree(d_numberOfPoints);
-
-	cudaFree(d_faces);
 	cudaFree(d_numberOfFaces);
 
-	return h_result;
+	return dhem;
 }
 
 __host__ __device__ uint64_t SCVoxelHashMap::expandBits(uint32_t v)

@@ -10,6 +10,12 @@
 #include <cuda_common.cuh>
 
 #include <PointCloud.cuh>
+#include <HashMap.hpp>
+#include <BitVolume.cuh>
+#include <DenseGrid.hpp>
+#include <VoxelHashMap.cuh>
+#include <SCVoxelHashMap.cuh>
+#include <HalfEdgeMesh.cuh>
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
@@ -56,6 +62,17 @@ __host__ float3 H_FromKey(uint64_t key, float resolution = 0.0001f);
 
 class Texture;
 
-HostPointCloud ProcessPointCloud(const HostPointCloud& h_input);
+class CUDAInstance
+{
+public:
+    CUDAInstance();
+    ~CUDAInstance();
+
+    DevicePointCloud d_input;
+    SCVoxelHashMap vhm;
+
+    HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input);
+
+};
 
 void cuMain(float voxelSize, std::vector<float3>& host_points, std::vector<float3>& host_normals, std::vector<uchar3>& host_colors, float3 center);
