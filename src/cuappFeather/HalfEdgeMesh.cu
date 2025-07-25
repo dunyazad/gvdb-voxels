@@ -498,7 +498,7 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
     for (unsigned int it = 0; it < iterations; ++it)
     {
         LaunchKernel(Kernel_DeviceHalfEdgeMesh_LaplacianSmooth, numberOfPoints,
-            positionsA, positionsB, numberOfPoints, halfEdges, numberOfHalfEdges, lambda);
+            positionsA, positionsB, numberOfPoints, halfEdges, numberOfHalfEdges, vertexToHalfEdge, lambda);
         std::swap(positionsA, positionsB);
     }
 
@@ -785,11 +785,13 @@ __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     unsigned int numberOfPoints,
     const HalfEdge* halfEdges,
     unsigned int numberOfHalfEdges,
+    unsigned int* vertexToHalfEdge,
     float lambda)
 {
     unsigned int vid = blockIdx.x * blockDim.x + threadIdx.x;
     if (vid >= numberOfPoints) return;
 
+    /*
     float3 center = positions_in[vid];
     float3 sum = make_float3(0, 0, 0);
     unsigned int count = 0;
@@ -817,8 +819,56 @@ __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     {
         positions_out[vid] = center;
     }
-}
+    */
 
+    unsigned int heStart = vertexToHalfEdge[vid];
+    if (UINT32_MAX == heStart) return;
+
+    float3 center = positions_in[vid];
+    
+    if (UINT32_MAX == halfEdges[heStart].oppositeIndex)
+    {
+        positions_out[vid] = center;
+        return;
+    }
+
+    float3 sum = make_float3(0, 0, 0);
+    unsigned int count = 0;
+
+    unsigned int he = heStart;
+    do
+    {
+        int opp = halfEdges[he].oppositeIndex;
+        if (opp == UINT32_MAX)
+        {
+            positions_out[vid] = center;
+            return;
+        }
+
+        unsigned int neighbor = halfEdges[opp].vertexIndex;
+        if (neighbor >= numberOfPoints)
+        {
+            positions_out[vid] = center;
+            return;
+        }
+
+        sum += positions_in[neighbor];
+        count++;
+
+        he = halfEdges[opp].nextIndex;
+
+    } while (he != heStart);
+
+    if (count > 0)
+    {
+        float3 avg = sum / (float)count;
+        positions_out[vid] = center + lambda * (avg - center);
+    }
+    else
+    {
+        positions_out[vid] = center;
+    }
+}
 
 __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmoothNRing(
     float3* positions_in,

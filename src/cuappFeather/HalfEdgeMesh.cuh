@@ -123,17 +123,13 @@ __global__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdgeMapping(
     unsigned int* vertexToHalfEdge,
     unsigned int numberOfHalfEdges);
 
-__global__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdge(
-    const HalfEdge* halfEdges,
-    unsigned int* vertexToHalfEdge,
-    unsigned int numberOfHalfEdges);
-
 __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
     const HalfEdge* halfEdges,
     unsigned int numberOfHalfEdges,
+    unsigned int* vertexToHalfEdge,
     float lambda);
 
 __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmoothNRing(
