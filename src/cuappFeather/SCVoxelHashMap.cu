@@ -148,7 +148,7 @@ void SCVoxelHashMap::MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue)
 
 	mesh.BuildHalfEdges();
 
-	//mesh.LaplacianSmoothing(1, 1.0f);
+	mesh.LaplacianSmoothing(3, 1.0f);
 	//mesh.LaplacianSmoothingNRing(2, 0.15f, 1);
 
 	cudaFree(d_numberOfPoints);

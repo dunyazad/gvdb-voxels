@@ -227,6 +227,18 @@ void ApplyHalfEdgeMeshToEntity(Entity entity, const HostHalfEdgeMesh& h_mesh)
 		renderable->Clear();
 	}
 
+	printf("numPoints: %d, numFaces: %d\n", cudaInstance.h_mesh.numberOfPoints, cudaInstance.h_mesh.numberOfFaces);
+	for (unsigned int i = 0; i < cudaInstance.h_mesh.numberOfFaces; ++i)
+	{
+		auto tri = cudaInstance.h_mesh.faces[i];
+		if (tri.x >= cudaInstance.h_mesh.numberOfPoints ||
+			tri.y >= cudaInstance.h_mesh.numberOfPoints ||
+			tri.z >= cudaInstance.h_mesh.numberOfPoints)
+		{
+			printf("Invalid face[%u]: %u %u %u\n", i, tri.x, tri.y, tri.z);
+		}
+	}
+
 	// 필수: 최소한 하나라도 vertex/face가 있어야 함
 	if (h_mesh.numberOfPoints == 0 || h_mesh.numberOfFaces == 0)
 	{
@@ -670,17 +682,17 @@ int main(int argc, char** argv)
 				}
 				});
 
-			printf("numPoints: %d, numFaces: %d\n", cudaInstance.h_mesh.numberOfPoints, cudaInstance.h_mesh.numberOfFaces);
-			for (unsigned int i = 0; i < cudaInstance.h_mesh.numberOfFaces; ++i)
-			{
-				auto tri = cudaInstance.h_mesh.faces[i];
-				if (tri.x >= cudaInstance.h_mesh.numberOfPoints ||
-					tri.y >= cudaInstance.h_mesh.numberOfPoints ||
-					tri.z >= cudaInstance.h_mesh.numberOfPoints)
-				{
-					printf("Invalid face[%u]: %u %u %u\n", i, tri.x, tri.y, tri.z);
-				}
-			}
+			//printf("numPoints: %d, numFaces: %d\n", cudaInstance.h_mesh.numberOfPoints, cudaInstance.h_mesh.numberOfFaces);
+			//for (unsigned int i = 0; i < cudaInstance.h_mesh.numberOfFaces; ++i)
+			//{
+			//	auto tri = cudaInstance.h_mesh.faces[i];
+			//	if (tri.x >= cudaInstance.h_mesh.numberOfPoints ||
+			//		tri.y >= cudaInstance.h_mesh.numberOfPoints ||
+			//		tri.z >= cudaInstance.h_mesh.numberOfPoints)
+			//	{
+			//		printf("Invalid face[%u]: %u %u %u\n", i, tri.x, tri.y, tri.z);
+			//	}
+			//}
 
 #ifdef SAVE_VOXEL_HASHMAP_POINT_CLOUD
 			PLYFormat ply;

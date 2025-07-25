@@ -149,6 +149,51 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
     CUDA_TE(MarchingCubes);
     h_mesh.CopyFromDevice(d_mesh);
 
+    h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh.ply", false);
+
+    //{
+    //    auto& mesh = h_mesh;
+
+    //    size_t numHalfEdges = mesh.numberOfFaces * 3;
+
+    //    for (size_t i = 0; i < numHalfEdges; ++i)
+    //    {
+    //        const auto& he = mesh.halfEdges[i];
+
+    //        if (he.oppositeIndex == UINT32_MAX)
+    //            continue; // boundary edge, skip
+
+    //        const auto& ohe = mesh.halfEdges[he.oppositeIndex];
+
+    //        // 1. Opposite of opposite should point back
+    //        if (ohe.oppositeIndex != i)
+    //        {
+    //            printf("[Invalid Opposite] at halfEdge %zu: ohe.oppositeIndex = %u\n", i, ohe.oppositeIndex);
+    //        }
+
+    //        // 2. Shared edge must be reversed (v0->v1 vs. v1->v0)
+    //        unsigned int he_v0 = he.vertexIndex;
+    //        unsigned int he_v1 = mesh.halfEdges[he.nextIndex].vertexIndex;
+
+    //        unsigned int ohe_v0 = ohe.vertexIndex;
+    //        unsigned int ohe_v1 = mesh.halfEdges[ohe.nextIndex].vertexIndex;
+
+    //        if (!(he_v0 == ohe_v1 && he_v1 == ohe_v0))
+    //        {
+    //            printf("[Mismatch] Edge direction mismatch at %zu: %u¡æ%u vs %u¡æ%u\n",
+    //                i, he_v0, he_v1, ohe_v0, ohe_v1);
+    //        }
+
+    //        // 3. Optional: check next cycle closure
+    //        const auto& e1 = mesh.halfEdges[he.nextIndex];
+    //        const auto& e2 = mesh.halfEdges[e1.nextIndex];
+    //        if (e2.nextIndex != i)
+    //        {
+    //            printf("[Loop Error] Face loop broken at halfEdge %zu\n", i);
+    //        }
+    //    }
+    //}
+
     //h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh.ply", false);
 
  /*   PLYFormat plyMesh;

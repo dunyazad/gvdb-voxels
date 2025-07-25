@@ -21,6 +21,7 @@ HostHalfEdgeMesh& HostHalfEdgeMesh::operator=(const HostHalfEdgeMesh& other)
     memcpy(faces, other.faces, sizeof(uint3) * numberOfFaces);
     memcpy(halfEdges, other.halfEdges, sizeof(HalfEdge) * numberOfFaces * 3);
     memcpy(halfEdgeFaces, other.halfEdgeFaces, sizeof(HalfEdgeFace) * numberOfFaces);
+    memcpy(vertexToHalfEdge, other.vertexToHalfEdge, sizeof(unsigned int) * numberOfPoints);
     return *this;
 }
 
@@ -61,12 +62,14 @@ void HostHalfEdgeMesh::Initialize(unsigned int numberOfPoints, unsigned int numb
         faces = new uint3[numberOfFaces];
         halfEdges = new HalfEdge[numberOfFaces * 3];
         halfEdgeFaces = new HalfEdgeFace[numberOfFaces];
+        vertexToHalfEdge = new unsigned int[numberOfPoints];
     }
     else
     {
         faces = nullptr;
         halfEdges = nullptr;
         halfEdgeFaces = nullptr;
+        vertexToHalfEdge = nullptr;
     }
 }
 
@@ -78,6 +81,7 @@ void HostHalfEdgeMesh::Terminate()
     if (faces) delete[] faces;
     if (halfEdges) delete[] halfEdges;
     if (halfEdgeFaces) delete[] halfEdgeFaces;
+    if (vertexToHalfEdge) delete[] vertexToHalfEdge;
 
     positions = nullptr;
     normals = nullptr;
@@ -85,6 +89,7 @@ void HostHalfEdgeMesh::Terminate()
     faces = nullptr;
     halfEdges = nullptr;
     halfEdgeFaces = nullptr;
+    vertexToHalfEdge = nullptr;
     numberOfPoints = 0;
     numberOfFaces = 0;
 }
@@ -100,6 +105,7 @@ void HostHalfEdgeMesh::CopyFromDevice(const DeviceHalfEdgeMesh& deviceMesh)
     CUDA_COPY_D2H(faces, deviceMesh.faces, sizeof(uint3) * numberOfFaces);
     CUDA_COPY_D2H(halfEdges, deviceMesh.halfEdges, sizeof(HalfEdge) * numberOfFaces * 3);
     CUDA_COPY_D2H(halfEdgeFaces, deviceMesh.halfEdgeFaces, sizeof(HalfEdgeFace) * numberOfFaces);
+    CUDA_COPY_D2H(vertexToHalfEdge, deviceMesh.vertexToHalfEdge, sizeof(unsigned int) * numberOfPoints);
 
     CUDA_SYNC();
 }
@@ -115,75 +121,77 @@ void HostHalfEdgeMesh::CopyToDevice(DeviceHalfEdgeMesh& deviceMesh) const
     CUDA_COPY_H2D(deviceMesh.faces, faces, sizeof(uint3) * numberOfFaces);
     CUDA_COPY_H2D(deviceMesh.halfEdges, halfEdges, sizeof(HalfEdge) * numberOfFaces * 3);
     CUDA_COPY_H2D(deviceMesh.halfEdgeFaces, halfEdgeFaces, sizeof(HalfEdgeFace) * numberOfFaces);
+    CUDA_COPY_H2D(deviceMesh.vertexToHalfEdge, vertexToHalfEdge, sizeof(unsigned int) * numberOfPoints);
 
     CUDA_SYNC();
+}
+
+uint64_t HostHalfEdgeMesh::PackEdge(unsigned int v0, unsigned int v1)
+{
+    return (static_cast<uint64_t>(v0) << 32) | static_cast<uint64_t>(v1);
 }
 
 void HostHalfEdgeMesh::BuildHalfEdges()
 {
     if (numberOfFaces == 0 || faces == nullptr)
-    {
         return;
-    }
 
-    // halfEdges, halfEdgeFaces 메모리 할당/재할당 (이미 Initialize에서 처리됨)
-    // 기존 할당된 것이 있다고 가정
-
-    // edge map: key = PackEdge(v0, v1), value = halfEdge index
-    // std::unordered_map<uint64_t, unsigned int>를 사용
     std::unordered_map<uint64_t, unsigned int> edgeMap;
 
-    // 1. 각 face마다 3개의 halfedge 생성 및 edgeMap 채우기
-    for (unsigned int f = 0; f < numberOfFaces; ++f)
+    for (unsigned int i = 0; i < numberOfFaces; ++i)
     {
-        const uint3& tri = faces[f];
-        unsigned int baseIdx = f * 3;
-        unsigned int heIdx[3] = { baseIdx, baseIdx + 1, baseIdx + 2 };
+        auto& face = faces[i];
 
-        for (int i = 0; i < 3; ++i)
-        {
-            unsigned int v0, v1;
-            if (i == 0) { v0 = tri.x; v1 = tri.y; }
-            else if (i == 1) { v0 = tri.y; v1 = tri.z; }
-            else { v0 = tri.z; v1 = tri.x; }
+        auto& e0 = halfEdges[i * 3 + 0];
+        auto& e1 = halfEdges[i * 3 + 1];
+        auto& e2 = halfEdges[i * 3 + 2];
 
-            HalfEdge& he = halfEdges[heIdx[i]];
-            he.vertexIndex = v1;
-            he.faceIndex = f;
-            he.nextIndex = heIdx[(i + 1) % 3];
-            he.oppositeIndex = UINT32_MAX;
+        auto& f = halfEdgeFaces[i];
 
-            uint64_t edgeKey = (static_cast<uint64_t>(v0) << 32) | static_cast<uint64_t>(v1);
-            edgeMap[edgeKey] = heIdx[i];
-        }
+        e0.faceIndex = i; e1.faceIndex = i; e2.faceIndex = i;
+        e0.nextIndex = i * 3 + 1; e1.nextIndex = i * 3 + 2; e2.nextIndex = i * 3 + 0;
+        
+        e0.vertexIndex = face.x;
+        e1.vertexIndex = face.y;
+        e2.vertexIndex = face.z;
+        e0.oppositeIndex = e1.oppositeIndex = e2.oppositeIndex = UINT32_MAX;
+        f.halfEdgeIndex = i * 3;
 
-        halfEdgeFaces[f].halfEdgeIndex = baseIdx;
+        edgeMap[PackEdge(face.x, face.y)] = i * 3 + 0; // v0->v1
+        edgeMap[PackEdge(face.y, face.z)] = i * 3 + 1; // v1->v2
+        edgeMap[PackEdge(face.z, face.x)] = i * 3 + 2; // v2->v0
     }
 
-    // 2. opposite 링크 생성
-    for (unsigned int f = 0; f < numberOfFaces; ++f)
+    for (unsigned int i = 0; i < numberOfFaces; ++i)
     {
-        unsigned int baseIdx = f * 3;
-        const uint3& tri = faces[f];
+        auto& face = faces[i];
+        // 0: v0->v1, 1: v1->v2, 2: v2->v0
+        if (auto it = edgeMap.find(PackEdge(face.y, face.x)); it != edgeMap.end())
+            halfEdges[i * 3 + 0].oppositeIndex = it->second;
+        if (auto it = edgeMap.find(PackEdge(face.z, face.y)); it != edgeMap.end())
+            halfEdges[i * 3 + 1].oppositeIndex = it->second;
+        if (auto it = edgeMap.find(PackEdge(face.x, face.z)); it != edgeMap.end())
+            halfEdges[i * 3 + 2].oppositeIndex = it->second;
+    }
 
-        for (int i = 0; i < 3; ++i)
-        {
-            unsigned int currHeIdx = baseIdx + i;
-            unsigned int v0, v1;
-            if (i == 0) { v0 = tri.x; v1 = tri.y; }
-            else if (i == 1) { v0 = tri.y; v1 = tri.z; }
-            else { v0 = tri.z; v1 = tri.x; }
+    BuildVertexToHalfEdgeMapping();
+}
 
-            uint64_t oppKey = (static_cast<uint64_t>(v1) << 32) | static_cast<uint64_t>(v0);
+void HostHalfEdgeMesh::BuildVertexToHalfEdgeMapping()
+{
+    if (vertexToHalfEdge) delete[] vertexToHalfEdge;
+    vertexToHalfEdge = new unsigned int[numberOfPoints];
+    for (unsigned int i = 0; i < numberOfPoints; ++i)
+        vertexToHalfEdge[i] = UINT32_MAX;
 
-            auto it = edgeMap.find(oppKey);
-            if (it != edgeMap.end())
-            {
-                halfEdges[currHeIdx].oppositeIndex = it->second;
-            }
-        }
+    for (unsigned int i = 0; i < numberOfFaces * 3; ++i)
+    {
+        unsigned int v = halfEdges[i].vertexIndex;
+        if (v < numberOfPoints && vertexToHalfEdge[v] == UINT32_MAX)
+            vertexToHalfEdge[v] = i;
     }
 }
+
 
 bool HostHalfEdgeMesh::SerializePLY(const std::string& filename, bool useAlpha)
 {
@@ -355,20 +363,20 @@ void DeviceHalfEdgeMesh::Initialize(unsigned int numberOfPoints, unsigned int nu
         cudaMalloc(&positions, sizeof(float3) * numberOfPoints);
         cudaMalloc(&normals, sizeof(float3) * numberOfPoints);
         cudaMalloc(&colors, sizeof(float3) * numberOfPoints);
-        cudaMalloc(&vertexToHalfEdge, sizeof(unsigned int) * numberOfPoints);
     }
     else
     {
         positions = nullptr;
         normals = nullptr;
         colors = nullptr;
-        vertexToHalfEdge = nullptr;
     }
     if (numberOfFaces > 0)
     {
         cudaMalloc(&faces, sizeof(uint3) * numberOfFaces);
         cudaMalloc(&halfEdges, sizeof(HalfEdge) * numberOfFaces * 3);
         cudaMalloc(&halfEdgeFaces, sizeof(HalfEdgeFace) * numberOfFaces);
+        cudaMalloc(&vertexToHalfEdge, sizeof(unsigned int) * numberOfPoints);
+        cudaMemset(vertexToHalfEdge, 0xFF, sizeof(unsigned int) * numberOfPoints);
     }
     else
     {
@@ -407,6 +415,7 @@ void DeviceHalfEdgeMesh::CopyFromHost(const HostHalfEdgeMesh& hostMesh)
     CUDA_COPY_H2D(faces, hostMesh.faces, sizeof(uint3) * hostMesh.numberOfFaces);
     CUDA_COPY_H2D(halfEdges, hostMesh.halfEdges, sizeof(HalfEdge) * hostMesh.numberOfFaces * 3);
     CUDA_COPY_H2D(halfEdgeFaces, hostMesh.halfEdgeFaces, sizeof(HalfEdgeFace) * hostMesh.numberOfFaces);
+    CUDA_COPY_H2D(vertexToHalfEdge, hostMesh.vertexToHalfEdge, sizeof(unsigned int) * hostMesh.numberOfPoints);
     CUDA_SYNC();
 }
 
@@ -421,6 +430,7 @@ void DeviceHalfEdgeMesh::CopyToHost(HostHalfEdgeMesh& hostMesh) const
     CUDA_COPY_D2H(hostMesh.faces, faces, sizeof(uint3) * numberOfFaces);
     CUDA_COPY_D2H(hostMesh.halfEdges, halfEdges, sizeof(HalfEdge) * numberOfFaces * 3);
     CUDA_COPY_D2H(hostMesh.halfEdgeFaces, halfEdgeFaces, sizeof(HalfEdgeFace) * numberOfFaces);
+    CUDA_COPY_D2H(hostMesh.vertexToHalfEdge, vertexToHalfEdge, sizeof(unsigned int) * numberOfPoints);
 
     CUDA_SYNC();
 }
@@ -439,26 +449,14 @@ void DeviceHalfEdgeMesh::BuildHalfEdges()
 
     LaunchKernel(Kernel_DeviceHalfEdgeMesh_LinkOpposites, numberOfFaces,
         faces, numberOfFaces, halfEdges, edgeMap.info);
+
+    LaunchKernel(Kernel_DeviceHalfEdgeMesh_ValidateOppositeEdges, numHalfEdges, halfEdges, numHalfEdges);
+
+    LaunchKernel(Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdgeMapping, numHalfEdges,
+        halfEdges, vertexToHalfEdge, numHalfEdges);
     CUDA_SYNC();
 
     edgeMap.Terminate();
-
-    // ========== vertexToHalfEdge 세팅 ==========
-    // (호스트에서 한번만, 커널 이후에 복사)
-    std::vector<HalfEdge> h_halfEdges(numHalfEdges);
-    CUDA_COPY_D2H(h_halfEdges.data(), halfEdges, sizeof(HalfEdge) * numHalfEdges);
-
-    std::vector<unsigned int> h_vertexToHalfEdge(numberOfPoints, UINT32_MAX);
-    for (unsigned int i = 0; i < numHalfEdges; ++i)
-    {
-        unsigned int v = h_halfEdges[i].vertexIndex;
-        if (v < numberOfPoints && h_vertexToHalfEdge[v] == UINT32_MAX)
-        {
-            h_vertexToHalfEdge[v] = i;
-        }
-    }
-    CUDA_COPY_H2D(vertexToHalfEdge, h_vertexToHalfEdge.data(), sizeof(unsigned int) * numberOfPoints);
-    CUDA_SYNC();
 }
 
 bool DeviceHalfEdgeMesh::PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const
@@ -495,11 +493,12 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
 
     float3* toFree = positionsB;
 
+    auto numberOfHalfEdges = numberOfFaces * 3;
+
     for (unsigned int it = 0; it < iterations; ++it)
     {
-        LaunchKernel(Kernel_LaplacianSmooth, numberOfPoints,
-            halfEdges, vertexToHalfEdge, positionsA, positionsB, numberOfPoints, lambda);
-        CUDA_SYNC();
+        LaunchKernel(Kernel_DeviceHalfEdgeMesh_LaplacianSmooth, numberOfPoints,
+            positionsA, positionsB, numberOfPoints, halfEdges, numberOfHalfEdges, lambda);
         std::swap(positionsA, positionsB);
     }
 
@@ -514,7 +513,7 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
 
 void DeviceHalfEdgeMesh::LaplacianSmoothingNRing(unsigned int iterations, float lambda, int nRing)
 {
-    if (numberOfPoints == 0 || numberOfFaces == 0) return;
+ /*   if (numberOfPoints == 0 || numberOfFaces == 0) return;
 
     float3* positionsA = positions;
     float3* positionsB;
@@ -522,7 +521,7 @@ void DeviceHalfEdgeMesh::LaplacianSmoothingNRing(unsigned int iterations, float 
 
     for (unsigned int it = 0; it < iterations; ++it)
     {
-        LaunchKernel(Kernel_LaplacianSmoothNRing, numberOfPoints,
+        LaunchKernel(Kernel_DeviceHalfEdgeMesh_LaplacianSmoothNRing, numberOfPoints,
             halfEdges, vertexToHalfEdge, positionsA, positionsB, numberOfPoints, lambda, nRing);
         CUDA_SYNC();
         std::swap(positionsA, positionsB);
@@ -532,7 +531,7 @@ void DeviceHalfEdgeMesh::LaplacianSmoothingNRing(unsigned int iterations, float 
     {
         CUDA_COPY_D2D(positions, positionsA, sizeof(float3) * numberOfPoints);
     }
-    cudaFree(positionsB);
+    cudaFree(positionsB);*/
 }
 
 __host__ __device__ uint64_t DeviceHalfEdgeMesh::PackEdge(unsigned int v0, unsigned int v1)
@@ -632,36 +631,46 @@ __global__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
     const uint3* faces,
     unsigned int numberOfFaces,
     HalfEdge* halfEdges,
-    HalfEdgeFace* outFaces,
+    HalfEdgeFace* halfEdgeFaces,
     HashMapInfo<uint64_t, unsigned int> info)
 {
-    unsigned int f = blockIdx.x * blockDim.x + threadIdx.x;
-    if (f >= numberOfFaces) return;
+    unsigned int faceIdx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (faceIdx >= numberOfFaces) return;
 
-    uint3 tri = faces[f];
-    unsigned int baseIdx = f * 3;
-    unsigned int heIdx[3] = { baseIdx, baseIdx + 1, baseIdx + 2 };
+    const uint3 face = faces[faceIdx];
 
-    for (int i = 0; i < 3; ++i)
-    {
-        unsigned int v0, v1;
-        if (i == 0) { v0 = tri.x; v1 = tri.y; }
-        else if (i == 1) { v0 = tri.y; v1 = tri.z; }
-        else { v0 = tri.z; v1 = tri.x; }
+    // 세 꼭짓점 인덱스
+    unsigned int v0 = face.x, v1 = face.y, v2 = face.z;
 
-        HalfEdge he;
-        he.vertexIndex = v1;
-        he.faceIndex = f;
-        he.nextIndex = heIdx[(i + 1) % 3];
-        he.oppositeIndex = UINT32_MAX;
+    // HalfEdgeVertex 및 HalfEdge 인덱스 (faceIdx 기준)
+    unsigned int he0 = faceIdx * 3 + 0;
+    unsigned int he1 = faceIdx * 3 + 1;
+    unsigned int he2 = faceIdx * 3 + 2;
 
-        halfEdges[heIdx[i]] = he;
+    // HalfEdge 설정
+    halfEdges[he0].faceIndex = faceIdx;
+    halfEdges[he1].faceIndex = faceIdx;
+    halfEdges[he2].faceIndex = faceIdx;
 
-        uint64_t edgeKey = DeviceHalfEdgeMesh::PackEdge(v0, v1);
-        DeviceHalfEdgeMesh::HashMapInsert(info, edgeKey, heIdx[i]);
-    }
+    halfEdges[he0].nextIndex = he1;
+    halfEdges[he1].nextIndex = he2;
+    halfEdges[he2].nextIndex = he0;
 
-    outFaces[f].halfEdgeIndex = baseIdx;
+    halfEdges[he0].vertexIndex = v0;
+    halfEdges[he1].vertexIndex = v1;
+    halfEdges[he2].vertexIndex = v2;
+
+    halfEdges[he0].oppositeIndex = UINT32_MAX;
+    halfEdges[he1].oppositeIndex = UINT32_MAX;
+    halfEdges[he2].oppositeIndex = UINT32_MAX;
+
+    // HalfEdgeFace 설정
+    halfEdgeFaces[faceIdx].halfEdgeIndex = he0;
+
+    // Edge map 구축 (항상 "vertex index 쌍"으로!)
+    DeviceHalfEdgeMesh::HashMapInsert(info, DeviceHalfEdgeMesh::PackEdge(v0, v1), he0); // v0->v1
+    DeviceHalfEdgeMesh::HashMapInsert(info, DeviceHalfEdgeMesh::PackEdge(v1, v2), he1); // v1->v2
+    DeviceHalfEdgeMesh::HashMapInsert(info, DeviceHalfEdgeMesh::PackEdge(v2, v0), he2); // v2->v0
 }
 
 __global__ void Kernel_DeviceHalfEdgeMesh_LinkOpposites(
@@ -670,162 +679,245 @@ __global__ void Kernel_DeviceHalfEdgeMesh_LinkOpposites(
     HalfEdge* halfEdges,
     HashMapInfo<uint64_t, unsigned int> info)
 {
-    unsigned int f = blockIdx.x * blockDim.x + threadIdx.x;
-    if (f >= numberOfFaces) return;
+    unsigned int faceIdx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (faceIdx >= numberOfFaces) return;
 
-    uint3 tri = faces[f];
-    unsigned int baseIdx = f * 3;
+    const uint3 face = faces[faceIdx];
+    unsigned int he0 = faceIdx * 3 + 0;
+    unsigned int he1 = faceIdx * 3 + 1;
+    unsigned int he2 = faceIdx * 3 + 2;
 
-    for (int i = 0; i < 3; ++i)
+    // (v0,v1), (v1,v2), (v2,v0) 각각의 반대 edge 찾기
     {
-        unsigned int currHeIdx = baseIdx + i;
-        unsigned int v0, v1;
-        if (i == 0) { v0 = tri.x; v1 = tri.y; }
-        else if (i == 1) { v0 = tri.y; v1 = tri.z; }
-        else { v0 = tri.z; v1 = tri.x; }
-
-        uint64_t oppKey = DeviceHalfEdgeMesh::PackEdge(v1, v0);
+        // he0: v0->v1의 반대는 v1->v0
+        uint64_t oppKey = DeviceHalfEdgeMesh::PackEdge(face.y, face.x);
         unsigned int oppIdx = UINT32_MAX;
-        bool found = DeviceHalfEdgeMesh::HashMapFind(info, oppKey, &oppIdx);
-        if (found && oppIdx != UINT32_MAX)
-        {
-            halfEdges[currHeIdx].oppositeIndex = oppIdx;
-        }
+        if (DeviceHalfEdgeMesh::HashMapFind(info, oppKey, &oppIdx))
+            halfEdges[he0].oppositeIndex = oppIdx;
+    }
+    {
+        // he1: v1->v2의 반대는 v2->v1
+        uint64_t oppKey = DeviceHalfEdgeMesh::PackEdge(face.z, face.y);
+        unsigned int oppIdx = UINT32_MAX;
+        if (DeviceHalfEdgeMesh::HashMapFind(info, oppKey, &oppIdx))
+            halfEdges[he1].oppositeIndex = oppIdx;
+    }
+    {
+        // he2: v2->v0의 반대는 v0->v2
+        uint64_t oppKey = DeviceHalfEdgeMesh::PackEdge(face.x, face.z);
+        unsigned int oppIdx = UINT32_MAX;
+        if (DeviceHalfEdgeMesh::HashMapFind(info, oppKey, &oppIdx))
+            halfEdges[he2].oppositeIndex = oppIdx;
     }
 }
 
-__global__ void Kernel_LaplacianSmooth(
-    const HalfEdge* halfEdges,
-    const unsigned int* vertexToHalfEdge,
-    const float3* positions_in,
-    float3* positions_out,
-    unsigned int numberOfPoints,
-    float lambda)
+__global__ void Kernel_DeviceHalfEdgeMesh_ValidateOppositeEdges(const HalfEdge* halfEdges, size_t numHalfEdges)
 {
-    unsigned int vtx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (vtx >= numberOfPoints) return;
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= numHalfEdges)
+        return;
 
-    unsigned int startHe = vertexToHalfEdge[vtx];
-    if (startHe == UINT32_MAX)
+    const HalfEdge& he = halfEdges[i];
+
+    // 진입 확인 로그 (일단 출력되는지 체크)
+    if (i < 5)
     {
-        positions_out[vtx] = positions_in[vtx];
+        printf("[Entry] Checking halfEdge[%zu]: vertex = %u, next = %u, opp = %u\n",
+            i, he.vertexIndex, he.nextIndex, he.oppositeIndex);
+    }
+
+    if (he.oppositeIndex == UINT32_MAX)
+    {
+        // boundary edge
+        if (i < 5)
+            printf("[Boundary] halfEdge[%zu] has no opposite\n", i);
         return;
     }
 
-    float3 sum = make_float3(0, 0, 0);
-    int n = 0;
-    unsigned int curr = startHe;
-    do
-    {
-        unsigned int neighbor = halfEdges[curr].vertexIndex;
-        if (neighbor < numberOfPoints)
-        {
-            sum += positions_in[neighbor];
-            n++;
-        }
-        unsigned int opp = halfEdges[curr].oppositeIndex;
-        if (opp == UINT32_MAX)
-            break;
-        curr = halfEdges[opp].nextIndex;
-    } while (curr != startHe);
+    const HalfEdge& ohe = halfEdges[he.oppositeIndex];
 
-    if (n > 0)
+    // 1. Opposite가 맞게 연결되어 있는가?
+    if (ohe.oppositeIndex != i)
     {
-        float3 center = sum / float(n);
-        float3 orig = positions_in[vtx];
-        positions_out[vtx] = orig + (center - orig) * lambda;
+        printf("[Invalid Opposite] he[%zu] → opp[%u] → opp = %u (expected %zu)\n",
+            i, he.oppositeIndex, ohe.oppositeIndex, i);
     }
-    else
+
+    // 2. 방향이 맞게 연결되어 있는가?
+    uint32_t he_v0 = he.vertexIndex;
+    uint32_t he_v1 = halfEdges[he.nextIndex].vertexIndex;
+
+    uint32_t ohe_v0 = ohe.vertexIndex;
+    uint32_t ohe_v1 = halfEdges[ohe.nextIndex].vertexIndex;
+
+    if (!(he_v0 == ohe_v1 && he_v1 == ohe_v0))
     {
-        positions_out[vtx] = positions_in[vtx];
+        printf("[Mismatch] Edge direction mismatch at he[%zu]: %u→%u vs opp[%u]: %u→%u\n",
+            i, he_v0, he_v1, he.oppositeIndex, ohe_v0, ohe_v1);
+    }
+
+    // 3. Face loop closure (optional)
+    const HalfEdge& e1 = halfEdges[he.nextIndex];
+    const HalfEdge& e2 = halfEdges[e1.nextIndex];
+    if (e2.nextIndex != i)
+    {
+        printf("[Loop Error] halfEdge[%zu] has broken loop\n", i);
     }
 }
 
-__global__ void Kernel_LaplacianSmoothNRing(
+__global__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdgeMapping(
     const HalfEdge* halfEdges,
-    const unsigned int* vertexToHalfEdge,
-    const float3* positions_in,
+    unsigned int* vertexToHalfEdge,
+    unsigned int numberOfHalfEdges)
+{
+    unsigned int heIdx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (heIdx >= numberOfHalfEdges) return;
+
+    unsigned int v = halfEdges[heIdx].vertexIndex;
+
+    // atomicMin 방식으로 병렬 충돌 방지
+    atomicMin(&vertexToHalfEdge[v], heIdx);
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
+    float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
-    float lambda,
-    int maxRing)
+    const HalfEdge* halfEdges,
+    unsigned int numberOfHalfEdges,
+    float lambda)
 {
-    unsigned int vtx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (vtx >= numberOfPoints) return;
+    unsigned int vid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (vid >= numberOfPoints) return;
 
-    // BFS를 위한 큐 (고정 크기)
-    const int MAX_NEIGHBORS = 1024;
-    unsigned int queue[MAX_NEIGHBORS];
-    unsigned int visited[MAX_NEIGHBORS];
-    unsigned int ring_level[MAX_NEIGHBORS];
+    float3 center = positions_in[vid];
+    float3 sum = make_float3(0, 0, 0);
+    unsigned int count = 0;
 
-    int front = 0, rear = 0;
-    int neighbor_count = 0;
-
-    // 방문체크 및 자기 자신 방문표시
-    for (int i = 0; i < MAX_NEIGHBORS; ++i) visited[i] = UINT32_MAX;
-    visited[0] = vtx;
-    queue[0] = vtx;
-    ring_level[0] = 0;
-    rear = 1;
-
-    while (front < rear && neighbor_count < MAX_NEIGHBORS)
+    for (unsigned int i = 0; i < numberOfHalfEdges; ++i)
     {
-        unsigned int curr_vtx = queue[front];
-        int curr_ring = ring_level[front];
-        front++;
+        if (halfEdges[i].vertexIndex != vid) continue;
 
-        if (curr_ring >= maxRing) continue;
-        unsigned int startHe = vertexToHalfEdge[curr_vtx];
-        if (startHe == UINT32_MAX) continue;
+        int opp = halfEdges[i].oppositeIndex;
+        if (opp == UINT32_MAX) continue;
 
-        unsigned int currHe = startHe;
-        do
-        {
-            unsigned int nextHe = halfEdges[currHe].nextIndex;
-            unsigned int neighbor = halfEdges[nextHe].vertexIndex;
-            // 아직 방문 안 했으면 큐에 추가
-            bool is_visited = false;
-            for (int k = 0; k < rear; ++k)
-            {
-                if (visited[k] == neighbor) { is_visited = true; break; }
-            }
-            if (!is_visited && neighbor < numberOfPoints && neighbor != vtx && rear < MAX_NEIGHBORS)
-            {
-                visited[rear] = neighbor;
-                queue[rear] = neighbor;
-                ring_level[rear] = curr_ring + 1;
-                rear++;
-                neighbor_count++;
-            }
-            unsigned int opp = halfEdges[currHe].oppositeIndex;
-            if (opp == UINT32_MAX) break;
-            currHe = halfEdges[opp].nextIndex;
-        } while (currHe != startHe && neighbor_count < MAX_NEIGHBORS);
+        int neighbor = halfEdges[opp].vertexIndex;
+        if (neighbor == vid || neighbor == UINT32_MAX) continue;
+
+        sum += positions_in[neighbor];
+        count++;
     }
 
-    // neighbor(자기 자신 제외) 평균
-    float3 accum = make_float3(0, 0, 0);
-    int n = 0;
-    for (int i = 1; i < rear; ++i) // i=0은 자기 자신
+    if (count > 0)
     {
-        accum += positions_in[visited[i]];
-        n++;
-    }
-
-    if (n > 0)
-    {
-        float3 center = accum / float(n);
-        float3 orig = positions_in[vtx];
-        positions_out[vtx] = orig + (center - orig) * lambda;
+        float3 avg = sum / (float)count;
+        positions_out[vid] = center + lambda * (avg - center);
     }
     else
     {
-        positions_out[vtx] = positions_in[vtx];
+        positions_out[vid] = center;
     }
 }
 
-__global__ void Kernel_PickFace(
+
+__global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmoothNRing(
+    float3* positions_in,
+    float3* positions_out,
+    unsigned int numberOfPoints,
+    const HalfEdge* halfEdges,
+    const unsigned int* vertexToHalfEdge,
+    unsigned int nRing,
+    float lambda)
+{
+    unsigned int threadId = blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadId >= numberOfPoints) return;
+
+    int startHE = vertexToHalfEdge[threadId];
+    if (startHE == UINT32_MAX) {
+        positions_out[threadId] = positions_in[threadId];
+        return;
+    }
+
+    // Ring traversal
+    constexpr int MAX_RING = 64;
+    unsigned int neighborIndices[MAX_RING];
+    unsigned int currentFront[MAX_RING];
+    unsigned int nextFront[MAX_RING];
+    unsigned int currentCount = 0, nextCount = 0;
+    bool visited[MAX_RING] = {};
+
+    // Initialize front with 1-ring neighbors
+    int he = startHE;
+    do {
+        int oppHE = halfEdges[he].oppositeIndex;
+        if (oppHE == UINT32_MAX) break;
+        int neighborVertex = halfEdges[oppHE].vertexIndex;
+
+        if (currentCount < MAX_RING && !visited[neighborVertex]) {
+            neighborIndices[currentCount] = neighborVertex;
+            currentFront[currentCount] = neighborVertex;
+            visited[neighborVertex] = true;
+            ++currentCount;
+        }
+
+        he = halfEdges[halfEdges[oppHE].nextIndex].nextIndex;
+    } while (he != startHE);
+
+    // n-ring propagation
+    for (unsigned int ring = 1; ring < nRing; ++ring) {
+        nextCount = 0;
+        for (unsigned int i = 0; i < currentCount; ++i) {
+            int currentVertex = currentFront[i];
+            int he2 = vertexToHalfEdge[currentVertex];
+            if (he2 == UINT32_MAX) continue;
+
+            int heLoop = he2;
+            do {
+                int oppHE = halfEdges[heLoop].oppositeIndex;
+                if (oppHE == UINT32_MAX) break;
+                int neighborVertex = halfEdges[oppHE].vertexIndex;
+
+                if (nextCount < MAX_RING && !visited[neighborVertex]) {
+                    neighborIndices[currentCount + nextCount] = neighborVertex;
+                    nextFront[nextCount] = neighborVertex;
+                    visited[neighborVertex] = true;
+                    ++nextCount;
+                }
+
+                heLoop = halfEdges[halfEdges[oppHE].nextIndex].nextIndex;
+            } while (heLoop != he2);
+        }
+
+        for (unsigned int i = 0; i < nextCount; ++i)
+            currentFront[i] = nextFront[i];
+        currentCount += nextCount;
+    }
+
+    float3 sum = make_float3(0, 0, 0);
+    int valid = 0;
+    for (unsigned int i = 0; i < currentCount; ++i)
+    {
+        if (neighborIndices[i] < numberOfPoints)
+        {
+            sum += positions_in[neighborIndices[i]];
+            ++valid;
+        }
+    }
+
+    float3 self = positions_in[threadId];
+    if (valid > 0)
+    {
+        float3 avg = sum / (float)valid;
+        float3 displacement = avg - self;
+        positions_out[threadId] = self + lambda * displacement;
+    }
+    else
+    {
+        positions_out[threadId] = self;
+    }
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_PickFace(
     const float3 rayOrigin,
     const float3 rayDir,
     const float3* positions,
@@ -846,30 +938,5 @@ __global__ void Kernel_PickFace(
     {
         // 원자적 최소 t 갱신 (여러 thread가 동시에 hit할 수 있음)
         DeviceHalfEdgeMesh::atomicMinF(outHitT, t, outHitIndex, i);
-    }
-}
-
-__global__ void Kernel_DeviceHalfEdgeMesh_PickFace(
-    const float3 rayOrigin,
-    const float3 rayDir,
-    const float3* positions,
-    const uint3* faces,
-    unsigned int numberOfFaces,
-    int* outHitIndex,
-    float* outHitT)
-{
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= numberOfFaces) return;
-
-    const uint3 tri = faces[i];
-    const float3 v0 = positions[tri.x];
-    const float3 v1 = positions[tri.y];
-    const float3 v2 = positions[tri.z];
-
-    float t, u, v;
-    if (DeviceHalfEdgeMesh::RayTriangleIntersect(rayOrigin, rayDir, v0, v1, v2, t, u, v))
-    {
-        DeviceHalfEdgeMesh::atomicMinWithIndex(outHitT, t, outHitIndex, i);
-        // barycentric 등 추가 저장은 필요시
     }
 }

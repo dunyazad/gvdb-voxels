@@ -3,12 +3,6 @@
 #include <cuda_common.cuh>
 #include <HashMap.hpp>
 
-struct HalfEdgeVertex
-{
-    unsigned int pointIndex = UINT32_MAX;
-    unsigned int halfEdgeIndex = UINT32_MAX;
-};
-
 struct HalfEdge
 {
     unsigned int vertexIndex = UINT32_MAX;
@@ -27,7 +21,6 @@ struct DeviceHalfEdgeMesh;
 
 struct HostHalfEdgeMesh
 {
-    // Vertex/Face buffer (HostMesh-compatible)
     float3* positions = nullptr;
     float3* normals = nullptr;
     float3* colors = nullptr;
@@ -36,9 +29,9 @@ struct HostHalfEdgeMesh
     uint3* faces = nullptr;
     unsigned int numberOfFaces = 0;
 
-    // Half-edge structure
     HalfEdge* halfEdges = nullptr;
     HalfEdgeFace* halfEdgeFaces = nullptr;
+    unsigned int* vertexToHalfEdge = nullptr;
 
     HostHalfEdgeMesh();
     HostHalfEdgeMesh(const HostHalfEdgeMesh& other);
@@ -53,7 +46,10 @@ struct HostHalfEdgeMesh
     void CopyFromDevice(const DeviceHalfEdgeMesh& deviceMesh);
     void CopyToDevice(DeviceHalfEdgeMesh& deviceMesh) const;
 
+    uint64_t PackEdge(unsigned int v0, unsigned int v1);
+    
     void BuildHalfEdges();
+    void BuildVertexToHalfEdgeMapping();
 
     bool SerializePLY(const string& filename, bool useAlpha = false);
     bool DeserializePLY(const string& filename);
@@ -73,7 +69,6 @@ struct DeviceHalfEdgeMesh
 
     HalfEdge* halfEdges = nullptr;
     HalfEdgeFace* halfEdgeFaces = nullptr;
-
     unsigned int* vertexToHalfEdge = nullptr;
 
     DeviceHalfEdgeMesh();
@@ -89,6 +84,7 @@ struct DeviceHalfEdgeMesh
     void CopyToHost(HostHalfEdgeMesh& hostMesh) const;
 
     void BuildHalfEdges();
+    void BuildVertexToHalfEdgeMapping();
 
     bool PickFace(const float3& rayOrigin, const float3& rayDir,int& outHitIndex, float& outHitT) const;
 
@@ -111,7 +107,7 @@ __global__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
     const uint3* faces,
     unsigned int numberOfFaces,
     HalfEdge* halfEdges,
-    HalfEdgeFace* outFaces,
+    HalfEdgeFace* halfEdgeFaces,
     HashMapInfo<uint64_t, unsigned int> info);
 
 __global__ void Kernel_DeviceHalfEdgeMesh_LinkOpposites(
@@ -120,15 +116,27 @@ __global__ void Kernel_DeviceHalfEdgeMesh_LinkOpposites(
     HalfEdge* halfEdges,
     HashMapInfo<uint64_t, unsigned int> info);
 
-__global__ void Kernel_LaplacianSmooth(
+__global__ void Kernel_DeviceHalfEdgeMesh_ValidateOppositeEdges(const HalfEdge* halfEdges, size_t numHalfEdges);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdgeMapping(
     const HalfEdge* halfEdges,
-    const unsigned int* vertexToHalfEdge,
-    const float3* positions_in,
+    unsigned int* vertexToHalfEdge,
+    unsigned int numberOfHalfEdges);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdge(
+    const HalfEdge* halfEdges,
+    unsigned int* vertexToHalfEdge,
+    unsigned int numberOfHalfEdges);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
+    float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
+    const HalfEdge* halfEdges,
+    unsigned int numberOfHalfEdges,
     float lambda);
 
-__global__ void Kernel_LaplacianSmoothNRing(
+__global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmoothNRing(
     const HalfEdge* halfEdges,
     const unsigned int* vertexToHalfEdge,
     const float3* positions_in,
