@@ -16,6 +16,7 @@
 #include <VoxelHashMap.cuh>
 #include <SCVoxelHashMap.cuh>
 #include <HalfEdgeMesh.cuh>
+#include <VEFM.cuh>
 
 #include <Eigen/Core>
 #include <Eigen/Dense>

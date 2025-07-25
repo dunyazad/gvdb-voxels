@@ -8,6 +8,7 @@
     <CudaCompile Include="Mesh.cu" />
     <CudaCompile Include="HalfEdgeMesh.cu" />
     <CudaCompile Include="BitVolume.cu" />
+    <CudaCompile Include="VEFM.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\External\glad\src\glad.c" />
@@ -26,6 +27,7 @@
     <ClInclude Include="Mesh.cuh" />
     <ClInclude Include="HalfEdgeMesh.cuh" />
     <ClInclude Include="BitVolume.cuh" />
+    <ClInclude Include="VEFM.cuh" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HashMap.hpp" />

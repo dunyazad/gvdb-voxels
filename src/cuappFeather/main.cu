@@ -125,7 +125,7 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
 
     d_input = h_input;
 
-    vhm.Initialize(0.2f, d_input.numberOfPoints * 8, 32);
+    vhm.Initialize(0.1f, d_input.numberOfPoints * 8, 32);
 
     vhm.Occupy(d_input, 3);
 

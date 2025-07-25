@@ -2,6 +2,7 @@
 
 #include <PointCloud.cuh>
 #include <HalfEdgeMesh.cuh>
+#include <VEFM.cuh>
 
 using SCVoxelKey = uint64_t;
 #ifndef EMPTY_KEY

@@ -21,6 +21,7 @@
     <CudaCompile Include="Mesh.cu" />
     <CudaCompile Include="PointCloud.cu" />
     <CudaCompile Include="SCVoxelHashMap.cu" />
+    <CudaCompile Include="VEFM.cu" />
     <CudaCompile Include="VoxelHashMap.cu" />
   </ItemGroup>
   <ItemGroup>
@@ -35,6 +36,7 @@
     <ClInclude Include="Octree.cuh" />
     <ClInclude Include="PointCloud.cuh" />
     <ClInclude Include="SCVoxelHashMap.cuh" />
+    <ClInclude Include="VEFM.cuh" />
     <ClInclude Include="VoxelHashMap.cuh" />
   </ItemGroup>
   <ItemGroup>
