@@ -721,37 +721,30 @@ int main(int argc, char** argv)
 			//	renderable->SetInstanceColor(i, MiniMath::V4(color.x / 255.0f, color.y / 255.0f, color.z / 255.0f, 1.0f));
 			//}
 
-			{ // AABB
-				auto m = alp.GetAABBMin();
-				float x = get<0>(m);
-				float y = get<1>(m);
-				float z = get<2>(m);
-				auto M = alp.GetAABBMax();
-				float X = get<0>(M);
-				float Y = get<1>(M);
-				float Z = get<2>(M);
+			{
+				auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
+				auto renderable = Feather.GetComponent<Renderable>(meshEntity);
+				for (size_t i = 0; i < renderable->GetIndices().size() / 3; i++)
+				{
+					auto i0 = renderable->GetIndices()[i * 3];
+					auto i1 = renderable->GetIndices()[i * 3 + 1];
+					auto i2 = renderable->GetIndices()[i * 3 + 2];
 
-				VD::AddLine("Lines", { x, y, z }, { X, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { X, y, z }, { X, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { X, Y, z }, { x, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { x, Y, z }, { x, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+					auto& v0 = renderable->GetVertices()[i0];
+					auto& v1 = renderable->GetVertices()[i1];
+					auto& v2 = renderable->GetVertices()[i2];
 
-				VD::AddLine("Lines", { x, y, Z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { X, y, Z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { X, Y, Z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { x, Y, Z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-
-				VD::AddLine("Lines", { x, y, z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { X, y, z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { X, Y, z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { x, Y, z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+					VD::AddLine("WireFrame", v0, v1, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
+					VD::AddLine("WireFrame", v1, v2, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
+					VD::AddLine("WireFrame", v2, v0, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
+				}
 			}
 			}
 #pragma endregion
 #endif
 		});
 
-	Feather.AddOnUpdateCallback([](f32 timeDelta) {
+	Feather.AddOnUpdateCallback([&](f32 timeDelta) {
 		{
 			auto& mesh = cudaInstance.h_mesh;
 
@@ -779,6 +772,36 @@ int main(int argc, char** argv)
 			//mesh.colors[vi].x = 1.0f;
 			//mesh.colors[vi].y = 0.0f;
 			//mesh.colors[vi].z = 0.0f;
+
+			{ // AABB
+				static float acc = 0.0f;
+				//acc += timeDelta * 0.01f;
+
+				auto m = alp.GetAABBMin();
+				float x = get<0>(m) + sinf(acc);
+				float y = get<1>(m) + sinf(acc);
+				float z = get<2>(m) + sinf(acc);
+				auto M = alp.GetAABBMax();
+				float X = get<0>(M) + sinf(acc);
+				float Y = get<1>(M) + sinf(acc);
+				float Z = get<2>(M) + sinf(acc);
+
+				VD::Clear("Lines");
+				VD::AddLine("Lines", { x, y, z }, { X, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { X, y, z }, { X, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { X, Y, z }, { x, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { x, Y, z }, { x, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+
+				VD::AddLine("Lines", { x, y, Z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { X, y, Z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { X, Y, Z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { x, Y, Z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+
+				VD::AddLine("Lines", { x, y, z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { X, y, z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { X, Y, z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { x, Y, z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			}
 		}
 		});
 
