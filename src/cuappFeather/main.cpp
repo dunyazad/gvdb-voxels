@@ -11,6 +11,7 @@
 #include <iostream>
 using namespace std;
 
+using VD = VisualDebugging;
 
 #include "nvapi510/include/nvapi.h"
 #include "nvapi510/include/NvApiDriverSettings.h"
@@ -730,38 +731,20 @@ int main(int argc, char** argv)
 				float Y = get<1>(M);
 				float Z = get<2>(M);
 
-				auto entity = Feather.CreateEntity("AABB");
-				auto renderable = Feather.CreateComponent<Renderable>(entity);
-				renderable->Initialize(Renderable::GeometryMode::Lines);
+				VD::AddLine("Lines", { x, y, z }, { X, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { X, y, z }, { X, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { X, Y, z }, { x, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { x, Y, z }, { x, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
 
-				renderable->AddShader(Feather.CreateShader("Line", File("../../res/Shaders/Line.vs"), File("../../res/Shaders/Line.fs")));
+				VD::AddLine("Lines", { x, y, Z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { X, y, Z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { X, Y, Z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { x, Y, Z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
 
-				renderable->AddVertex({ x, y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, Y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, Y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, Y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, Y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-
-				renderable->AddVertex({ x, y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, Y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, Y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, Y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, Y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-
-				renderable->AddVertex({ x, y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, Y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ X, Y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, Y, z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
-				renderable->AddVertex({ x, Y, Z }); renderable->AddColor({ 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { x, y, z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { X, y, z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { X, Y, z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+				VD::AddLine("Lines", { x, Y, z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
 			}
 			}
 #pragma endregion

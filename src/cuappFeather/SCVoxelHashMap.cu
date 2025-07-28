@@ -171,7 +171,7 @@ void SCVoxelHashMap::MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue)
 		}
 	}
 
-	VFM::M m;
+	VEFM::M m;
 	m.Initialize(10, 10);
 
 	mesh.LaplacianSmoothing(5, 1.0f);
