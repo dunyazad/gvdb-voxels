@@ -354,7 +354,8 @@ int main(int argc, char** argv)
 				auto ray = manipulator->GetCamera()->ScreenPointToRay(event.xpos, event.ypos, w->GetWidth(), w->GetHeight());
 				//VD::Clear("PickingRay");
 				VD::AddLine("PickingRay", ray.origin, ray.direction * 500.0f, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
-
+				VD::AddBox("PickingBox", ray.origin, { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+				
 				int hitIndex = -1;
 				float outHit = FLT_MAX;
 				cudaInstance.h_mesh.PickFace(
