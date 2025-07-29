@@ -55,6 +55,9 @@ struct HostHalfEdgeMesh
     bool DeserializePLY(const string& filename);
 
     bool PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const;
+
+    unsigned int FindBoundaryHalfEdge(unsigned int v) const;
+    std::vector<unsigned int> GetOneRingVertices(unsigned int v) const;
 };
 
 struct DeviceHalfEdgeMesh

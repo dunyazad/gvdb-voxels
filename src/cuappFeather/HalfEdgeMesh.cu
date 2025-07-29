@@ -308,6 +308,99 @@ bool HostHalfEdgeMesh::PickFace(const float3& rayOrigin, const float3& rayDir, i
     return (minIdx >= 0);
 }
 
+unsigned int HostHalfEdgeMesh::FindBoundaryHalfEdge(unsigned int v) const
+{
+    if (!vertexToHalfEdge || v >= numberOfPoints) return UINT32_MAX;
+
+    unsigned int startHE = vertexToHalfEdge[v];
+    if (startHE == UINT32_MAX) return UINT32_MAX;
+
+    unsigned int he = startHE;
+    for (int i = 0; i < numberOfFaces * 3; ++i) // valence보다 크면 구조가 깨진 것!
+    {
+        if (halfEdges[he].vertexIndex != v) break;
+        // boundary half-edge 발견
+        if (halfEdges[he].oppositeIndex == UINT32_MAX)
+            return he;
+
+        // 다음 outgoing half-edge로 이동
+        he = halfEdges[halfEdges[he].oppositeIndex].nextIndex;
+        if (he == startHE) break; // 한 바퀴 돌았으면 중단
+    }
+    // 못 찾으면 그냥 startHE 리턴 (closed mesh)
+    return startHE;
+}
+
+std::vector<unsigned int> HostHalfEdgeMesh::GetOneRingVertices(unsigned int v) const
+{
+    std::vector<unsigned int> neighbors;
+    if (!vertexToHalfEdge || v >= numberOfPoints) return neighbors;
+
+    // boundary half-edge부터 순회
+    unsigned int startHE = vertexToHalfEdge[v];
+    unsigned int he = startHE;
+    for (int i = 0; i < numberOfFaces * 3; ++i)
+    {
+        if (halfEdges[he].vertexIndex != v) break;
+        if (halfEdges[he].oppositeIndex == UINT32_MAX)
+        {
+            startHE = he;
+            break;
+        }
+        he = halfEdges[halfEdges[he].oppositeIndex].nextIndex;
+        if (he == vertexToHalfEdge[v]) break;
+    }
+
+    // 한쪽 방향(next+opp)
+    std::set<unsigned int> neighborSet;
+    he = startHE;
+    for (int i = 0; i < numberOfFaces * 3; ++i)
+    {
+        unsigned int opp = halfEdges[he].oppositeIndex;
+        if (opp == UINT32_MAX) break;
+        unsigned int neighbor = halfEdges[opp].vertexIndex;
+        if (neighbor != v) neighborSet.insert(neighbor);
+        he = halfEdges[opp].nextIndex;
+        if (he == startHE) break;
+    }
+
+    // 반대방향(prev+opp)
+    auto findPrev = [&](unsigned int hei) -> unsigned int
+    {
+        unsigned int f = halfEdges[hei].faceIndex;
+        for (unsigned int d = 0; d < 3; ++d)
+        {
+            unsigned int candidate = f * 3 + d;
+            if (halfEdges[candidate].nextIndex == hei)
+                return candidate;
+        }
+        return UINT32_MAX;
+    };
+
+    he = startHE;
+    for (int i = 0; i < numberOfFaces * 3; ++i)
+    {
+        unsigned int prev = findPrev(he);
+        if (prev == UINT32_MAX) break;
+        unsigned int opp = halfEdges[prev].oppositeIndex;
+        if (opp == UINT32_MAX) break;
+        unsigned int neighbor = halfEdges[opp].vertexIndex;
+        if (neighbor != v) neighborSet.insert(neighbor);
+        he = opp;
+        if (he == startHE) break;
+    }
+
+    neighbors.assign(neighborSet.begin(), neighborSet.end());
+    return neighbors;
+}
+
+
+
+
+
+
+
+
 DeviceHalfEdgeMesh::DeviceHalfEdgeMesh() {}
 
 DeviceHalfEdgeMesh::DeviceHalfEdgeMesh(const HostHalfEdgeMesh& other)

@@ -300,6 +300,30 @@ int main(int argc, char** argv)
 			{
 				glfwSetWindowShouldClose(Feather.GetFeatherWindow()->GetGLFWwindow(), true);
 			}
+			else if (GLFW_KEY_BACKSPACE == event.keyCode)
+			{
+				VD::ClearAll();
+			}
+			else if (GLFW_KEY_ENTER == event.keyCode)
+			{
+				printf("Finding Border\n");
+
+				auto& mesh = cudaInstance.h_mesh;
+
+				for (size_t i = 0; i < mesh.numberOfFaces * 3; i++)
+				{
+					auto& he = mesh.halfEdges[i];
+					if (UINT32_MAX == he.oppositeIndex)
+					{
+						auto ne = mesh.halfEdges[he.nextIndex];
+
+						auto& v0 = mesh.positions[he.vertexIndex];
+						auto& v1 = mesh.positions[ne.vertexIndex];
+
+						VD::AddLine("BorderLines", { XYZ(v0) }, { XYZ(v1) }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+					}
+				}
+			}
 			});
 	}
 #pragma endregion
@@ -336,10 +360,10 @@ int main(int argc, char** argv)
 				auto ray = manipulator->GetCamera()->ScreenPointToRay(event.xpos, event.ypos, w->GetWidth(), w->GetHeight());
 				//VD::Clear("PickingRay");
 				//VD::AddBox("PickingBox", ray.origin, { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
-				
+
 				int hitIndex = -1;
 				float outHit = FLT_MAX;
-				if(cudaInstance.h_mesh.PickFace(
+				if (cudaInstance.h_mesh.PickFace(
 					make_float3(ray.origin.x, ray.origin.y, ray.origin.z),
 					make_float3(ray.direction.x, ray.direction.y, ray.direction.z),
 					hitIndex, outHit))
@@ -354,12 +378,12 @@ int main(int argc, char** argv)
 					auto v2 = glm::vec3(XYZ(p2));
 
 					VD::AddTriangle("Picked", v0, v1, v2, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
-					VD::AddSphere("PickedS", v0, 0.025f, { 1.0f, 0.0f, 0.0f, 1.0f});
-					VD::AddSphere("PickedS", v1, 0.025f, { 0.0f, 1.0f, 0.0f, 1.0f});
-					VD::AddSphere("PickedS", v2, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f});
+					VD::AddSphere("PickedS", v0, 0.025f, { 1.0f, 0.0f, 0.0f, 1.0f });
+					VD::AddSphere("PickedS", v1, 0.025f, { 0.0f, 1.0f, 0.0f, 1.0f });
+					VD::AddSphere("PickedS", v2, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
 					auto hitPosition = ray.origin + glm::normalize(ray.direction) * outHit;
 					VD::AddSphere("PickedPosition", hitPosition, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
-				
+
 					VD::AddLine("PickingRay", ray.origin, hitPosition, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
 
 					if (GLFW_MOD_CONTROL == event.mods)
@@ -371,28 +395,41 @@ int main(int argc, char** argv)
 					auto d0 = glm::distance2(hitPosition, v0);
 					auto d1 = glm::distance2(hitPosition, v1);
 					auto d2 = glm::distance2(hitPosition, v2);
+					unsigned int vi = -1;
 					if (d0 < d1 && d0 < d2)
 					{
 						VD::AddBox("Nearest", v0, { 0.0f, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						vi = f.x;
 					}
 					else if (d1 < d0 && d1 < d2)
 					{
-						VD::AddBox("Nearest", v1, { 0.0f, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						VD::AddBox("Nearest", v1, { 0.0, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						vi = f.y;
 					}
 					else if (d2 < d0 && d2 < d1)
 					{
-						VD::AddBox("Nearest", v2, { 0.0f, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						VD::AddBox("Nearest", v2, { 0.0, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						vi = f.z;
 					}
+
+					printf("[h_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
+
+					auto vis = cudaInstance.h_mesh.GetOneRingVertices(vi);
+					for (auto& vi : vis)
+					{
+						VD::AddBox("OneRing", { XYZ(cudaInstance.h_mesh.positions[vi]) }, { 0.0f, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 0.0f, 1.0f, 0.0f, 1.0f });
+					}
+
+
+
+					cudaInstance.d_mesh.PickFace(
+						make_float3(ray.origin.x, ray.origin.y, ray.origin.z),
+						make_float3(ray.direction.x, ray.direction.y, ray.direction.z),
+						hitIndex, outHit);
+
+					printf("[d_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
+
 				}
-
-				printf("[h_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
-
-				cudaInstance.d_mesh.PickFace(
-					make_float3(ray.origin.x, ray.origin.y, ray.origin.z),
-					make_float3(ray.direction.x, ray.direction.y, ray.direction.z),
-					hitIndex, outHit);
-				
-				printf("[d_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
 			}
 			});
 
@@ -555,10 +592,6 @@ int main(int argc, char** argv)
 				else if (GLFW_KEY_2 == event.keyCode)
 				{
 					renderable->SetActiveShaderIndex(1);
-				}
-				else if (GLFW_KEY_BACKSPACE == event.keyCode)
-				{
-					VD::ClearAll();
 				}
 				else if (GLFW_KEY_F1 == event.keyCode)
 				{
