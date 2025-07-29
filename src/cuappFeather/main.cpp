@@ -240,14 +240,12 @@ void ApplyHalfEdgeMeshToEntity(Entity entity, const HostHalfEdgeMesh& h_mesh)
 		}
 	}
 
-	// 필수: 최소한 하나라도 vertex/face가 있어야 함
 	if (h_mesh.numberOfPoints == 0 || h_mesh.numberOfFaces == 0)
 	{
 		printf("Mesh is empty\n");
 		return;
 	}
 
-	// 정점 입력
 	for (unsigned int i = 0; i < h_mesh.numberOfPoints; ++i)
 	{
 		renderable->AddVertex({ h_mesh.positions[i].x, h_mesh.positions[i].y, h_mesh.positions[i].z });
@@ -255,15 +253,13 @@ void ApplyHalfEdgeMeshToEntity(Entity entity, const HostHalfEdgeMesh& h_mesh)
 		if (h_mesh.colors) renderable->AddColor({ h_mesh.colors[i].x, h_mesh.colors[i].y, h_mesh.colors[i].z, 1.0f });
 	}
 
-	// 인덱스 입력
 	for (unsigned int i = 0; i < h_mesh.numberOfFaces; ++i)
 	{
 		const auto& tri = h_mesh.faces[i];
-		// index 범위 체크
 		if (tri.x >= h_mesh.numberOfPoints || tri.y >= h_mesh.numberOfPoints || tri.z >= h_mesh.numberOfPoints)
 		{
 			printf("Face %d has out-of-range index: %d %d %d (max: %d)\n", i, tri.x, tri.y, tri.z, h_mesh.numberOfPoints - 1);
-			continue; // 잘못된 face는 무시
+			continue;
 		}
 		renderable->AddIndex(tri.x);
 		renderable->AddIndex(tri.y);
@@ -272,7 +268,6 @@ void ApplyHalfEdgeMeshToEntity(Entity entity, const HostHalfEdgeMesh& h_mesh)
 }
 void ApplyHalfEdgeMeshToEntity(Entity entity, const DeviceHalfEdgeMesh& d_mesh)
 {
-	// 디바이스에서 호스트로 복사 후 기존 함수 사용
 	HostHalfEdgeMesh h_mesh(d_mesh);
 	ApplyHalfEdgeMeshToEntity(entity, h_mesh);
 
@@ -354,14 +349,22 @@ int main(int argc, char** argv)
 				auto ray = manipulator->GetCamera()->ScreenPointToRay(event.xpos, event.ypos, w->GetWidth(), w->GetHeight());
 				//VD::Clear("PickingRay");
 				VD::AddLine("PickingRay", ray.origin, ray.direction * 500.0f, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
-				VD::AddBox("PickingBox", ray.origin, { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+				//VD::AddBox("PickingBox", ray.origin, { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
 				
 				int hitIndex = -1;
 				float outHit = FLT_MAX;
-				cudaInstance.h_mesh.PickFace(
+				if(cudaInstance.h_mesh.PickFace(
 					make_float3(ray.origin.x, ray.origin.y, ray.origin.z),
 					make_float3(ray.direction.x, ray.direction.y, ray.direction.z),
-					hitIndex, outHit);
+					hitIndex, outHit))
+				{
+					auto& f = cudaInstance.h_mesh.faces[hitIndex];
+					auto& v0 = cudaInstance.h_mesh.positions[f.x];
+					auto& v1 = cudaInstance.h_mesh.positions[f.y];
+					auto& v2 = cudaInstance.h_mesh.positions[f.z];
+
+					VD::AddTriangle("Picked", { XYZ(v0) }, { XYZ(v1) }, { XYZ(v2) }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+				}
 
 				printf("[h_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
 

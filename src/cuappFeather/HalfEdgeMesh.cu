@@ -306,6 +306,8 @@ bool HostHalfEdgeMesh::PickFace(const float3& rayOrigin, const float3& rayDir, i
             {
                 minT = t;
                 minIdx = static_cast<int>(i);
+
+                printf("[%.4f, %.4f, %.4f], [%.4f, %.4f, %.4f], [%.4f, %.4f, %.4f]\n", v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
             }
         }
     }
@@ -575,7 +577,8 @@ __device__ bool DeviceHalfEdgeMesh::HashMapFind(const HashMapInfo<uint64_t, unsi
 }
 
 __host__ __device__
-bool DeviceHalfEdgeMesh::RayTriangleIntersect(const float3& orig, const float3& dir,
+bool DeviceHalfEdgeMesh::RayTriangleIntersect(
+    const float3& orig, const float3& dir,
     const float3& v0, const float3& v1, const float3& v2,
     float& t, float& u, float& v)
 {
@@ -988,5 +991,7 @@ __global__ void Kernel_DeviceHalfEdgeMesh_PickFace(
     {
         // 원자적 최소 t 갱신 (여러 thread가 동시에 hit할 수 있음)
         DeviceHalfEdgeMesh::atomicMinF(outHitT, t, outHitIndex, i);
+
+        printf("[%.4f, %.4f, %.4f], [%.4f, %.4f, %.4f], [%.4f, %.4f, %.4f]\n", v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
     }
 }
