@@ -148,36 +148,9 @@ void SCVoxelHashMap::MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue)
 	mesh.numberOfPoints = h_numberOfPoints;
 	mesh.numberOfFaces = h_numberOfFaces;
 
-	//std::vector<uint3> h_faces(mesh.numberOfFaces);
-	//cudaMemcpy(h_faces.data(), mesh.faces, sizeof(uint3) * mesh.numberOfFaces, cudaMemcpyDeviceToHost);
-	//for (unsigned int i = 0; i < mesh.numberOfFaces; ++i)
-	//{
-	//	if (h_faces[i].x >= mesh.numberOfPoints || h_faces[i].y >= mesh.numberOfPoints || h_faces[i].z >= mesh.numberOfPoints)
-	//	{
-	//		printf("[ERROR] Invalid device face index at face[%u]: %u, %u, %u\n",
-	//			i, h_faces[i].x, h_faces[i].y, h_faces[i].z);
-	//	}
-	//}
-
 	mesh.BuildHalfEdges();
 
-	//std::vector<HalfEdge> h_halfEdges(mesh.numberOfFaces * 3);
-	//cudaMemcpy(h_halfEdges.data(), mesh.halfEdges, sizeof(HalfEdge) * mesh.numberOfFaces * 3, cudaMemcpyDeviceToHost);
-	//CUDA_SYNC();
-
-	//for (unsigned int i = 0; i < mesh.numberOfFaces * 3; ++i)
-	//{
-	//	if (h_halfEdges[i].vertexIndex >= mesh.numberOfPoints)
-	//	{
-	//		printf("[ERROR] Invalid halfEdge[%u].vertexIndex = %u (numberOfPoints=%u)\n",
-	//			i, h_halfEdges[i].vertexIndex, mesh.numberOfPoints);
-	//	}
-	//}
-
-	//VEFM::M m;
-	//m.Initialize(10, 10);
-
-	mesh.LaplacianSmoothing(5, 1.0f);
+	//mesh.LaplacianSmoothing(5, 1.0f);
 	//mesh.LaplacianSmoothingNRing(2, 0.15f, 1);
 
 	cudaFree(d_numberOfPoints);

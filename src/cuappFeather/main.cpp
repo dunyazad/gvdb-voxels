@@ -200,10 +200,10 @@ void ApplyPointCloudToEntity(Entity entity, const HostPointCloud& h_pointCloud)
 		renderable->AddInstanceNormal({ n.x, n.y, n.z });
 
 		glm::mat4 model = glm::identity<glm::mat4>();
+		model = glm::translate(model, { p.x, p.y, p.z });
 		model[0][0] = 2.0f;
 		model[1][1] = 2.0f;
 		model[2][2] = 2.0f;
-		model = glm::translate(model, { p.x, p.y, p.z });
 		renderable->AddInstanceTransform(model);
 	}
 	renderable->EnableInstancing(h_pointCloud.numberOfPoints);
@@ -292,28 +292,14 @@ int main(int argc, char** argv)
 
 	ALPFormat<PointPNC> alp;
 
-	bool tick = false;
-
 #pragma region AppMain
 	{
 		auto appMain = Feather.CreateEntity("AppMain");
-		Feather.CreateEventCallback<KeyEvent>(appMain, [&tick](Entity entity, const KeyEvent& event) {
+		Feather.CreateEventCallback<KeyEvent>(appMain, [&](Entity entity, const KeyEvent& event) {
 			if (GLFW_KEY_ESCAPE == event.keyCode)
 			{
 				glfwSetWindowShouldClose(Feather.GetFeatherWindow()->GetGLFWwindow(), true);
 			}
-			//else if (GLFW_KEY_TAB == event.keyCode)
-			//{
-			//	if (0 == event.action)
-			//	{
-			//		auto o = Feather.GetEntityByName("Input Point Cloud _ O");
-			//		Feather.GetComponent<Renderable>(o)->SetVisible(tick);
-			//		auto p = Feather.GetEntityByName("Input Point Cloud");
-			//		Feather.GetComponent<Renderable>(p)->SetVisible(!tick);
-
-			//		tick = !tick;
-			//	}
-			//}
 			});
 	}
 #pragma endregion
@@ -342,13 +328,13 @@ int main(int argc, char** argv)
 		Feather.CreateEventCallback<MouseButtonEvent>(cam, [&](Entity entity, const MouseButtonEvent& event) {
 			auto manipulator = Feather.GetComponent<CameraManipulatorTrackball>(entity);
 			manipulator->OnMouseButton(event);
+			auto camera = manipulator->GetCamera();
 
 			auto renderable = Feather.GetComponent<Renderable>(entity);
 			if (event.button == 0 && event.action == 0)
 			{
 				auto ray = manipulator->GetCamera()->ScreenPointToRay(event.xpos, event.ypos, w->GetWidth(), w->GetHeight());
 				//VD::Clear("PickingRay");
-				VD::AddLine("PickingRay", ray.origin, ray.direction * 500.0f, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
 				//VD::AddBox("PickingBox", ray.origin, { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
 				
 				int hitIndex = -1;
@@ -359,11 +345,44 @@ int main(int argc, char** argv)
 					hitIndex, outHit))
 				{
 					auto& f = cudaInstance.h_mesh.faces[hitIndex];
-					auto& v0 = cudaInstance.h_mesh.positions[f.x];
-					auto& v1 = cudaInstance.h_mesh.positions[f.y];
-					auto& v2 = cudaInstance.h_mesh.positions[f.z];
+					auto& p0 = cudaInstance.h_mesh.positions[f.x];
+					auto& p1 = cudaInstance.h_mesh.positions[f.y];
+					auto& p2 = cudaInstance.h_mesh.positions[f.z];
 
-					VD::AddTriangle("Picked", { XYZ(v0) }, { XYZ(v1) }, { XYZ(v2) }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+					auto v0 = glm::vec3(XYZ(p0));
+					auto v1 = glm::vec3(XYZ(p1));
+					auto v2 = glm::vec3(XYZ(p2));
+
+					VD::AddTriangle("Picked", v0, v1, v2, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+					VD::AddSphere("PickedS", v0, 0.025f, { 1.0f, 0.0f, 0.0f, 1.0f});
+					VD::AddSphere("PickedS", v1, 0.025f, { 0.0f, 1.0f, 0.0f, 1.0f});
+					VD::AddSphere("PickedS", v2, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f});
+					auto hitPosition = ray.origin + glm::normalize(ray.direction) * outHit;
+					VD::AddSphere("PickedPosition", hitPosition, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
+				
+					VD::AddLine("PickingRay", ray.origin, hitPosition, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+
+					if (GLFW_MOD_CONTROL == event.mods)
+					{
+						camera->SetTarget(hitPosition);
+						camera->SetEye(hitPosition + (-ray.direction) * manipulator->GetRadius());
+					}
+
+					auto d0 = glm::distance2(hitPosition, v0);
+					auto d1 = glm::distance2(hitPosition, v1);
+					auto d2 = glm::distance2(hitPosition, v2);
+					if (d0 < d1 && d0 < d2)
+					{
+						VD::AddBox("Nearest", v0, { 0.0f, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+					}
+					else if (d1 < d0 && d1 < d2)
+					{
+						VD::AddBox("Nearest", v1, { 0.0f, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+					}
+					else if (d2 < d0 && d2 < d1)
+					{
+						VD::AddBox("Nearest", v2, { 0.0f, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+					}
 				}
 
 				printf("[h_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
@@ -510,15 +529,15 @@ int main(int argc, char** argv)
 			printf("max : %f, %f, %f\n", Mx, My, Mz);
 			printf("dimensions : %f, %f, %f\n", lx, ly, lz);
 
-			//Entity cam = Feather.GetEntityByName("Camera");
-			//auto pcam = Feather.GetComponent<PerspectiveCamera>(cam);
-			//auto cameraManipulator = Feather.GetComponent<CameraManipulatorTrackball>(cam);
-			//cameraManipulator->SetRadius(lx + ly + lz);
-			//auto camera = cameraManipulator->GetCamera();
-			//camera->SetEye({ cx,cy,cz + cameraManipulator->GetRadius() });
-			//camera->SetTarget({ cx,cy,cz });
+			Entity cam = Feather.GetEntityByName("Camera");
+			auto pcam = Feather.GetComponent<PerspectiveCamera>(cam);
+			auto cameraManipulator = Feather.GetComponent<CameraManipulatorTrackball>(cam);
+			cameraManipulator->SetRadius(lx + ly + lz);
+			auto camera = cameraManipulator->GetCamera();
+			camera->SetEye({ cx,cy,cz + cameraManipulator->GetRadius() });
+			camera->SetTarget({ cx,cy,cz });
 
-			//cameraManipulator->MakeDefault();
+			cameraManipulator->MakeDefault();
 
 
 			Feather.CreateEventCallback<KeyEvent>(entity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
@@ -536,6 +555,10 @@ int main(int argc, char** argv)
 				else if (GLFW_KEY_2 == event.keyCode)
 				{
 					renderable->SetActiveShaderIndex(1);
+				}
+				else if (GLFW_KEY_BACKSPACE == event.keyCode)
+				{
+					VD::ClearAll();
 				}
 				else if (GLFW_KEY_F1 == event.keyCode)
 				{
@@ -584,97 +607,8 @@ int main(int argc, char** argv)
 			auto result = cudaInstance.ProcessPointCloud(h_pointCloud);
 			//ApplyPointCloudToEntity(entity, result);
 
-			cudaInstance.ProcessHalfEdgeMesh("../../res/3D/HostHalfEdgeMesh.ply");
-
-			//{
-			//	auto& mesh = cudaInstance.h_mesh;
-			//	auto& he = mesh.halfEdges[halfEdgeIndex];
-			//	auto vi = he.vertexIndex;
-			//	vertexIndex = vi;
-			//	initialPosition.x = mesh.positions[vi].x;
-			//	initialPosition.y = mesh.positions[vi].y;
-			//	initialPosition.z = mesh.positions[vi].z;
-			//	mesh.colors[vi].x = 1.0f;
-			//	mesh.colors[vi].y = 0.0f;
-			//	mesh.colors[vi].z = 0.0f;
-
-
-
-			//	{
-			//		unsigned int startEdge = halfEdgeIndex;
-			//		unsigned int currEdge = startEdge;
-			//		oneRing.clear();
-			//		oneRingPositions.clear();
-			//		std::unordered_set<unsigned int> visited;
-
-			//		do
-			//		{
-			//			unsigned int nextEdge = mesh.halfEdges[currEdge].nextIndex;
-			//			unsigned int neighborVertex = mesh.halfEdges[nextEdge].vertexIndex;
-
-			//			if (visited.find(neighborVertex) == visited.end())
-			//			{
-			//				oneRing.push_back(neighborVertex);
-			//				oneRingPositions.push_back(mesh.positions[neighborVertex]);
-			//				visited.insert(neighborVertex);
-			//			}
-
-			//			unsigned int oppEdge = mesh.halfEdges[currEdge].oppositeIndex;
-			//			if (oppEdge == UINT32_MAX)
-			//				break; // boundary¿¡ µµ´Þ
-
-			//			currEdge = mesh.halfEdges[oppEdge].nextIndex;
-			//		} while (currEdge != startEdge && currEdge != UINT32_MAX);
-			//	}
-			//	//{
-			//	//	auto ne = mesh.halfEdges[he.nextIndex];
-			//	//	auto ni = ne.vertexIndex;
-			//	//	auto nne = mesh.halfEdges[ne.nextIndex];
-			//	//	auto nni = nne.vertexIndex;
-
-			//	//	oneRing.push_back(vi);
-			//	//	oneRing.push_back(ni);
-			//	//	oneRing.push_back(nni);
-
-			//	//	oneRingPositions.push_back(mesh.positions[vi]);
-			//	//	oneRingPositions.push_back(mesh.positions[ni]);
-			//	//	oneRingPositions.push_back(mesh.positions[nni]);
-			//	//}
-
-			//	/*auto currentHalfEdgeIndex = he.oppositeIndex;
-			//	auto initialHalfEdgeIndex = currentHalfEdgeIndex;
-			//	do {
-			//		oneRing.push_back(currentHalfEdgeIndex);
-			//		oneRingPositions.push_back(mesh.positions[mesh.halfEdges[currentHalfEdgeIndex].vertexIndex]);
-
-			//		currentHalfEdgeIndex = mesh.halfEdges[currentHalfEdgeIndex].oppositeIndex;
-			//		currentHalfEdgeIndex = mesh.halfEdges[currentHalfEdgeIndex].nextIndex;
-			//	} while (currentHalfEdgeIndex != halfEdgeIndex && initialHalfEdgeIndex != currentHalfEdgeIndex);*/
-			//}
-
-			//cudaInstance.h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh_compare.ply");
-
 			auto meshEntity = Feather.CreateEntity("MarchingCubesMesh");
 			ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
-
-			//{
-			//	auto& mesh = cudaInstance.h_mesh;
-
-			//	auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
-			//	auto renderable = Feather.GetComponent<Renderable>(meshEntity);
-
-			//	for (size_t i = 0; i < oneRing.size(); i++)
-			//	{
-			//		auto hi = oneRing[i];
-			//		auto vi = mesh.halfEdges[hi].vertexIndex;
-
-			//		renderable->SetVertex(hi, glm::vec3(oneRingPositions[i].x, oneRingPositions[i].y, oneRingPositions[i].z + 0.1f));
-			//		renderable->SetColor(hi, { 0.0f, 0.0f, 1.0f, 1.0f });
-			//	}
-
-			//	renderable->SetVertex(vertexIndex, glm::vec3(initialPosition.x, initialPosition.y, initialPosition.z + 1.1f));
-			//	renderable->SetColor(vertexIndex, { 1.0f, 0.0f, 0.0f, 1.0f });
-			//}
 
 			Feather.CreateEventCallback<KeyEvent>(meshEntity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
 				auto renderable = Feather.GetComponent<Renderable>(entity);
@@ -697,18 +631,6 @@ int main(int argc, char** argv)
 				}
 				});
 
-			//printf("numPoints: %d, numFaces: %d\n", cudaInstance.h_mesh.numberOfPoints, cudaInstance.h_mesh.numberOfFaces);
-			//for (unsigned int i = 0; i < cudaInstance.h_mesh.numberOfFaces; ++i)
-			//{
-			//	auto tri = cudaInstance.h_mesh.faces[i];
-			//	if (tri.x >= cudaInstance.h_mesh.numberOfPoints ||
-			//		tri.y >= cudaInstance.h_mesh.numberOfPoints ||
-			//		tri.z >= cudaInstance.h_mesh.numberOfPoints)
-			//	{
-			//		printf("Invalid face[%u]: %u %u %u\n", i, tri.x, tri.y, tri.z);
-			//	}
-			//}
-
 #ifdef SAVE_VOXEL_HASHMAP_POINT_CLOUD
 			PLYFormat ply;
 			for (size_t i = 0; i < result.numberOfPoints; i++)
@@ -728,31 +650,6 @@ int main(int argc, char** argv)
 
 			//result.Terminate();
 			h_pointCloud.Terminate();
-
-			//for (size_t i = 0; i < host_colors.size(); i++)
-			//{
-			//	auto& color = host_colors[i];
-			//	renderable->SetInstanceColor(i, glm::vec4(color.x / 255.0f, color.y / 255.0f, color.z / 255.0f, 1.0f));
-			//}
-
-			//{
-			//	auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
-			//	auto renderable = Feather.GetComponent<Renderable>(meshEntity);
-			//	for (size_t i = 0; i < renderable->GetIndices().size() / 3; i++)
-			//	{
-			//		auto i0 = renderable->GetIndices()[i * 3];
-			//		auto i1 = renderable->GetIndices()[i * 3 + 1];
-			//		auto i2 = renderable->GetIndices()[i * 3 + 2];
-
-			//		auto& v0 = renderable->GetVertices()[i0];
-			//		auto& v1 = renderable->GetVertices()[i1];
-			//		auto& v2 = renderable->GetVertices()[i2];
-
-			//		VD::AddLine("WireFrame", v0, v1, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
-			//		VD::AddLine("WireFrame", v1, v2, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
-			//		VD::AddLine("WireFrame", v2, v0, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
-			//	}
-			//}
 			}
 #pragma endregion
 #endif
@@ -817,34 +714,6 @@ int main(int argc, char** argv)
 		});
 
 	Feather.AddOnUpdateCallback([&](f32 timeDelta) {
-		//{
-		//	auto& mesh = cudaInstance.h_mesh;
-
-		//	auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
-		//	auto renderable = Feather.GetComponent<Renderable>(meshEntity);
-
-		//	static float delta = 0;
-		//	delta += timeDelta * 0.01f;
-		//	float diff = sinf(delta * DEG2RAD);
-		//	//renderable->SetVertex(vertexIndex, initialPosition + glm::vec3(0.0f, 0.0f, diff));
-		//	//renderable->SetColor(vertexIndex, {1.0f, 0.0f, 0.0f, 1.0f});
-
-		//	for (size_t i = 0; i < oneRing.size(); i++)
-		//	{
-		//		auto hi = oneRing[i];
-		//		auto vi = mesh.halfEdges[hi].vertexIndex;
-
-		//		//renderable->SetVertex(hi, glm::vec3(oneRingPositions[i].x, oneRingPositions[i].y, oneRingPositions[i].z + diff));
-		//		renderable->SetColor(hi, { 0.0f, 0.0f, 1.0f, 1.0f });
-		//	}
-
-		//	//auto& mesh = cudaInstance.h_mesh;
-		//	//auto& he = mesh.halfEdges[10000];
-		//	//auto vi = he.vertexIndex;
-		//	//mesh.colors[vi].x = 1.0f;
-		//	//mesh.colors[vi].y = 0.0f;
-		//	//mesh.colors[vi].z = 0.0f;
-		//}
 		});
 
 	Feather.Run();

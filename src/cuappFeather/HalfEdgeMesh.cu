@@ -197,7 +197,6 @@ bool HostHalfEdgeMesh::SerializePLY(const std::string& filename, bool useAlpha)
 {
     PLYFormat ply;
 
-    // 1. Points
     for (unsigned int i = 0; i < numberOfPoints; ++i)
     {
         ply.AddPoint(positions[i].x, positions[i].y, positions[i].z);
@@ -211,7 +210,6 @@ bool HostHalfEdgeMesh::SerializePLY(const std::string& filename, bool useAlpha)
         }
     }
 
-    // 2. Faces using halfEdgeFaces (robust even for non-contiguous memory or non-trivial face topologies)
     for (unsigned int f = 0; f < numberOfFaces; ++f)
     {
         unsigned int he0 = halfEdgeFaces[f].halfEdgeIndex;
@@ -238,7 +236,6 @@ bool HostHalfEdgeMesh::DeserializePLY(const std::string& filename)
     Terminate();
     Initialize(n, nf);
 
-    // Points
     const auto& pts = ply.GetPoints();
     for (unsigned int i = 0; i < n; ++i)
     {
@@ -247,7 +244,6 @@ bool HostHalfEdgeMesh::DeserializePLY(const std::string& filename)
         positions[i].z = pts[i * 3 + 2];
     }
 
-    // Normals
     if (normals && !ply.GetNormals().empty())
     {
         const auto& ns = ply.GetNormals();
@@ -259,7 +255,6 @@ bool HostHalfEdgeMesh::DeserializePLY(const std::string& filename)
         }
     }
 
-    // Colors
     if (colors && !ply.GetColors().empty())
     {
         const auto& cs = ply.GetColors();
@@ -272,7 +267,6 @@ bool HostHalfEdgeMesh::DeserializePLY(const std::string& filename)
         }
     }
 
-    // Faces
     const auto& idx = ply.GetTriangleIndices();
     for (unsigned int i = 0; i < nf; ++i)
     {
@@ -281,7 +275,6 @@ bool HostHalfEdgeMesh::DeserializePLY(const std::string& filename)
         faces[i].z = idx[i * 3 + 2];
     }
 
-    // HalfEdge 구조 생성
     BuildHalfEdges();
 
     return true;
@@ -306,8 +299,6 @@ bool HostHalfEdgeMesh::PickFace(const float3& rayOrigin, const float3& rayDir, i
             {
                 minT = t;
                 minIdx = static_cast<int>(i);
-
-                printf("[%.4f, %.4f, %.4f], [%.4f, %.4f, %.4f], [%.4f, %.4f, %.4f]\n", v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
             }
         }
     }
@@ -513,29 +504,6 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
     cudaFree(toFree);
 }
 
-void DeviceHalfEdgeMesh::LaplacianSmoothingNRing(unsigned int iterations, float lambda, int nRing)
-{
- /*   if (numberOfPoints == 0 || numberOfFaces == 0) return;
-
-    float3* positionsA = positions;
-    float3* positionsB;
-    cudaMalloc(&positionsB, sizeof(float3) * numberOfPoints);
-
-    for (unsigned int it = 0; it < iterations; ++it)
-    {
-        LaunchKernel(Kernel_DeviceHalfEdgeMesh_LaplacianSmoothNRing, numberOfPoints,
-            halfEdges, vertexToHalfEdge, positionsA, positionsB, numberOfPoints, lambda, nRing);
-        CUDA_SYNC();
-        std::swap(positionsA, positionsB);
-    }
-
-    if (positionsA != positions)
-    {
-        CUDA_COPY_D2D(positions, positionsA, sizeof(float3) * numberOfPoints);
-    }
-    cudaFree(positionsB);*/
-}
-
 __host__ __device__ uint64_t DeviceHalfEdgeMesh::PackEdge(unsigned int v0, unsigned int v1)
 {
     return (static_cast<uint64_t>(v0) << 32) | static_cast<uint64_t>(v1);
@@ -587,7 +555,7 @@ bool DeviceHalfEdgeMesh::RayTriangleIntersect(
     float3 edge2 = v2 - v0;
     float3 h = cross(dir, edge2);
     float a = dot(edge1, h);
-    if (fabs(a) < EPSILON) return false; // 평행
+    if (fabs(a) < EPSILON) return false;
     float f = 1.0f / a;
     float3 s = orig - v0;
     u = f * dot(s, h);
@@ -596,7 +564,7 @@ bool DeviceHalfEdgeMesh::RayTriangleIntersect(
     v = f * dot(dir, q);
     if (v < 0.0f || u + v > 1.0f) return false;
     t = f * dot(edge2, q);
-    return t > EPSILON; // ray 방향상의 hit만
+    return t > EPSILON;
 }
 
 __device__ void DeviceHalfEdgeMesh::atomicMinF(float* addr, float val, int* idx, int myIdx)
@@ -642,15 +610,12 @@ __global__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
 
     const uint3 face = faces[faceIdx];
 
-    // 세 꼭짓점 인덱스
     unsigned int v0 = face.x, v1 = face.y, v2 = face.z;
 
-    // HalfEdgeVertex 및 HalfEdge 인덱스 (faceIdx 기준)
     unsigned int he0 = faceIdx * 3 + 0;
     unsigned int he1 = faceIdx * 3 + 1;
     unsigned int he2 = faceIdx * 3 + 2;
 
-    // HalfEdge 설정
     halfEdges[he0].faceIndex = faceIdx;
     halfEdges[he1].faceIndex = faceIdx;
     halfEdges[he2].faceIndex = faceIdx;
@@ -667,10 +632,8 @@ __global__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
     halfEdges[he1].oppositeIndex = UINT32_MAX;
     halfEdges[he2].oppositeIndex = UINT32_MAX;
 
-    // HalfEdgeFace 설정
     halfEdgeFaces[faceIdx].halfEdgeIndex = he0;
 
-    // Edge map 구축 (항상 "vertex index 쌍"으로!)
     DeviceHalfEdgeMesh::HashMapInsert(info, DeviceHalfEdgeMesh::PackEdge(v0, v1), he0); // v0->v1
     DeviceHalfEdgeMesh::HashMapInsert(info, DeviceHalfEdgeMesh::PackEdge(v1, v2), he1); // v1->v2
     DeviceHalfEdgeMesh::HashMapInsert(info, DeviceHalfEdgeMesh::PackEdge(v2, v0), he2); // v2->v0
@@ -690,23 +653,19 @@ __global__ void Kernel_DeviceHalfEdgeMesh_LinkOpposites(
     unsigned int he1 = faceIdx * 3 + 1;
     unsigned int he2 = faceIdx * 3 + 2;
 
-    // (v0,v1), (v1,v2), (v2,v0) 각각의 반대 edge 찾기
     {
-        // he0: v0->v1의 반대는 v1->v0
         uint64_t oppKey = DeviceHalfEdgeMesh::PackEdge(face.y, face.x);
         unsigned int oppIdx = UINT32_MAX;
         if (DeviceHalfEdgeMesh::HashMapFind(info, oppKey, &oppIdx))
             halfEdges[he0].oppositeIndex = oppIdx;
     }
     {
-        // he1: v1->v2의 반대는 v2->v1
         uint64_t oppKey = DeviceHalfEdgeMesh::PackEdge(face.z, face.y);
         unsigned int oppIdx = UINT32_MAX;
         if (DeviceHalfEdgeMesh::HashMapFind(info, oppKey, &oppIdx))
             halfEdges[he1].oppositeIndex = oppIdx;
     }
     {
-        // he2: v2->v0의 반대는 v0->v2
         uint64_t oppKey = DeviceHalfEdgeMesh::PackEdge(face.x, face.z);
         unsigned int oppIdx = UINT32_MAX;
         if (DeviceHalfEdgeMesh::HashMapFind(info, oppKey, &oppIdx))
@@ -722,7 +681,6 @@ __global__ void Kernel_DeviceHalfEdgeMesh_ValidateOppositeEdges(const HalfEdge* 
 
     const HalfEdge& he = halfEdges[i];
 
-    // 진입 확인 로그 (일단 출력되는지 체크)
     if (i < 5)
     {
         printf("[Entry] Checking halfEdge[%zu]: vertex = %u, next = %u, opp = %u\n",
@@ -739,14 +697,12 @@ __global__ void Kernel_DeviceHalfEdgeMesh_ValidateOppositeEdges(const HalfEdge* 
 
     const HalfEdge& ohe = halfEdges[he.oppositeIndex];
 
-    // 1. Opposite가 맞게 연결되어 있는가?
     if (ohe.oppositeIndex != i)
     {
         printf("[Invalid Opposite] he[%zu] → opp[%u] → opp = %u (expected %zu)\n",
             i, he.oppositeIndex, ohe.oppositeIndex, i);
     }
 
-    // 2. 방향이 맞게 연결되어 있는가?
     uint32_t he_v0 = he.vertexIndex;
     uint32_t he_v1 = halfEdges[he.nextIndex].vertexIndex;
 
@@ -759,7 +715,6 @@ __global__ void Kernel_DeviceHalfEdgeMesh_ValidateOppositeEdges(const HalfEdge* 
             i, he_v0, he_v1, he.oppositeIndex, ohe_v0, ohe_v1);
     }
 
-    // 3. Face loop closure (optional)
     const HalfEdge& e1 = halfEdges[he.nextIndex];
     const HalfEdge& e2 = halfEdges[e1.nextIndex];
     if (e2.nextIndex != i)
@@ -989,9 +944,6 @@ __global__ void Kernel_DeviceHalfEdgeMesh_PickFace(
     float t, u, v;
     if (DeviceHalfEdgeMesh::RayTriangleIntersect(rayOrigin, rayDir, v0, v1, v2, t, u, v))
     {
-        // 원자적 최소 t 갱신 (여러 thread가 동시에 hit할 수 있음)
         DeviceHalfEdgeMesh::atomicMinF(outHitT, t, outHitIndex, i);
-
-        printf("[%.4f, %.4f, %.4f], [%.4f, %.4f, %.4f], [%.4f, %.4f, %.4f]\n", v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
     }
 }

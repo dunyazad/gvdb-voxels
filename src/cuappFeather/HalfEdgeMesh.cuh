@@ -89,7 +89,6 @@ struct DeviceHalfEdgeMesh
     bool PickFace(const float3& rayOrigin, const float3& rayDir,int& outHitIndex, float& outHitT) const;
 
     void LaplacianSmoothing(unsigned int iterations = 1, float lambda = 0.5f);
-    void LaplacianSmoothingNRing(unsigned int iterations, float lambda, int nRing);
 
     __host__ __device__ static uint64_t PackEdge(unsigned int v0, unsigned int v1);
     __device__ static bool HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value);
