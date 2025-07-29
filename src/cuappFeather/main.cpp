@@ -18,7 +18,7 @@ using VD = VisualDebugging;
 
 CUDAInstance cudaInstance;
 
-MiniMath::V3 initialPosition;
+glm::vec3 initialPosition;
 unsigned int halfEdgeIndex = 2000;
 unsigned int vertexIndex = 0;
 vector<unsigned int> oneRing;
@@ -145,12 +145,12 @@ bool ForceGPUPerformance()
 //}
 #pragma endregion
 
-//const string resource_file_name = "0_Initial";
+const string resource_file_name = "0_Initial";
 //const string resource_file_name = "0_Initial_Noise";
 //const string resource_file_name = "Compound_Full";
 //const string resource_file_name = "Bridge";
 //const string resource_file_name = "Reintegrate";
-const string resource_file_name = "KOL";
+//const string resource_file_name = "KOL";
 const string resource_file_name_ply = "../../res/3D/" + resource_file_name + ".ply";
 const string resource_file_name_alp = "../../res/3D/" + resource_file_name + ".alp";
 
@@ -181,7 +181,7 @@ void ApplyPointCloudToEntity(Entity entity, const HostPointCloud& h_pointCloud)
 		renderable->Clear();
 	}
 
-	auto [indices, vertices, normals, colors, uvs] = GeometryBuilder::BuildSphere("zero", 0.05f, 6, 6);
+	auto [indices, vertices, normals, colors, uvs] = GeometryBuilder::BuildSphere({ 0.0f, 0.0f, 0.0f }, 0.05f, 6, 6);
 	//auto [indices, vertices, normals, colors, uvs] = GeometryBuilder::BuildBox("zero", "half");
 	renderable->AddIndices(indices);
 	renderable->AddVertices(vertices);
@@ -196,14 +196,14 @@ void ApplyPointCloudToEntity(Entity entity, const HostPointCloud& h_pointCloud)
 		auto& n = h_pointCloud.normals[i];
 		auto& c = h_pointCloud.colors[i];
 
-		renderable->AddInstanceColor(MiniMath::V4(c.x, c.y, c.z, 1.0f));
+		renderable->AddInstanceColor(glm::vec4(c.x, c.y, c.z, 1.0f));
 		renderable->AddInstanceNormal({ n.x, n.y, n.z });
 
-		MiniMath::M4 model = MiniMath::M4::identity();
-		model.m[0][0] = 2.0f;
-		model.m[1][1] = 2.0f;
-		model.m[2][2] = 2.0f;
-		model = MiniMath::translate(model, { p.x, p.y, p.z });
+		glm::mat4 model = glm::identity<glm::mat4>();
+		model[0][0] = 2.0f;
+		model[1][1] = 2.0f;
+		model[2][2] = 2.0f;
+		model = glm::translate(model, { p.x, p.y, p.z });
 		renderable->AddInstanceTransform(model);
 	}
 	renderable->EnableInstancing(h_pointCloud.numberOfPoints);
@@ -344,7 +344,7 @@ int main(int argc, char** argv)
 			Feather.GetComponent<CameraManipulatorTrackball>(entity)->OnMousePosition(event);
 			});
 
-		Feather.CreateEventCallback<MouseButtonEvent>(cam, [w](Entity entity, const MouseButtonEvent& event) {
+		Feather.CreateEventCallback<MouseButtonEvent>(cam, [&](Entity entity, const MouseButtonEvent& event) {
 			auto manipulator = Feather.GetComponent<CameraManipulatorTrackball>(entity);
 			manipulator->OnMouseButton(event);
 
@@ -352,8 +352,8 @@ int main(int argc, char** argv)
 			if (event.button == 0 && event.action == 0)
 			{
 				auto ray = manipulator->GetCamera()->ScreenPointToRay(event.xpos, event.ypos, w->GetWidth(), w->GetHeight());
-				//printf("From : %.4f, %.4f, %.4f, Direction : %.4f, %.4f, %.4f\n",
-				//	ray.origin.x, ray.origin.y, ray.origin.z, ray.direction.x, ray.direction.y, ray.direction.z);
+				//VD::Clear("PickingRay");
+				VD::AddLine("PickingRay", ray.origin, ray.direction * 500.0f, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
 
 				int hitIndex = -1;
 				float outHit = FLT_MAX;
@@ -368,7 +368,7 @@ int main(int argc, char** argv)
 					make_float3(ray.origin.x, ray.origin.y, ray.origin.z),
 					make_float3(ray.direction.x, ray.direction.y, ray.direction.z),
 					hitIndex, outHit);
-
+				
 				printf("[d_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
 			}
 			});
@@ -381,9 +381,19 @@ int main(int argc, char** argv)
 
 #pragma region Status Panel
 	{
+		auto gui = Feather.CreateEntity("Panel");
+		
+		auto panel = Feather.CreateComponent<Panel>(gui, "Mouse Position");
+		Feather.CreateEventCallback<MousePositionEvent>(gui, [](Entity entity, const MousePositionEvent& event) {
+			auto component = Feather.GetComponent<Panel>(entity);
+			component->mouseX = event.xpos;
+			component->mouseY = event.ypos;
+			});
+	}
+	{
 		auto gui = Feather.CreateEntity("Status Panel");
-		auto statusPanel = Feather.CreateComponent<StatusPanel>(gui);
 
+		auto statusPanel = Feather.CreateComponent<StatusPanel>(gui);
 		Feather.CreateEventCallback<MousePositionEvent>(gui, [](Entity entity, const MousePositionEvent& event) {
 			auto component = Feather.GetComponent<StatusPanel>(entity);
 			component->mouseX = event.xpos;
@@ -496,15 +506,15 @@ int main(int argc, char** argv)
 			printf("max : %f, %f, %f\n", Mx, My, Mz);
 			printf("dimensions : %f, %f, %f\n", lx, ly, lz);
 
-			Entity cam = Feather.GetEntityByName("Camera");
-			auto pcam = Feather.GetComponent<PerspectiveCamera>(cam);
-			auto cameraManipulator = Feather.GetComponent<CameraManipulatorTrackball>(cam);
-			cameraManipulator->SetRadius(lx + ly + lz);
-			auto camera = cameraManipulator->GetCamera();
-			camera->SetEye({ cx,cy,cz + cameraManipulator->GetRadius() });
-			camera->SetTarget({ cx,cy,cz });
+			//Entity cam = Feather.GetEntityByName("Camera");
+			//auto pcam = Feather.GetComponent<PerspectiveCamera>(cam);
+			//auto cameraManipulator = Feather.GetComponent<CameraManipulatorTrackball>(cam);
+			//cameraManipulator->SetRadius(lx + ly + lz);
+			//auto camera = cameraManipulator->GetCamera();
+			//camera->SetEye({ cx,cy,cz + cameraManipulator->GetRadius() });
+			//camera->SetTarget({ cx,cy,cz });
 
-			cameraManipulator->MakeDefault();
+			//cameraManipulator->MakeDefault();
 
 
 			Feather.CreateEventCallback<KeyEvent>(entity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
@@ -528,7 +538,7 @@ int main(int argc, char** argv)
 					//for (size_t i = 0; i < host_colors.size(); i++)
 					//{
 					//	auto& color = host_colors[i];
-					//	renderable->SetInstanceColor(i, MiniMath::V4(color.x / 255.0f, color.y / 255.0f, color.z / 255.0f, 1.0f));
+					//	renderable->SetInstanceColor(i, glm::vec4(color.x / 255.0f, color.y / 255.0f, color.z / 255.0f, 1.0f));
 					//}
 				}
 				else if (GLFW_KEY_F2 == event.keyCode)
@@ -536,7 +546,7 @@ int main(int argc, char** argv)
 					//for (size_t i = 0; i < host_colors.size(); i++)
 					//{
 					//	auto& color = host_colors_hsv[i];
-					//	renderable->SetInstanceColor(i, MiniMath::V4(color.x, color.y, 0.25f, 1.0f));
+					//	renderable->SetInstanceColor(i, glm::vec4(color.x, color.y, 0.25f, 1.0f));
 					//}
 				}
 				else if (GLFW_KEY_F3 == event.keyCode)
@@ -643,24 +653,24 @@ int main(int argc, char** argv)
 			auto meshEntity = Feather.CreateEntity("MarchingCubesMesh");
 			ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
 
-			{
-				auto& mesh = cudaInstance.h_mesh;
+			//{
+			//	auto& mesh = cudaInstance.h_mesh;
 
-				auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
-				auto renderable = Feather.GetComponent<Renderable>(meshEntity);
+			//	auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
+			//	auto renderable = Feather.GetComponent<Renderable>(meshEntity);
 
-				for (size_t i = 0; i < oneRing.size(); i++)
-				{
-					auto hi = oneRing[i];
-					auto vi = mesh.halfEdges[hi].vertexIndex;
+			//	for (size_t i = 0; i < oneRing.size(); i++)
+			//	{
+			//		auto hi = oneRing[i];
+			//		auto vi = mesh.halfEdges[hi].vertexIndex;
 
-					renderable->SetVertex(hi, MiniMath::V3(oneRingPositions[i].x, oneRingPositions[i].y, oneRingPositions[i].z + 0.1f));
-					renderable->SetColor(hi, { 0.0f, 0.0f, 1.0f, 1.0f });
-				}
+			//		renderable->SetVertex(hi, glm::vec3(oneRingPositions[i].x, oneRingPositions[i].y, oneRingPositions[i].z + 0.1f));
+			//		renderable->SetColor(hi, { 0.0f, 0.0f, 1.0f, 1.0f });
+			//	}
 
-				renderable->SetVertex(vertexIndex, MiniMath::V3(initialPosition.x, initialPosition.y, initialPosition.z + 1.1f));
-				renderable->SetColor(vertexIndex, { 1.0f, 0.0f, 0.0f, 1.0f });
-			}
+			//	renderable->SetVertex(vertexIndex, glm::vec3(initialPosition.x, initialPosition.y, initialPosition.z + 1.1f));
+			//	renderable->SetColor(vertexIndex, { 1.0f, 0.0f, 0.0f, 1.0f });
+			//}
 
 			Feather.CreateEventCallback<KeyEvent>(meshEntity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
 				auto renderable = Feather.GetComponent<Renderable>(entity);
@@ -718,91 +728,119 @@ int main(int argc, char** argv)
 			//for (size_t i = 0; i < host_colors.size(); i++)
 			//{
 			//	auto& color = host_colors[i];
-			//	renderable->SetInstanceColor(i, MiniMath::V4(color.x / 255.0f, color.y / 255.0f, color.z / 255.0f, 1.0f));
+			//	renderable->SetInstanceColor(i, glm::vec4(color.x / 255.0f, color.y / 255.0f, color.z / 255.0f, 1.0f));
 			//}
 
-			{
-				auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
-				auto renderable = Feather.GetComponent<Renderable>(meshEntity);
-				for (size_t i = 0; i < renderable->GetIndices().size() / 3; i++)
-				{
-					auto i0 = renderable->GetIndices()[i * 3];
-					auto i1 = renderable->GetIndices()[i * 3 + 1];
-					auto i2 = renderable->GetIndices()[i * 3 + 2];
+			//{
+			//	auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
+			//	auto renderable = Feather.GetComponent<Renderable>(meshEntity);
+			//	for (size_t i = 0; i < renderable->GetIndices().size() / 3; i++)
+			//	{
+			//		auto i0 = renderable->GetIndices()[i * 3];
+			//		auto i1 = renderable->GetIndices()[i * 3 + 1];
+			//		auto i2 = renderable->GetIndices()[i * 3 + 2];
 
-					auto& v0 = renderable->GetVertices()[i0];
-					auto& v1 = renderable->GetVertices()[i1];
-					auto& v2 = renderable->GetVertices()[i2];
+			//		auto& v0 = renderable->GetVertices()[i0];
+			//		auto& v1 = renderable->GetVertices()[i1];
+			//		auto& v2 = renderable->GetVertices()[i2];
 
-					VD::AddLine("WireFrame", v0, v1, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
-					VD::AddLine("WireFrame", v1, v2, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
-					VD::AddLine("WireFrame", v2, v0, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
-				}
-			}
+			//		VD::AddLine("WireFrame", v0, v1, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
+			//		VD::AddLine("WireFrame", v1, v2, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
+			//		VD::AddLine("WireFrame", v2, v0, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
+			//	}
+			//}
 			}
 #pragma endregion
 #endif
+
+		{ // AABB
+			vector<glm::vec3> points;
+
+			auto m = alp.GetAABBMin();
+			float x = get<0>(m);
+			float y = get<1>(m);
+			float z = get<2>(m);
+			auto M = alp.GetAABBMax();
+			float X = get<0>(M);
+			float Y = get<1>(M);
+			float Z = get<2>(M);
+
+			points.push_back({ x,y,z });
+			points.push_back({ X,y,z });
+			points.push_back({ x,Y,z });
+			points.push_back({ X,Y,z });
+
+			points.push_back({ x,y,Z });
+			points.push_back({ X,y,Z });
+			points.push_back({ x,Y,Z });
+			points.push_back({ X,Y,Z });
+
+			auto width = w->GetWidth();
+			auto height = w->GetHeight();
+
+			Entity cam = Feather.GetEntityByName("Camera");
+			auto pcam = Feather.GetComponent<PerspectiveCamera>(cam);
+
+			auto projection  =pcam->GetProjectionMatrix();
+			auto view = pcam->GetViewMatrix();
+
+			for (auto& p : points)
+			{
+
+				glm::vec4 clip = projection * view * glm::vec4(p.x, p.y, p.z, 1.0f);
+				glm::vec3 ndc = glm::vec3(clip.x, clip.y, clip.z) / clip.w;
+				int x_screen = (ndc.x * 0.5f + 0.5f) * width;
+				int y_screen = (1.0f - (ndc.y * 0.5f + 0.5f)) * height;
+				printf("Vertex (%f, %f, %f) => Screen (%d, %d)\n", p.x, p.y, p.z, x_screen, y_screen);
+			}
+
+			VD::Clear("Lines");
+			VD::AddLine("Lines", { x, y, z }, { X, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			VD::AddLine("Lines", { X, y, z }, { X, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			VD::AddLine("Lines", { X, Y, z }, { x, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			VD::AddLine("Lines", { x, Y, z }, { x, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+
+			VD::AddLine("Lines", { x, y, Z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			VD::AddLine("Lines", { X, y, Z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			VD::AddLine("Lines", { X, Y, Z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			VD::AddLine("Lines", { x, Y, Z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+
+			VD::AddLine("Lines", { x, y, z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			VD::AddLine("Lines", { X, y, z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			VD::AddLine("Lines", { X, Y, z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			VD::AddLine("Lines", { x, Y, z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+		}
 		});
 
 	Feather.AddOnUpdateCallback([&](f32 timeDelta) {
-		{
-			auto& mesh = cudaInstance.h_mesh;
+		//{
+		//	auto& mesh = cudaInstance.h_mesh;
 
-			auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
-			auto renderable = Feather.GetComponent<Renderable>(meshEntity);
+		//	auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
+		//	auto renderable = Feather.GetComponent<Renderable>(meshEntity);
 
-			static float delta = 0;
-			delta += timeDelta * 0.01f;
-			float diff = sinf(delta * MiniMath::PI / 180.0f);
-			//renderable->SetVertex(vertexIndex, initialPosition + MiniMath::V3(0.0f, 0.0f, diff));
-			//renderable->SetColor(vertexIndex, {1.0f, 0.0f, 0.0f, 1.0f});
+		//	static float delta = 0;
+		//	delta += timeDelta * 0.01f;
+		//	float diff = sinf(delta * DEG2RAD);
+		//	//renderable->SetVertex(vertexIndex, initialPosition + glm::vec3(0.0f, 0.0f, diff));
+		//	//renderable->SetColor(vertexIndex, {1.0f, 0.0f, 0.0f, 1.0f});
 
-			for (size_t i = 0; i < oneRing.size(); i++)
-			{
-				auto hi = oneRing[i];
-				auto vi = mesh.halfEdges[hi].vertexIndex;
+		//	for (size_t i = 0; i < oneRing.size(); i++)
+		//	{
+		//		auto hi = oneRing[i];
+		//		auto vi = mesh.halfEdges[hi].vertexIndex;
 
-				//renderable->SetVertex(hi, MiniMath::V3(oneRingPositions[i].x, oneRingPositions[i].y, oneRingPositions[i].z + diff));
-				renderable->SetColor(hi, { 0.0f, 0.0f, 1.0f, 1.0f });
-			}
+		//		//renderable->SetVertex(hi, glm::vec3(oneRingPositions[i].x, oneRingPositions[i].y, oneRingPositions[i].z + diff));
+		//		renderable->SetColor(hi, { 0.0f, 0.0f, 1.0f, 1.0f });
+		//	}
 
-			//auto& mesh = cudaInstance.h_mesh;
-			//auto& he = mesh.halfEdges[10000];
-			//auto vi = he.vertexIndex;
-			//mesh.colors[vi].x = 1.0f;
-			//mesh.colors[vi].y = 0.0f;
-			//mesh.colors[vi].z = 0.0f;
-
-			{ // AABB
-				static float acc = 0.0f;
-				//acc += timeDelta * 0.01f;
-
-				auto m = alp.GetAABBMin();
-				float x = get<0>(m) + sinf(acc);
-				float y = get<1>(m) + sinf(acc);
-				float z = get<2>(m) + sinf(acc);
-				auto M = alp.GetAABBMax();
-				float X = get<0>(M) + sinf(acc);
-				float Y = get<1>(M) + sinf(acc);
-				float Z = get<2>(M) + sinf(acc);
-
-				VD::Clear("Lines");
-				VD::AddLine("Lines", { x, y, z }, { X, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { X, y, z }, { X, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { X, Y, z }, { x, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { x, Y, z }, { x, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-
-				VD::AddLine("Lines", { x, y, Z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { X, y, Z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { X, Y, Z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { x, Y, Z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-
-				VD::AddLine("Lines", { x, y, z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { X, y, z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { X, Y, z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-				VD::AddLine("Lines", { x, Y, z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			}
-		}
+		//	//auto& mesh = cudaInstance.h_mesh;
+		//	//auto& he = mesh.halfEdges[10000];
+		//	//auto vi = he.vertexIndex;
+		//	//mesh.colors[vi].x = 1.0f;
+		//	//mesh.colors[vi].y = 0.0f;
+		//	//mesh.colors[vi].z = 0.0f;
+		//}
 		});
 
 	Feather.Run();

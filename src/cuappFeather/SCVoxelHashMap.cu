@@ -117,6 +117,8 @@ HostPointCloud SCVoxelHashMap::Serialize()
 
 void SCVoxelHashMap::MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue)
 {
+	nvtxRangePushA("MarchingCubes");
+
 	unsigned int maxPoints = info.h_numberOfOccupiedVoxels * 3;
 	unsigned int maxFaces = info.h_numberOfOccupiedVoxels * 15;
 	mesh.Terminate();
@@ -159,26 +161,31 @@ void SCVoxelHashMap::MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue)
 
 	mesh.BuildHalfEdges();
 
-	std::vector<HalfEdge> h_halfEdges(mesh.numberOfFaces * 3);
-	cudaMemcpy(h_halfEdges.data(), mesh.halfEdges, sizeof(HalfEdge) * mesh.numberOfFaces * 3, cudaMemcpyDeviceToHost);
+	//std::vector<HalfEdge> h_halfEdges(mesh.numberOfFaces * 3);
+	//cudaMemcpy(h_halfEdges.data(), mesh.halfEdges, sizeof(HalfEdge) * mesh.numberOfFaces * 3, cudaMemcpyDeviceToHost);
+	//CUDA_SYNC();
 
-	for (unsigned int i = 0; i < mesh.numberOfFaces * 3; ++i)
-	{
-		if (h_halfEdges[i].vertexIndex >= mesh.numberOfPoints)
-		{
-			printf("[ERROR] Invalid halfEdge[%u].vertexIndex = %u (numberOfPoints=%u)\n",
-				i, h_halfEdges[i].vertexIndex, mesh.numberOfPoints);
-		}
-	}
+	//for (unsigned int i = 0; i < mesh.numberOfFaces * 3; ++i)
+	//{
+	//	if (h_halfEdges[i].vertexIndex >= mesh.numberOfPoints)
+	//	{
+	//		printf("[ERROR] Invalid halfEdge[%u].vertexIndex = %u (numberOfPoints=%u)\n",
+	//			i, h_halfEdges[i].vertexIndex, mesh.numberOfPoints);
+	//	}
+	//}
 
-	VEFM::M m;
-	m.Initialize(10, 10);
+	//VEFM::M m;
+	//m.Initialize(10, 10);
 
 	mesh.LaplacianSmoothing(5, 1.0f);
 	//mesh.LaplacianSmoothingNRing(2, 0.15f, 1);
 
 	cudaFree(d_numberOfPoints);
 	cudaFree(d_numberOfFaces);
+
+	CUDA_SYNC();
+
+	nvtxRangePop();
 }
 
 __host__ __device__ uint64_t SCVoxelHashMap::expandBits(uint32_t v)
