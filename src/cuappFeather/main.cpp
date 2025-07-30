@@ -400,17 +400,20 @@ int main(int argc, char** argv)
 					unsigned int vi = -1;
 					if (d0 < d1 && d0 < d2)
 					{
-						VD::AddBox("Nearest", v0, { 0.0f, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						auto vn = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.x]));
+						VD::AddBox("Nearest", v0, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
 						vi = f.x;
 					}
 					else if (d1 < d0 && d1 < d2)
 					{
-						VD::AddBox("Nearest", v1, { 0.0, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						auto vn = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.y]));
+						VD::AddBox("Nearest", v1, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
 						vi = f.y;
 					}
 					else if (d2 < d0 && d2 < d1)
 					{
-						VD::AddBox("Nearest", v2, { 0.0, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						auto vn = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.z]));
+						VD::AddBox("Nearest", v2, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
 						vi = f.z;
 					}
 
@@ -419,7 +422,7 @@ int main(int argc, char** argv)
 					auto vis = cudaInstance.h_mesh.GetOneRingVertices(vi);
 					for (auto& vi : vis)
 					{
-						VD::AddBox("OneRing", { XYZ(cudaInstance.h_mesh.positions[vi]) }, { 0.0f, 1.0f, 0.0f }, { 0.05f, 0.05, 0.05 }, { 0.0f, 1.0f, 0.0f, 1.0f });
+						VD::AddBox("OneRing", { XYZ(cudaInstance.h_mesh.positions[vi]) }, normal, { 0.05f, 0.05, 0.05 }, Color::green());
 					}
 
 
@@ -444,7 +447,7 @@ int main(int argc, char** argv)
 #pragma region Status Panel
 	{
 		auto gui = Feather.CreateEntity("Panel");
-		
+
 		auto panel = Feather.CreateComponent<Panel>(gui, "Mouse Position");
 		Feather.CreateEventCallback<MousePositionEvent>(gui, [](Entity entity, const MousePositionEvent& event) {
 			auto component = Feather.GetComponent<Panel>(entity);
@@ -635,7 +638,7 @@ int main(int argc, char** argv)
 
 			//result.Terminate();
 			h_pointCloud.Terminate();
-			}
+		}
 #pragma endregion
 #endif
 
@@ -655,26 +658,10 @@ int main(int argc, char** argv)
 			Entity cam = Feather.GetEntityByName("Camera");
 			auto pcam = Feather.GetComponent<PerspectiveCamera>(cam);
 
-			auto projection  =pcam->GetProjectionMatrix();
+			auto projection = pcam->GetProjectionMatrix();
 			auto view = pcam->GetViewMatrix();
 
 			VD::AddWiredBox("AABB", { x, y, z }, { X, Y, Z }, Color::blue());
-
-			//VD::Clear("Lines");
-			//VD::AddLine("Lines", { x, y, z }, { X, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			//VD::AddLine("Lines", { X, y, z }, { X, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			//VD::AddLine("Lines", { X, Y, z }, { x, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			//VD::AddLine("Lines", { x, Y, z }, { x, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-
-			//VD::AddLine("Lines", { x, y, Z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			//VD::AddLine("Lines", { X, y, Z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			//VD::AddLine("Lines", { X, Y, Z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			//VD::AddLine("Lines", { x, Y, Z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-
-			//VD::AddLine("Lines", { x, y, z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			//VD::AddLine("Lines", { X, y, z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			//VD::AddLine("Lines", { X, Y, z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			//VD::AddLine("Lines", { x, Y, z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
 		}
 		});
 
@@ -686,4 +673,4 @@ int main(int argc, char** argv)
 	Feather.Terminate();
 
 	return 0;
-	}
+}
