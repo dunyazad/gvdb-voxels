@@ -308,89 +308,75 @@ bool HostHalfEdgeMesh::PickFace(const float3& rayOrigin, const float3& rayDir, i
     return (minIdx >= 0);
 }
 
-unsigned int HostHalfEdgeMesh::FindBoundaryHalfEdge(unsigned int v) const
-{
-    if (!vertexToHalfEdge || v >= numberOfPoints) return UINT32_MAX;
-
-    unsigned int startHE = vertexToHalfEdge[v];
-    if (startHE == UINT32_MAX) return UINT32_MAX;
-
-    unsigned int he = startHE;
-    for (int i = 0; i < numberOfFaces * 3; ++i) // valence보다 크면 구조가 깨진 것!
-    {
-        if (halfEdges[he].vertexIndex != v) break;
-        // boundary half-edge 발견
-        if (halfEdges[he].oppositeIndex == UINT32_MAX)
-            return he;
-
-        // 다음 outgoing half-edge로 이동
-        he = halfEdges[halfEdges[he].oppositeIndex].nextIndex;
-        if (he == startHE) break; // 한 바퀴 돌았으면 중단
-    }
-    // 못 찾으면 그냥 startHE 리턴 (closed mesh)
-    return startHE;
-}
-
 std::vector<unsigned int> HostHalfEdgeMesh::GetOneRingVertices(unsigned int v) const
 {
     std::vector<unsigned int> neighbors;
     if (!vertexToHalfEdge || v >= numberOfPoints) return neighbors;
 
-    // boundary half-edge부터 순회
-    unsigned int startHE = vertexToHalfEdge[v];
-    unsigned int he = startHE;
-    for (int i = 0; i < numberOfFaces * 3; ++i)
+    auto ishe = vertexToHalfEdge[v];
+    auto ihe = ishe;
+    auto lihe = ihe;
+    bool borderFound = false;
+
+    // ccw
+    do
     {
-        if (halfEdges[he].vertexIndex != v) break;
-        if (halfEdges[he].oppositeIndex == UINT32_MAX)
+        auto he = halfEdges[ihe];
+        if (UINT32_MAX == he.nextIndex) break;
+
+        auto ioe = he.oppositeIndex;
+        if (UINT32_MAX == ioe)
         {
-            startHE = he;
+            lihe = ihe;
+            borderFound = true;
             break;
         }
-        he = halfEdges[halfEdges[he].oppositeIndex].nextIndex;
-        if (he == vertexToHalfEdge[v]) break;
-    }
-
-    // 한쪽 방향(next+opp)
-    std::set<unsigned int> neighborSet;
-    he = startHE;
-    for (int i = 0; i < numberOfFaces * 3; ++i)
-    {
-        unsigned int opp = halfEdges[he].oppositeIndex;
-        if (opp == UINT32_MAX) break;
-        unsigned int neighbor = halfEdges[opp].vertexIndex;
-        if (neighbor != v) neighborSet.insert(neighbor);
-        he = halfEdges[opp].nextIndex;
-        if (he == startHE) break;
-    }
-
-    // 반대방향(prev+opp)
-    auto findPrev = [&](unsigned int hei) -> unsigned int
-    {
-        unsigned int f = halfEdges[hei].faceIndex;
-        for (unsigned int d = 0; d < 3; ++d)
+        auto oe = halfEdges[he.oppositeIndex];
+        if (UINT32_MAX == oe.vertexIndex)
         {
-            unsigned int candidate = f * 3 + d;
-            if (halfEdges[candidate].nextIndex == hei)
-                return candidate;
+            printf("[Fatal] Oppsite halfedge has no vertex index.\n");
+            break;
         }
-        return UINT32_MAX;
-    };
+        neighbors.push_back(oe.vertexIndex);
 
-    he = startHE;
-    for (int i = 0; i < numberOfFaces * 3; ++i)
+        if (UINT32_MAX == oe.nextIndex)
+        {
+            printf("[Fatal] Oppsite halfedge has no next halfedge index.\n");
+            break;
+        }
+
+        ihe = oe.nextIndex;
+    } while (ihe != ishe && UINT32_MAX != ihe);
+
+    // cw
+    if (borderFound)
     {
-        unsigned int prev = findPrev(he);
-        if (prev == UINT32_MAX) break;
-        unsigned int opp = halfEdges[prev].oppositeIndex;
-        if (opp == UINT32_MAX) break;
-        unsigned int neighbor = halfEdges[opp].vertexIndex;
-        if (neighbor != v) neighborSet.insert(neighbor);
-        he = opp;
-        if (he == startHE) break;
-    }
+        neighbors.clear();
 
-    neighbors.assign(neighborSet.begin(), neighborSet.end());
+        ihe = lihe;
+        do
+        {
+            auto he = halfEdges[ihe];
+            if (UINT32_MAX == he.nextIndex)
+            {
+                printf("[Fatal] Halfedge has no next halfedge index.\n");
+                break;
+            }
+
+            auto ne = halfEdges[he.nextIndex];
+            if (UINT32_MAX == ne.nextIndex)
+            {
+                printf("[Fatal] Next halfedge has no next halfedge index.\n");
+                break;
+            }
+            //neighbors.push_back(ne.vertexIndex);
+
+            auto pe = halfEdges[ne.nextIndex];
+            neighbors.push_back(pe.vertexIndex);
+
+            ihe = pe.oppositeIndex;
+        } while (ihe != ishe && UINT32_MAX != ihe);
+    }
     return neighbors;
 }
 

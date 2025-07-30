@@ -147,7 +147,9 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
     CUDA_TS(MarchingCubes);
     vhm.MarchingCubes(d_mesh);
     CUDA_TE(MarchingCubes);
-    h_mesh.CopyFromDevice(d_mesh);
+    //h_mesh.CopyFromDevice(d_mesh);
+
+    h_mesh.DeserializePLY("../../res/3D/HostHalfEdgeMesh.ply");
 
     //h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh.ply", false);
 

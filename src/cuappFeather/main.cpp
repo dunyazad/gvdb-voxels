@@ -196,17 +196,26 @@ void ApplyPointCloudToEntity(Entity entity, const HostPointCloud& h_pointCloud)
 		auto& n = h_pointCloud.normals[i];
 		auto& c = h_pointCloud.colors[i];
 
-		renderable->AddInstanceColor(glm::vec4(c.x, c.y, c.z, 1.0f));
-		renderable->AddInstanceNormal({ n.x, n.y, n.z });
+		glm::vec3 position(XYZ(p));
+		glm::vec3 normal(XYZ(n));
+		glm::vec4 color(XYZ(c), 1.0f);
 
-		glm::mat4 model = glm::identity<glm::mat4>();
-		model = glm::translate(model, { p.x, p.y, p.z });
-		model[0][0] = 2.0f;
-		model[1][1] = 2.0f;
-		model[2][2] = 2.0f;
-		renderable->AddInstanceTransform(model);
+		renderable->AddInstanceColor(color);
+		renderable->AddInstanceNormal(normal);
+
+		glm::mat4 tm = glm::identity<glm::mat4>();
+		glm::mat4 rot = glm::mat4(1.0f);
+		if (glm::length(normal) > 0.0001f)
+		{
+			glm::vec3 axis = glm::normalize(glm::cross(glm::vec3(0, 0, 1), normal));
+			float angle = acos(glm::dot(glm::normalize(normal), glm::vec3(0, 0, 1)));
+			if (glm::length(axis) > 0.0001f)
+				rot = glm::rotate(glm::mat4(1.0f), angle, axis);
+		}
+		tm = glm::translate(tm, position) * rot * glm::scale(glm::mat4(1.0f), glm::vec3(2.0f));
+		renderable->AddInstanceTransform(tm);
+		renderable->IncreaseNumberOfInstances();
 	}
-	renderable->EnableInstancing(h_pointCloud.numberOfPoints);
 }
 
 void ApplyHalfEdgeMeshToEntity(Entity entity, const HostHalfEdgeMesh& h_mesh);
@@ -248,7 +257,8 @@ void ApplyHalfEdgeMeshToEntity(Entity entity, const HostHalfEdgeMesh& h_mesh)
 
 	for (unsigned int i = 0; i < h_mesh.numberOfPoints; ++i)
 	{
-		renderable->AddVertex({ h_mesh.positions[i].x, h_mesh.positions[i].y, h_mesh.positions[i].z });
+		auto position = glm::vec3(XYZ(h_mesh.positions[i]));
+		renderable->AddVertex(position);
 		if (h_mesh.normals) renderable->AddNormal({ h_mesh.normals[i].x, h_mesh.normals[i].y, h_mesh.normals[i].z });
 		if (h_mesh.colors) renderable->AddColor({ h_mesh.colors[i].x, h_mesh.colors[i].y, h_mesh.colors[i].z, 1.0f });
 	}
@@ -303,6 +313,17 @@ int main(int argc, char** argv)
 			else if (GLFW_KEY_BACKSPACE == event.keyCode)
 			{
 				VD::ClearAll();
+			}
+			else if (GLFW_KEY_F1 == event.keyCode)
+			{
+				for (unsigned int i = 0; i < cudaInstance.h_mesh.numberOfPoints; ++i)
+				{
+					auto position = glm::vec3(XYZ(cudaInstance.h_mesh.positions[i]));
+
+					stringstream ss;
+					ss << i;
+					VD::AddText("OneRingVertices", ss.str(), position, Color::white());
+				}
 			}
 			else if (GLFW_KEY_ENTER == event.keyCode)
 			{
@@ -379,7 +400,7 @@ int main(int argc, char** argv)
 
 					auto normal = glm::trianglenormal(v0, v1, v2);
 
-					VD::AddTriangle("Picked", v0, v1, v2, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+					//VD::AddTriangle("Picked", v0, v1, v2, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
 					VD::AddSphere("PickedS", v0, normal, 0.025f, { 1.0f, 0.0f, 0.0f, 1.0f });
 					VD::AddSphere("PickedS", v1, normal, 0.025f, { 0.0f, 1.0f, 0.0f, 1.0f });
 					VD::AddSphere("PickedS", v2, normal, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
@@ -401,29 +422,37 @@ int main(int argc, char** argv)
 					if (d0 < d1 && d0 < d2)
 					{
 						auto vn = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.x]));
-						VD::AddBox("Nearest", v0, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						VD::AddWiredBox("Nearest", v0, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
 						vi = f.x;
 					}
 					else if (d1 < d0 && d1 < d2)
 					{
 						auto vn = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.y]));
-						VD::AddBox("Nearest", v1, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						VD::AddWiredBox("Nearest", v1, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
 						vi = f.y;
 					}
 					else if (d2 < d0 && d2 < d1)
 					{
 						auto vn = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.z]));
-						VD::AddBox("Nearest", v2, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						VD::AddWiredBox("Nearest", v2, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
 						vi = f.z;
 					}
 
 					printf("[h_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
 
+					printf("OneRing Center : %d\n", vi);
 					auto vis = cudaInstance.h_mesh.GetOneRingVertices(vi);
 					for (auto& vi : vis)
 					{
-						VD::AddBox("OneRing", { XYZ(cudaInstance.h_mesh.positions[vi]) }, normal, { 0.05f, 0.05, 0.05 }, Color::green());
+						printf("%d, ", vi);
+						glm::vec3 position = glm::vec3(XYZ(cudaInstance.h_mesh.positions[vi]));
+						VD::AddWiredBox("OneRing", position, normal, { 0.025f, 0.025, 0.025 }, Color::green());
+
+						stringstream ss;
+						ss << vi;
+						VD::AddText("OneRingVertices", ss.str(), position, Color::white());
 					}
+					printf("\n");
 
 
 
