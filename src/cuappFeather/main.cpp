@@ -384,6 +384,8 @@ int main(int argc, char** argv)
 
 				int hitIndex = -1;
 				float outHit = FLT_MAX;
+
+				/* Host
 				if (cudaInstance.h_mesh.PickFace(
 					make_float3(ray.origin.x, ray.origin.y, ray.origin.z),
 					make_float3(ray.direction.x, ray.direction.y, ray.direction.z),
@@ -453,16 +455,78 @@ int main(int argc, char** argv)
 						VD::AddText("OneRingVertices", ss.str(), position, Color::white());
 					}
 					printf("\n");
+				}
+				*/
 
+				if (cudaInstance.d_mesh.PickFace(
+					make_float3(ray.origin.x, ray.origin.y, ray.origin.z),
+					make_float3(ray.direction.x, ray.direction.y, ray.direction.z),
+					hitIndex, outHit))
+				{
+					auto& f = cudaInstance.h_mesh.faces[hitIndex];
+					auto& p0 = cudaInstance.h_mesh.positions[f.x];
+					auto& p1 = cudaInstance.h_mesh.positions[f.y];
+					auto& p2 = cudaInstance.h_mesh.positions[f.z];
 
+					auto v0 = glm::vec3(XYZ(p0));
+					auto v1 = glm::vec3(XYZ(p1));
+					auto v2 = glm::vec3(XYZ(p2));
 
-					cudaInstance.d_mesh.PickFace(
-						make_float3(ray.origin.x, ray.origin.y, ray.origin.z),
-						make_float3(ray.direction.x, ray.direction.y, ray.direction.z),
-						hitIndex, outHit);
+					auto normal = glm::trianglenormal(v0, v1, v2);
+
+					//VD::AddTriangle("Picked", v0, v1, v2, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+					VD::AddSphere("PickedS", v0, normal, 0.025f, { 1.0f, 0.0f, 0.0f, 1.0f });
+					VD::AddSphere("PickedS", v1, normal, 0.025f, { 0.0f, 1.0f, 0.0f, 1.0f });
+					VD::AddSphere("PickedS", v2, normal, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
+					auto hitPosition = ray.origin + glm::normalize(ray.direction) * outHit;
+					VD::AddSphere("PickedPosition", hitPosition, normal, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
+
+					VD::AddLine("PickingRay", ray.origin, hitPosition, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+
+					if (GLFW_MOD_CONTROL == event.mods)
+					{
+						camera->SetTarget(hitPosition);
+						camera->SetEye(hitPosition + (-ray.direction) * manipulator->GetRadius());
+					}
+
+					auto d0 = glm::distance2(hitPosition, v0);
+					auto d1 = glm::distance2(hitPosition, v1);
+					auto d2 = glm::distance2(hitPosition, v2);
+					unsigned int vi = -1;
+					if (d0 < d1 && d0 < d2)
+					{
+						auto vn = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.x]));
+						VD::AddWiredBox("Nearest", v0, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						vi = f.x;
+					}
+					else if (d1 < d0 && d1 < d2)
+					{
+						auto vn = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.y]));
+						VD::AddWiredBox("Nearest", v1, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						vi = f.y;
+					}
+					else if (d2 < d0 && d2 < d1)
+					{
+						auto vn = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.z]));
+						VD::AddWiredBox("Nearest", v2, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						vi = f.z;
+					}
 
 					printf("[d_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
 
+					printf("OneRing Center : %d\n", vi);
+					auto vis = cudaInstance.d_mesh.GetOneRingVertices(vi);
+					for (auto& vi : vis)
+					{
+						printf("%d, ", vi);
+						glm::vec3 position = glm::vec3(XYZ(cudaInstance.h_mesh.positions[vi]));
+						VD::AddWiredBox("OneRing", position, normal, { 0.025f, 0.025, 0.025 }, Color::green());
+
+						stringstream ss;
+						ss << vi;
+						VD::AddText("OneRingVertices", ss.str(), position, Color::white());
+					}
+					printf("\n");
 				}
 			}
 			});

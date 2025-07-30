@@ -558,6 +558,51 @@ bool DeviceHalfEdgeMesh::PickFace(const float3& rayOrigin, const float3& rayDir,
     return (outHitIndex >= 0);
 }
 
+std::vector<unsigned int> DeviceHalfEdgeMesh::GetOneRingVertices(unsigned int v) const
+{
+    // 파라미터 체크
+    assert(v < numberOfPoints);
+
+    // 디바이스 결과 버퍼 할당
+    constexpr unsigned int MAX_NEIGHBORS = 64;
+    unsigned int* d_neighbors = nullptr;
+    unsigned int* d_count = nullptr;
+    cudaMalloc(&d_neighbors, sizeof(unsigned int) * MAX_NEIGHBORS);
+    cudaMalloc(&d_count, sizeof(unsigned int));
+    cudaMemset(d_neighbors, 0xFF, sizeof(unsigned int) * MAX_NEIGHBORS);
+    cudaMemset(d_count, 0, sizeof(unsigned int));
+
+    // 커널 호출 (단일 스레드, 하나의 vertex만 추출)
+    Kernel_ExampleOneRing << <1, 1 >> > (
+        halfEdges,
+        vertexToHalfEdge,
+        numberOfPoints,
+        v,
+        d_neighbors,
+        d_count
+        );
+    cudaDeviceSynchronize();
+
+    // 결과 복사
+    unsigned int h_count = 0;
+    unsigned int h_neighbors[MAX_NEIGHBORS];
+    cudaMemcpy(&h_count, d_count, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_neighbors, d_neighbors, sizeof(unsigned int) * MAX_NEIGHBORS, cudaMemcpyDeviceToHost);
+
+    // 정리
+    cudaFree(d_neighbors);
+    cudaFree(d_count);
+
+    // 결과 생성
+    std::vector<unsigned int> result;
+    for (unsigned int i = 0; i < h_count; ++i)
+    {
+        if (h_neighbors[i] != UINT32_MAX)
+            result.push_back(h_neighbors[i]);
+    }
+    return result;
+}
+
 void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambda)
 {
     if (numberOfPoints == 0 || numberOfFaces == 0) return;
@@ -678,6 +723,80 @@ __device__ void DeviceHalfEdgeMesh::atomicMinWithIndex(float* address, float val
         if (old == assumed)
             *idxAddress = idx;
     } while (old != assumed);
+}
+
+__device__ void DeviceHalfEdgeMesh::GetOneRingVertices_Device(
+    unsigned int v,
+    const HalfEdge* halfEdges,
+    const unsigned int* vertexToHalfEdge,
+    unsigned int numberOfPoints,
+    unsigned int* outNeighbors,
+    unsigned int& outCount,
+    unsigned int maxNeighbors)
+{
+    outCount = 0;
+    if (!vertexToHalfEdge || v >= numberOfPoints)
+        return;
+
+    unsigned int ishe = vertexToHalfEdge[v];
+    if (ishe == UINT32_MAX)
+        return;
+    unsigned int ihe = ishe;
+    unsigned int lihe = ihe;
+    bool borderFound = false;
+
+    // CW traversal
+    do
+    {
+        const HalfEdge& he = halfEdges[ihe];
+        if (he.nextIndex == UINT32_MAX) break;
+
+        unsigned int ioe = he.oppositeIndex;
+        if (ioe == UINT32_MAX)
+        {
+            lihe = ihe;
+            borderFound = true;
+            break;
+        }
+        const HalfEdge& oe = halfEdges[ioe];
+        if (oe.vertexIndex == UINT32_MAX)
+            break;
+
+        if (outCount < maxNeighbors)
+            outNeighbors[outCount++] = oe.vertexIndex;
+
+        if (oe.nextIndex == UINT32_MAX)
+            break;
+
+        ihe = oe.nextIndex;
+    } while (ihe != ishe && ihe != UINT32_MAX);
+
+    // CCW traversal (border case)
+    if (borderFound)
+    {
+        outCount = 0;
+        ishe = lihe;
+        ihe = lihe;
+        do
+        {
+            const HalfEdge& he = halfEdges[ihe];
+            if (he.nextIndex == UINT32_MAX)
+                break;
+
+            const HalfEdge& ne = halfEdges[he.nextIndex];
+            if (ne.nextIndex == UINT32_MAX)
+                break;
+
+            if (ishe == ihe && outCount < maxNeighbors)
+                outNeighbors[outCount++] = ne.vertexIndex;
+
+            const HalfEdge& pe = halfEdges[ne.nextIndex];
+            if (outCount < maxNeighbors)
+                outNeighbors[outCount++] = pe.vertexIndex;
+
+            ihe = pe.oppositeIndex;
+        } while (ihe != ishe && ihe != UINT32_MAX);
+    }
 }
 
 __global__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
@@ -1027,5 +1146,27 @@ __global__ void Kernel_DeviceHalfEdgeMesh_PickFace(
     if (DeviceHalfEdgeMesh::RayTriangleIntersect(rayOrigin, rayDir, v0, v1, v2, t, u, v))
     {
         DeviceHalfEdgeMesh::atomicMinF(outHitT, t, outHitIndex, i);
+    }
+}
+
+__global__ void Kernel_ExampleOneRing(
+    const HalfEdge* halfEdges,
+    const unsigned int* vertexToHalfEdge,
+    unsigned int numberOfPoints,
+    unsigned int v, // 조사할 vertex index
+    unsigned int* outBuffer, // outBuffer[0:count-1]에 결과 저장
+    unsigned int* outCount)
+{
+    if (threadIdx.x == 0)
+    {
+        unsigned int neighbors[32];
+        unsigned int nCount = 0;
+        DeviceHalfEdgeMesh::GetOneRingVertices_Device(
+            v, halfEdges, vertexToHalfEdge, numberOfPoints, neighbors, nCount, 32);
+        for (unsigned int i = 0; i < nCount; ++i)
+        {
+            outBuffer[i] = neighbors[i];
+        }
+        *outCount = nCount;
     }
 }

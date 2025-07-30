@@ -90,6 +90,8 @@ struct DeviceHalfEdgeMesh
 
     bool PickFace(const float3& rayOrigin, const float3& rayDir,int& outHitIndex, float& outHitT) const;
 
+    std::vector<unsigned int> GetOneRingVertices(unsigned int v) const;
+
     void LaplacianSmoothing(unsigned int iterations = 1, float lambda = 0.5f);
 
     __host__ __device__ static uint64_t PackEdge(unsigned int v0, unsigned int v1);
@@ -102,6 +104,15 @@ struct DeviceHalfEdgeMesh
             float& t, float& u, float& v);
     __device__ static void atomicMinF(float* addr, float val, int* idx, int myIdx);
     __device__ static void atomicMinWithIndex(float* address, float val, int* idxAddress, int idx);
+
+    __device__ static void GetOneRingVertices_Device(
+            unsigned int v,
+            const HalfEdge* halfEdges,
+            const unsigned int* vertexToHalfEdge,
+            unsigned int numberOfPoints,
+            unsigned int* outNeighbors,
+            unsigned int& outCount,
+            unsigned int maxNeighbors = 32);
 };
 
 __global__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
@@ -150,3 +161,11 @@ __global__ void Kernel_DeviceHalfEdgeMesh_PickFace(
     unsigned int numberOfFaces,
     int* outHitIndex,
     float* outHitT);
+
+__global__ void Kernel_ExampleOneRing(
+    const HalfEdge* halfEdges,
+    const unsigned int* vertexToHalfEdge,
+    unsigned int numberOfPoints,
+    unsigned int v, // 조사할 vertex index
+    unsigned int* outBuffer, // outBuffer[0:count-1]에 결과 저장
+    unsigned int* outCount);

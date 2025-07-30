@@ -147,99 +147,11 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
     CUDA_TS(MarchingCubes);
     vhm.MarchingCubes(d_mesh);
     CUDA_TE(MarchingCubes);
-    //h_mesh.CopyFromDevice(d_mesh);
+    h_mesh.CopyFromDevice(d_mesh);
 
-    h_mesh.DeserializePLY("../../res/3D/HostHalfEdgeMesh.ply");
-
-    //h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh.ply", false);
-
-    //{
-    //    auto& mesh = h_mesh;
-
-    //    size_t numHalfEdges = mesh.numberOfFaces * 3;
-
-    //    for (size_t i = 0; i < numHalfEdges; ++i)
-    //    {
-    //        const auto& he = mesh.halfEdges[i];
-
-    //        if (he.oppositeIndex == UINT32_MAX)
-    //            continue; // boundary edge, skip
-
-    //        const auto& ohe = mesh.halfEdges[he.oppositeIndex];
-
-    //        // 1. Opposite of opposite should point back
-    //        if (ohe.oppositeIndex != i)
-    //        {
-    //            printf("[Invalid Opposite] at halfEdge %zu: ohe.oppositeIndex = %u\n", i, ohe.oppositeIndex);
-    //        }
-
-    //        // 2. Shared edge must be reversed (v0->v1 vs. v1->v0)
-    //        unsigned int he_v0 = he.vertexIndex;
-    //        unsigned int he_v1 = mesh.halfEdges[he.nextIndex].vertexIndex;
-
-    //        unsigned int ohe_v0 = ohe.vertexIndex;
-    //        unsigned int ohe_v1 = mesh.halfEdges[ohe.nextIndex].vertexIndex;
-
-    //        if (!(he_v0 == ohe_v1 && he_v1 == ohe_v0))
-    //        {
-    //            printf("[Mismatch] Edge direction mismatch at %zu: %u¡æ%u vs %u¡æ%u\n",
-    //                i, he_v0, he_v1, ohe_v0, ohe_v1);
-    //        }
-
-    //        // 3. Optional: check next cycle closure
-    //        const auto& e1 = mesh.halfEdges[he.nextIndex];
-    //        const auto& e2 = mesh.halfEdges[e1.nextIndex];
-    //        if (e2.nextIndex != i)
-    //        {
-    //            printf("[Loop Error] Face loop broken at halfEdge %zu\n", i);
-    //        }
-    //    }
-    //}
+    //h_mesh.DeserializePLY("../../res/3D/HostHalfEdgeMesh.ply");
 
     //h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh.ply", false);
-
- /*   PLYFormat plyMesh;
-    for (size_t i = 0; i < h_mesh.numberOfPoints; i++)
-    {
-        auto& p = h_mesh.positions[i];
-        if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
-        auto& n = h_mesh .normals[i];
-        auto& c = h_mesh .colors[i];
-
-        plyMesh.AddPoint(p.x, p.y, p.z);
-        plyMesh.AddNormal(n.x, n.y, n.z);
-        plyMesh.AddColor(c.x, c.y, c.z);
-    }
-    for (size_t i = 0; i < h_mesh.numberOfFaces; i++)
-    {
-        auto& index = h_mesh.faces[i];
-
-        plyMesh.AddFace(index.x, index.y, index.z);
-    }
-    plyMesh.Serialize("../../res/3D/MarchingCubes.ply");*/
-
-    //PLYFormat hePLY;
-    //for (unsigned int i = 0; i < mesh.numberOfPoints; ++i)
-    //{
-    //    auto& p = mesh.positions[i];
-    //    auto& n = mesh.normals[i];
-    //    auto& c = mesh.colors[i];
-    //    hePLY.AddPoint(p.x, p.y, p.z);
-    //    hePLY.AddNormal(n.x, n.y, n.z);
-    //    hePLY.AddColor(c.x, c.y, c.z);
-    //}
-
-    //for (size_t i = 0; i < mesh.numberOfFaces; ++i)
-    //{
-    //    auto& f = mesh.halfEdgeFaces[i];
-    //    auto& he0 = mesh.halfEdges[f.halfEdgeIndex];
-    //    auto& he1 = mesh.halfEdges[he0.nextIndex];
-    //    auto& he2 = mesh.halfEdges[he1.nextIndex];
-
-    //    hePLY.AddFace(he0.vertexIndex, he1.vertexIndex, he2.vertexIndex);
-    //}
-    //hePLY.Serialize("../../res/3D/HalfEdgeMesh.ply");
-
 
     CUDA_TE(ProcessPointCloud);
 
