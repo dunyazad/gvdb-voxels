@@ -377,12 +377,14 @@ int main(int argc, char** argv)
 					auto v1 = glm::vec3(XYZ(p1));
 					auto v2 = glm::vec3(XYZ(p2));
 
+					auto normal = glm::trianglenormal(v0, v1, v2);
+
 					VD::AddTriangle("Picked", v0, v1, v2, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
-					VD::AddSphere("PickedS", v0, 0.025f, { 1.0f, 0.0f, 0.0f, 1.0f });
-					VD::AddSphere("PickedS", v1, 0.025f, { 0.0f, 1.0f, 0.0f, 1.0f });
-					VD::AddSphere("PickedS", v2, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
+					VD::AddSphere("PickedS", v0, normal, 0.025f, { 1.0f, 0.0f, 0.0f, 1.0f });
+					VD::AddSphere("PickedS", v1, normal, 0.025f, { 0.0f, 1.0f, 0.0f, 1.0f });
+					VD::AddSphere("PickedS", v2, normal, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
 					auto hitPosition = ray.origin + glm::normalize(ray.direction) * outHit;
-					VD::AddSphere("PickedPosition", hitPosition, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
+					VD::AddSphere("PickedPosition", hitPosition, normal, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
 
 					VD::AddLine("PickingRay", ray.origin, hitPosition, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
 
@@ -638,8 +640,6 @@ int main(int argc, char** argv)
 #endif
 
 		{ // AABB
-			vector<glm::vec3> points;
-
 			auto m = alp.GetAABBMin();
 			float x = get<0>(m);
 			float y = get<1>(m);
@@ -648,16 +648,6 @@ int main(int argc, char** argv)
 			float X = get<0>(M);
 			float Y = get<1>(M);
 			float Z = get<2>(M);
-
-			points.push_back({ x,y,z });
-			points.push_back({ X,y,z });
-			points.push_back({ x,Y,z });
-			points.push_back({ X,Y,z });
-
-			points.push_back({ x,y,Z });
-			points.push_back({ X,y,Z });
-			points.push_back({ x,Y,Z });
-			points.push_back({ X,Y,Z });
 
 			auto width = w->GetWidth();
 			auto height = w->GetHeight();
@@ -668,31 +658,23 @@ int main(int argc, char** argv)
 			auto projection  =pcam->GetProjectionMatrix();
 			auto view = pcam->GetViewMatrix();
 
-			for (auto& p : points)
-			{
+			VD::AddWiredBox("AABB", { x, y, z }, { X, Y, Z }, Color::blue());
 
-				glm::vec4 clip = projection * view * glm::vec4(p.x, p.y, p.z, 1.0f);
-				glm::vec3 ndc = glm::vec3(clip.x, clip.y, clip.z) / clip.w;
-				int x_screen = (ndc.x * 0.5f + 0.5f) * width;
-				int y_screen = (1.0f - (ndc.y * 0.5f + 0.5f)) * height;
-				printf("Vertex (%f, %f, %f) => Screen (%d, %d)\n", p.x, p.y, p.z, x_screen, y_screen);
-			}
+			//VD::Clear("Lines");
+			//VD::AddLine("Lines", { x, y, z }, { X, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			//VD::AddLine("Lines", { X, y, z }, { X, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			//VD::AddLine("Lines", { X, Y, z }, { x, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			//VD::AddLine("Lines", { x, Y, z }, { x, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
 
-			VD::Clear("Lines");
-			VD::AddLine("Lines", { x, y, z }, { X, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			VD::AddLine("Lines", { X, y, z }, { X, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			VD::AddLine("Lines", { X, Y, z }, { x, Y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			VD::AddLine("Lines", { x, Y, z }, { x, y, z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			//VD::AddLine("Lines", { x, y, Z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			//VD::AddLine("Lines", { X, y, Z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			//VD::AddLine("Lines", { X, Y, Z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			//VD::AddLine("Lines", { x, Y, Z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
 
-			VD::AddLine("Lines", { x, y, Z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			VD::AddLine("Lines", { X, y, Z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			VD::AddLine("Lines", { X, Y, Z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			VD::AddLine("Lines", { x, Y, Z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-
-			VD::AddLine("Lines", { x, y, z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			VD::AddLine("Lines", { X, y, z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			VD::AddLine("Lines", { X, Y, z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
-			VD::AddLine("Lines", { x, Y, z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			//VD::AddLine("Lines", { x, y, z }, { x, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			//VD::AddLine("Lines", { X, y, z }, { X, y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			//VD::AddLine("Lines", { X, Y, z }, { X, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
+			//VD::AddLine("Lines", { x, Y, z }, { x, Y, Z }, { 0.0f, 0.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f });
 		}
 		});
 
