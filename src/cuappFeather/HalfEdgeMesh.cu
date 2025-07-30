@@ -318,7 +318,7 @@ std::vector<unsigned int> HostHalfEdgeMesh::GetOneRingVertices(unsigned int v) c
     auto lihe = ihe;
     bool borderFound = false;
 
-    // ccw
+    // cw
     do
     {
         auto he = halfEdges[ihe];
@@ -348,11 +348,11 @@ std::vector<unsigned int> HostHalfEdgeMesh::GetOneRingVertices(unsigned int v) c
         ihe = oe.nextIndex;
     } while (ihe != ishe && UINT32_MAX != ihe);
 
-    // cw
+    // ccw
     if (borderFound)
     {
         neighbors.clear();
-
+        ishe = lihe;
         ihe = lihe;
         do
         {
@@ -369,7 +369,10 @@ std::vector<unsigned int> HostHalfEdgeMesh::GetOneRingVertices(unsigned int v) c
                 printf("[Fatal] Next halfedge has no next halfedge index.\n");
                 break;
             }
-            //neighbors.push_back(ne.vertexIndex);
+            if (ishe == ihe)
+            {
+                neighbors.push_back(ne.vertexIndex);
+            }
 
             auto pe = halfEdges[ne.nextIndex];
             neighbors.push_back(pe.vertexIndex);
