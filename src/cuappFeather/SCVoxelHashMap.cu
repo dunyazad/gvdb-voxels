@@ -152,7 +152,7 @@ void SCVoxelHashMap::MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue)
 
 	//SCVoxelHashMap::SurfaceProjection_SDF(info, mesh);
 
-	mesh.LaplacianSmoothing(5, 1.0f, true);
+	//mesh.LaplacianSmoothing(5, 1.0f, true);
 
 	cudaFree(d_numberOfPoints);
 	cudaFree(d_numberOfFaces);

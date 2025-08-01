@@ -13,6 +13,7 @@
   <ItemGroup>
     <ClCompile Include="..\..\External\glad\src\glad.c" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="HalfEdgeMeshInterop.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="main.cuh" />
@@ -28,8 +29,68 @@
     <ClInclude Include="HalfEdgeMesh.cuh" />
     <ClInclude Include="BitVolume.cuh" />
     <ClInclude Include="VEFM.cuh" />
+    <ClInclude Include="HalfEdgeMeshInterop.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HashMap.hpp" />
+    <None Include="..\..\res\Shaders\Default.fs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\Default.vs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\Flat.fs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\Flat.gs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\Flat.vs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\Instancing.fs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\Instancing.vs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\InstancingWithoutLighting.fs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\InstancingWithoutLighting.vs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\InstancingWithoutNormal.fs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\InstancingWithoutNormal.vs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\Line.fs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\Line.vs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\Texturing.fs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\Texturing.vs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\TwoSide.fs">
+      <Filter>res\Shaders</Filter>
+    </None>
+    <None Include="..\..\res\Shaders\TwoSide.vs">
+      <Filter>res\Shaders</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="res">
+      <UniqueIdentifier>{0b076251-59fb-49c8-a808-218fa0f79fb1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="res\Shaders">
+      <UniqueIdentifier>{44ea84d0-ce60-4c0b-8d27-c172a1ef2e6d}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>

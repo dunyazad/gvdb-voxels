@@ -325,6 +325,21 @@ int main(int argc, char** argv)
 					VD::AddText("OneRingVertices", ss.str(), position, Color::white());
 				}
 			}
+			else if (GLFW_KEY_TAB == event.keyCode)
+			{
+				if (event.action == 1)
+				{
+					auto entity = Feather.GetEntityByName("MarchingCubesMesh");
+					auto renderable = Feather.GetComponent<Renderable>(entity);
+					auto as = renderable->GetActiveShaderIndex();
+					renderable->SetActiveShaderIndex((as + 1) % renderable->GetShaders().size());
+				}
+			}
+			else if (GLFW_KEY_SPACE == event.keyCode)
+			{
+				cudaInstance.d_mesh.LaplacianSmoothing(5, 1.0f, false);
+				cudaInstance.interop.UploadFromDevice(cudaInstance.d_mesh);
+			}
 			else if (GLFW_KEY_ENTER == event.keyCode)
 			{
 				printf("Finding Border\n");
@@ -520,8 +535,11 @@ int main(int argc, char** argv)
 					printf("[d_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
 
 					printf("OneRing Center : %d\n", vi);
+
+					float radius = 1.0f;
+
 					//auto vis = cudaInstance.d_mesh.GetOneRingVertices(vi);
-					auto vis = cudaInstance.d_mesh.GetVerticesInRadius(vi, 0.2f);
+					auto vis = cudaInstance.d_mesh.GetVerticesInRadius(vi, radius);
 					for (auto& vi : vis)
 					{
 						printf("%d, ", vi);
@@ -533,7 +551,10 @@ int main(int argc, char** argv)
 						VD::AddText("OneRingVertices", ss.str(), position, Color::white());
 					}
 					printf("\n");
-					VD::AddSphere("Range", nearest, nearestNormal, 0.2f, glm::vec4(1.0f, 1.0f, 1.0f, 0.3f));
+					VD::AddSphere("Range", nearest, nearestNormal, radius, glm::vec4(1.0f, 1.0f, 1.0f, 0.3f));
+
+					//cudaInstance.d_mesh.RadiusLaplacianSmoothing(radius, 1);
+					cudaInstance.interop.UploadFromDevice(cudaInstance.d_mesh);
 				}
 			}
 			});
@@ -696,7 +717,17 @@ int main(int argc, char** argv)
 			//ApplyPointCloudToEntity(entity, result);
 
 			auto meshEntity = Feather.CreateEntity("MarchingCubesMesh");
-			ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
+			//ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
+			auto meshRenderable = Feather.CreateComponent<Renderable>(meshEntity);
+			meshRenderable->Initialize(Renderable::GeometryMode::Triangles);
+			cudaInstance.interop.Initialize(meshRenderable);
+			meshRenderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Default.vs"), File("../../res/Shaders/Default.fs")));
+			meshRenderable->AddShader(Feather.CreateShader("TwoSide", File("../../res/Shaders/TwoSide.vs"), File("../../res/Shaders/TwoSide.fs")));
+			meshRenderable->AddShader(Feather.CreateShader("Flat", File("../../res/Shaders/Flat.vs"), File("../../res/Shaders/Flat.gs"), File("../../res/Shaders/Flat.fs")));
+			meshRenderable->SetActiveShaderIndex(0);
+			cudaInstance.interop.UploadFromDevice(cudaInstance.d_mesh);
+
+			printf("meshEntity : %d\n", meshEntity);
 
 			Feather.CreateEventCallback<KeyEvent>(meshEntity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
 				auto renderable = Feather.GetComponent<Renderable>(entity);

@@ -111,6 +111,7 @@ struct DeviceHalfEdgeMesh
     std::vector<unsigned int> GetVerticesInRadius(unsigned int startVertex, float radius);
 
     void LaplacianSmoothing(unsigned int iterations = 1, float lambda = 0.5f, bool fixBorderVertices = false);
+    void RadiusLaplacianSmoothing(float radius, unsigned int iterations);
 
     __host__ __device__ static uint64_t PackEdge(unsigned int v0, unsigned int v1);
     __device__ static bool HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value);
@@ -196,3 +197,22 @@ __global__ void Kernel_DeviceHalfEdgeMesh_GetVerticesInRadius(
     unsigned int* resultSize,
     unsigned int startVertex,
     float radius);
+
+__global__ void Kernel_GetAllVerticesInRadius(
+    const float3* positions,
+    unsigned int numberOfPoints,
+    const HalfEdge* halfEdges,
+    const unsigned int* vertexToHalfEdge,
+    unsigned int* allNeighbors,   // [numberOfPoints * MAX_NEIGHBORS]
+    unsigned int* allNeighborSizes, // [numberOfPoints]
+    unsigned int maxNeighbors,
+    float radius
+);
+
+__global__ void Kernel_RadiusLaplacianSmooth_WithNeighbors(
+    const float3* positions_in,
+    float3* positions_out,
+    unsigned int numberOfPoints,
+    const unsigned int* allNeighbors,   // [numberOfPoints * MAX_NEIGHBORS]
+    const unsigned int* allNeighborSizes, // [numberOfPoints]
+    unsigned int maxNeighbors);

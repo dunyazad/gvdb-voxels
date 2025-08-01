@@ -17,6 +17,7 @@
 #include <SCVoxelHashMap.cuh>
 #include <HalfEdgeMesh.cuh>
 #include <VEFM.cuh>
+#include <HalfEdgeMeshInterop.h>
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
@@ -73,6 +74,8 @@ public:
     SCVoxelHashMap vhm;
     HostHalfEdgeMesh h_mesh;
     DeviceHalfEdgeMesh d_mesh;
+
+    HalfEdgeMeshInterop interop;
 
     HostPointCloud ProcessPointCloud(const HostPointCloud& h_input);
     void ProcessHalfEdgeMesh(const string& filename);

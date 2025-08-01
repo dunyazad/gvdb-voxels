@@ -6,6 +6,9 @@
 #define MAX_FRONTIER (1 << 16)
 #define MAX_RESULT   (1 << 20)
 
+#define MAX_NEIGHBORS 64
+
+
 HostHalfEdgeMesh::HostHalfEdgeMesh() {}
 
 HostHalfEdgeMesh::HostHalfEdgeMesh(const HostHalfEdgeMesh& other)
@@ -701,7 +704,6 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::GetOneRingVertices(unsigned int v,
     assert(v < numberOfPoints);
 
     // 디바이스 결과 버퍼 할당
-    constexpr unsigned int MAX_NEIGHBORS = 64;
     unsigned int* d_neighbors = nullptr;
     unsigned int* d_count = nullptr;
     cudaMalloc(&d_neighbors, sizeof(unsigned int) * MAX_NEIGHBORS);
@@ -861,6 +863,55 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
     }
 
     cudaFree(toFree);
+}
+
+void DeviceHalfEdgeMesh::RadiusLaplacianSmoothing(float radius, unsigned int iterations)
+{
+    unsigned int* d_neighbors = nullptr;
+    unsigned int* d_neighborSizes = nullptr;
+    cudaMalloc(&d_neighbors, sizeof(unsigned int) * numberOfPoints * MAX_NEIGHBORS);
+    cudaMalloc(&d_neighborSizes, sizeof(unsigned int) * numberOfPoints);
+
+    float3* positionsA = positions;
+    float3* positionsB = nullptr;
+    cudaMalloc(&positionsB, sizeof(float3) * numberOfPoints);
+
+    for (unsigned int it = 0; it < iterations; ++it)
+    {
+        // 1. 전체 vertex에 대해 neighbor set 구성
+        unsigned int blockSize = 128;
+        unsigned int gridSize = (numberOfPoints + blockSize - 1) / blockSize;
+        Kernel_GetAllVerticesInRadius << <gridSize, blockSize >> > (
+            positionsA,
+            numberOfPoints,
+            halfEdges,
+            vertexToHalfEdge,
+            d_neighbors,
+            d_neighborSizes,
+            MAX_NEIGHBORS,
+            radius
+            );
+        cudaDeviceSynchronize();
+
+        // 2. smoothing (neighbor set 활용)
+        Kernel_RadiusLaplacianSmooth_WithNeighbors << <gridSize, blockSize >> > (
+            positionsA,
+            positionsB,
+            numberOfPoints,
+            d_neighbors,
+            d_neighborSizes,
+            MAX_NEIGHBORS
+            );
+        cudaDeviceSynchronize();
+        std::swap(positionsA, positionsB);
+    }
+
+    if (positionsA != positions)
+        cudaMemcpy(positions, positionsA, sizeof(float3) * numberOfPoints, cudaMemcpyDeviceToDevice);
+
+    cudaFree(positionsB);
+    cudaFree(d_neighbors);
+    cudaFree(d_neighborSizes);
 }
 
 __host__ __device__ uint64_t DeviceHalfEdgeMesh::PackEdge(unsigned int v0, unsigned int v1)
@@ -1279,7 +1330,6 @@ __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     if (vid >= numberOfPoints) return;
 
     // 1-ring 이웃 인덱스 추출
-    const unsigned int MAX_NEIGHBORS = 32;
     unsigned int neighbors[MAX_NEIGHBORS];
     unsigned int nCount = 0;
 
@@ -1408,4 +1458,125 @@ __global__ void Kernel_DeviceHalfEdgeMesh_GetVerticesInRadius(
             }
         }
     }
+}
+
+__global__ void Kernel_GetAllVerticesInRadius(
+    const float3* positions,
+    unsigned int numberOfPoints,
+    const HalfEdge* halfEdges,
+    const unsigned int* vertexToHalfEdge,
+    unsigned int* allNeighbors,   // [numberOfPoints * MAX_NEIGHBORS]
+    unsigned int* allNeighborSizes, // [numberOfPoints]
+    unsigned int maxNeighbors,
+    float radius
+)
+{
+    unsigned int vid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (vid >= numberOfPoints) return;
+
+    // 각 vertex마다 별도의 output 버퍼/카운터
+    unsigned int* neighbors = allNeighbors + vid * maxNeighbors;
+    unsigned int* neighborSize = allNeighborSizes + vid;
+
+    // 초기화
+    for (unsigned int i = 0; i < maxNeighbors; ++i)
+        neighbors[i] = UINT32_MAX;
+    *neighborSize = 0;
+
+    // Frontier, visited, nextFrontier 등 임시 버퍼 (로컬 변수, 크기 한정)
+    unsigned int frontier[MAX_FRONTIER];
+    unsigned int visited[MAX_FRONTIER];
+    unsigned int nextFrontier[MAX_FRONTIER];
+    unsigned int nextFrontierSize = 0;
+    unsigned int result[MAX_NEIGHBORS];
+    unsigned int resultSize = 0;
+
+    // 시작점 넣기
+    unsigned int startVertex = vid;
+    unsigned int h_frontierSize = 1;
+    frontier[0] = startVertex;
+    visited[0] = startVertex;
+    unsigned int visitedCount = 1;
+    result[0] = startVertex;
+    resultSize = 1;
+
+    float3 startPos = positions[startVertex];
+
+    for (unsigned int iter = 0; h_frontierSize > 0 && resultSize < maxNeighbors; ++iter)
+    {
+        nextFrontierSize = 0;
+        for (unsigned int fi = 0; fi < h_frontierSize; ++fi)
+        {
+            unsigned int v = frontier[fi];
+            // 1-ring neighbor 찾기
+            unsigned int neighbors1ring[32];
+            unsigned int nCount = 0;
+            DeviceHalfEdgeMesh::GetOneRingVertices_Device(
+                v, halfEdges, vertexToHalfEdge, numberOfPoints, false, neighbors1ring, nCount, 32);
+
+            for (unsigned int ni = 0; ni < nCount; ++ni)
+            {
+                unsigned int nb = neighbors1ring[ni];
+                if (nb == UINT32_MAX || nb >= numberOfPoints) continue;
+                // 방문 여부
+                bool alreadyVisited = false;
+                for (unsigned int vi = 0; vi < visitedCount; ++vi)
+                    if (visited[vi] == nb) { alreadyVisited = true; break; }
+                if (alreadyVisited) continue;
+                // 거리 제한
+                float dist2 = length2(positions[nb] - startPos);
+                if (dist2 <= radius * radius)
+                {
+                    if (visitedCount < MAX_FRONTIER)
+                    {
+                        visited[visitedCount++] = nb;
+                        if (resultSize < maxNeighbors)
+                            result[resultSize++] = nb;
+                        if (nextFrontierSize < MAX_FRONTIER)
+                            nextFrontier[nextFrontierSize++] = nb;
+                    }
+                }
+            }
+        }
+        if (nextFrontierSize == 0) break;
+        for (unsigned int i = 0; i < nextFrontierSize; ++i)
+            frontier[i] = nextFrontier[i];
+        h_frontierSize = nextFrontierSize;
+    }
+
+    // 결과 저장
+    unsigned int outCount = min(resultSize, maxNeighbors);
+    for (unsigned int i = 0; i < outCount; ++i)
+        neighbors[i] = result[i];
+    *neighborSize = outCount;
+}
+
+__global__ void Kernel_RadiusLaplacianSmooth_WithNeighbors(
+    const float3* positions_in,
+    float3* positions_out,
+    unsigned int numberOfPoints,
+    const unsigned int* allNeighbors,   // [numberOfPoints * MAX_NEIGHBORS]
+    const unsigned int* allNeighborSizes, // [numberOfPoints]
+    unsigned int maxNeighbors)
+{
+    unsigned int vid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (vid >= numberOfPoints) return;
+
+    const unsigned int* neighbors = allNeighbors + vid * maxNeighbors;
+    unsigned int nCount = allNeighborSizes[vid];
+
+    float3 center = positions_in[vid];
+    float3 sum = make_float3(0, 0, 0);
+    int count = 0;
+    for (unsigned int i = 0; i < nCount; ++i)
+    {
+        unsigned int nb = neighbors[i];
+        if (nb == vid || nb == UINT32_MAX) continue;
+        sum += positions_in[nb];
+        ++count;
+    }
+    if (count > 0)
+        positions_out[vid] = (sum / (float)count);
+    else
+        positions_out[vid] = center;
 }
