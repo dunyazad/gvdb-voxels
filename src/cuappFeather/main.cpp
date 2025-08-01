@@ -337,8 +337,14 @@ int main(int argc, char** argv)
 			}
 			else if (GLFW_KEY_SPACE == event.keyCode)
 			{
-				cudaInstance.d_mesh.LaplacianSmoothing(5, 1.0f, false);
+				cudaInstance.d_mesh.RadiusLaplacianSmoothing(0.5f, 10, 0.05f);
+				cudaInstance.d_mesh.LaplacianSmoothing(2, 1.0f, false);
 				cudaInstance.interop.UploadFromDevice(cudaInstance.d_mesh);
+			}
+			else if (GLFW_KEY_PAGE_DOWN == event.keyCode)
+			{
+				cudaInstance.h_mesh.CopyFromDevice(cudaInstance.d_mesh);
+				cudaInstance.h_mesh.SerializePLY("../../res/3D/MarchingCubes.ply");
 			}
 			else if (GLFW_KEY_ENTER == event.keyCode)
 			{
@@ -548,7 +554,7 @@ int main(int argc, char** argv)
 
 						stringstream ss;
 						ss << vi;
-						VD::AddText("OneRingVertices", ss.str(), position, Color::white());
+						//VD::AddText("OneRingVertices", ss.str(), position, Color::white());
 					}
 					printf("\n");
 					VD::AddSphere("Range", nearest, nearestNormal, radius, glm::vec4(1.0f, 1.0f, 1.0f, 0.3f));

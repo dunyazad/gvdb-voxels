@@ -391,139 +391,6 @@ std::vector<unsigned int> HostHalfEdgeMesh::GetOneRingVertices(unsigned int v) c
     return neighbors;
 }
 
-void HostHalfEdgeMesh::ComputeFeatureWeights(std::vector<float>& featureWeights, float sharpAngleDeg)
-{
-    featureWeights.resize(numberOfPoints, 1.0f);
-    float cosThr = std::cos(sharpAngleDeg * PI / 180.0f);
-
-    for (unsigned int vid = 0; vid < numberOfPoints; ++vid)
-    {
-        float3 n0 = normals[vid];
-        std::vector<unsigned int> neighbors = GetOneRingVertices(vid);
-
-        for (unsigned int nb : neighbors)
-        {
-            float3 n1 = normals[nb];
-            float dotn = n0.x * n1.x + n0.y * n1.y + n0.z * n1.z;
-            if (dotn < cosThr)
-            {
-                featureWeights[vid] = 0.1f; // 샤프엣지, feature
-                break;
-            }
-        }
-    }
-}
-
-void HostHalfEdgeMesh::BilateralNormalSmoothing(
-    std::vector<float3>& outNormals,
-    const std::vector<float>& featureWeights,
-    float sigma_s,
-    float sigma_n)
-{
-    outNormals.resize(numberOfPoints);
-
-    for (unsigned int vid = 0; vid < numberOfPoints; ++vid)
-    {
-        float3 vpos = positions[vid];
-        float3 vnor = normals[vid];
-        float w_sum = 0.0f;
-        float3 n_sum = make_float3(0, 0, 0);
-
-        std::vector<unsigned int> neighbors = GetOneRingVertices(vid);
-        for (unsigned int nb : neighbors)
-        {
-            float3 npos = positions[nb];
-            float3 nnor = normals[nb];
-
-            float dist2 = length2(vpos - npos);
-            float angle2 = length2(vnor - nnor); // 혹은 1 - dot(vnor, nnor)
-
-            float w_spatial = std::exp(-dist2 / (2.0f * sigma_s * sigma_s));
-            float w_normal = std::exp(-angle2 / (2.0f * sigma_n * sigma_n));
-            float w_feature = std::min(featureWeights[vid], featureWeights[nb]);
-
-            float w = w_spatial * w_normal * w_feature;
-            n_sum += nnor * w;
-            w_sum += w;
-        }
-
-        if (w_sum > 0)
-        {
-            float3 nout = n_sum / w_sum;
-            outNormals[vid] = normalize(nout);
-        }
-        else
-        {
-            outNormals[vid] = vnor;
-        }
-    }
-}
-
-void HostHalfEdgeMesh::TangentPlaneProjection(
-    std::vector<float3>& outPositions,
-    const std::vector<float3>& smoothNormals,
-    const std::vector<float>& featureWeights,
-    float sigma_proj)
-{
-    outPositions.resize(numberOfPoints);
-
-    for (unsigned int vid = 0; vid < numberOfPoints; ++vid)
-    {
-        float3 vpos = positions[vid];
-        float3 vnor = smoothNormals[vid];
-
-        float3 p_sum = make_float3(0, 0, 0);
-        float w_sum = 0.0f;
-
-        std::vector<unsigned int> neighbors = GetOneRingVertices(vid);
-        for (unsigned int nb : neighbors)
-        {
-            float3 npos = positions[nb];
-
-            // tangent plane projection
-            float3 delta = npos - vpos;
-            float d = delta.x * vnor.x + delta.y * vnor.y + delta.z * vnor.z;
-            float3 proj = npos - vnor * d;
-
-            float w_spatial = std::exp(-length2(delta) / (2.0f * sigma_proj * sigma_proj));
-            float w_feature = std::min(featureWeights[vid], featureWeights[nb]);
-            float w = w_spatial * w_feature;
-            p_sum += proj * w;
-            w_sum += w;
-        }
-
-        // 본인 좌표 포함(안정성, optional)
-        p_sum += vpos;
-        w_sum += 1.0f;
-
-        if (w_sum > 0)
-            outPositions[vid] = p_sum / w_sum;
-        else
-            outPositions[vid] = vpos;
-    }
-}
-
-void HostHalfEdgeMesh::RobustSmooth(int iterations, float sigma_s, float sigma_n, float sigma_proj, float sharpAngleDeg)
-{
-    std::vector<float> featureWeights(numberOfPoints, 1.0f);
-    std::vector<float3> smoothNormals(numberOfPoints);
-    std::vector<float3> smoothPositions(numberOfPoints);
-
-    for (int it = 0; it < iterations; ++it)
-    {
-        ComputeFeatureWeights(featureWeights, sharpAngleDeg);
-        BilateralNormalSmoothing(smoothNormals, featureWeights, sigma_s, sigma_n);
-        TangentPlaneProjection(smoothPositions, smoothNormals, featureWeights, sigma_proj);
-
-        // apply results
-        for (unsigned int vid = 0; vid < numberOfPoints; ++vid)
-        {
-            normals[vid] = smoothNormals[vid];
-            positions[vid] = smoothPositions[vid];
-        }
-    }
-}
-
 
 
 
@@ -865,53 +732,31 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
     cudaFree(toFree);
 }
 
-void DeviceHalfEdgeMesh::RadiusLaplacianSmoothing(float radius, unsigned int iterations)
+void DeviceHalfEdgeMesh::RadiusLaplacianSmoothing(float radius, unsigned int iterations, float lambda)
 {
-    unsigned int* d_neighbors = nullptr;
-    unsigned int* d_neighborSizes = nullptr;
-    cudaMalloc(&d_neighbors, sizeof(unsigned int) * numberOfPoints * MAX_NEIGHBORS);
-    cudaMalloc(&d_neighborSizes, sizeof(unsigned int) * numberOfPoints);
+    if (numberOfPoints == 0 || numberOfFaces == 0) return;
 
     float3* positionsA = positions;
     float3* positionsB = nullptr;
-    cudaMalloc(&positionsB, sizeof(float3) * numberOfPoints);
+    CUDA_MALLOC(&positionsB, sizeof(float3) * numberOfPoints);
+    float3* toFree = positionsB;
 
     for (unsigned int it = 0; it < iterations; ++it)
     {
-        // 1. 전체 vertex에 대해 neighbor set 구성
-        unsigned int blockSize = 128;
-        unsigned int gridSize = (numberOfPoints + blockSize - 1) / blockSize;
-        Kernel_GetAllVerticesInRadius << <gridSize, blockSize >> > (
-            positionsA,
-            numberOfPoints,
-            halfEdges,
-            vertexToHalfEdge,
-            d_neighbors,
-            d_neighborSizes,
-            MAX_NEIGHBORS,
-            radius
-            );
-        cudaDeviceSynchronize();
+        LaunchKernel(Kernel_RadiusLaplacianSmooth, numberOfPoints,
+            positionsA, positionsB, numberOfPoints,
+            halfEdges, vertexToHalfEdge, MAX_NEIGHBORS, radius, lambda);
+        CUDA_SYNC();
 
-        // 2. smoothing (neighbor set 활용)
-        Kernel_RadiusLaplacianSmooth_WithNeighbors << <gridSize, blockSize >> > (
-            positionsA,
-            positionsB,
-            numberOfPoints,
-            d_neighbors,
-            d_neighborSizes,
-            MAX_NEIGHBORS
-            );
-        cudaDeviceSynchronize();
         std::swap(positionsA, positionsB);
     }
 
     if (positionsA != positions)
-        cudaMemcpy(positions, positionsA, sizeof(float3) * numberOfPoints, cudaMemcpyDeviceToDevice);
-
-    cudaFree(positionsB);
-    cudaFree(d_neighbors);
-    cudaFree(d_neighborSizes);
+    {
+        CUDA_COPY_D2D(positions, positionsA, sizeof(float3) * numberOfPoints);
+        CUDA_SYNC();
+    }
+    CUDA_FREE(toFree);
 }
 
 __host__ __device__ uint64_t DeviceHalfEdgeMesh::PackEdge(unsigned int v0, unsigned int v1)
@@ -1313,98 +1158,6 @@ __global__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdgeMapping(
     atomicMin(&vertexToHalfEdge[v], heIdx);
 }
 
-//__global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
-//    float3* positions_in,
-//    float3* positions_out,
-//    unsigned int numberOfPoints,
-//    const HalfEdge* halfEdges,
-//    unsigned int numberOfHalfEdges,
-//    unsigned int* vertexToHalfEdge,
-//    float lambda)
-//{
-//    unsigned int vid = blockIdx.x * blockDim.x + threadIdx.x;
-//    if (vid >= numberOfPoints) return;
-//
-//    /*
-//    float3 center = positions_in[vid];
-//    float3 sum = make_float3(0, 0, 0);
-//    unsigned int count = 0;
-//
-//    for (unsigned int i = 0; i < numberOfHalfEdges; ++i)
-//    {
-//        if (halfEdges[i].vertexIndex != vid) continue;
-//
-//        int opp = halfEdges[i].oppositeIndex;
-//        if (opp == UINT32_MAX) continue;
-//
-//        int neighbor = halfEdges[opp].vertexIndex;
-//        if (neighbor == vid || neighbor == UINT32_MAX) continue;
-//
-//        sum += positions_in[neighbor];
-//        count++;
-//    }
-//
-//    if (count > 0)
-//    {
-//        float3 avg = sum / (float)count;
-//        positions_out[vid] = center + lambda * (avg - center);
-//    }
-//    else
-//    {
-//        positions_out[vid] = center;
-//    }
-//    */
-//
-//    unsigned int heStart = vertexToHalfEdge[vid];
-//    if (UINT32_MAX == heStart) return;
-//
-//    float3 center = positions_in[vid];
-//    
-//    if (UINT32_MAX == halfEdges[heStart].oppositeIndex)
-//    {
-//        positions_out[vid] = center;
-//        return;
-//    }
-//
-//    float3 sum = make_float3(0, 0, 0);
-//    unsigned int count = 0;
-//
-//    unsigned int he = heStart;
-//    do
-//    {
-//        int opp = halfEdges[he].oppositeIndex;
-//        if (opp == UINT32_MAX)
-//        {
-//            positions_out[vid] = center;
-//            return;
-//        }
-//
-//        unsigned int neighbor = halfEdges[opp].vertexIndex;
-//        if (neighbor >= numberOfPoints)
-//        {
-//            positions_out[vid] = center;
-//            return;
-//        }
-//
-//        sum += positions_in[neighbor];
-//        count++;
-//
-//        he = halfEdges[opp].nextIndex;
-//
-//    } while (he != heStart);
-//
-//    if (count > 0)
-//    {
-//        float3 avg = sum / (float)count;
-//        positions_out[vid] = center + lambda * (avg - center);
-//    }
-//    else
-//    {
-//        positions_out[vid] = center;
-//    }
-//}
-
-
 __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     float3* positions_in,
     float3* positions_out,
@@ -1571,104 +1324,30 @@ __global__ void Kernel_GetAllVerticesInRadius(
 
     allNeighborSizes[vid] = outCount;
 }
-    /*
-{
-    unsigned int vid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (vid >= numberOfPoints) return;
 
-    // 각 vertex마다 별도의 output 버퍼/카운터
-    unsigned int* neighbors = allNeighbors + vid * maxNeighbors;
-    unsigned int* neighborSize = allNeighborSizes + vid;
-
-    // 초기화
-    for (unsigned int i = 0; i < maxNeighbors; ++i)
-        neighbors[i] = UINT32_MAX;
-    *neighborSize = 0;
-
-    // Frontier, visited, nextFrontier 등 임시 버퍼 (로컬 변수, 크기 한정)
-    unsigned int frontier[MAX_FRONTIER];
-    unsigned int visited[MAX_FRONTIER];
-    unsigned int nextFrontier[MAX_FRONTIER];
-    unsigned int nextFrontierSize = 0;
-    unsigned int result[MAX_NEIGHBORS];
-    unsigned int resultSize = 0;
-
-    // 시작점 넣기
-    unsigned int startVertex = vid;
-    unsigned int h_frontierSize = 1;
-    frontier[0] = startVertex;
-    visited[0] = startVertex;
-    unsigned int visitedCount = 1;
-    result[0] = startVertex;
-    resultSize = 1;
-
-    float3 startPos = positions[startVertex];
-
-    for (unsigned int iter = 0; h_frontierSize > 0 && resultSize < maxNeighbors; ++iter)
-    {
-        nextFrontierSize = 0;
-        for (unsigned int fi = 0; fi < h_frontierSize; ++fi)
-        {
-            unsigned int v = frontier[fi];
-            // 1-ring neighbor 찾기
-            unsigned int neighbors1ring[32];
-            unsigned int nCount = 0;
-            DeviceHalfEdgeMesh::GetOneRingVertices_Device(
-                v, halfEdges, vertexToHalfEdge, numberOfPoints, false, neighbors1ring, nCount, 32);
-
-            for (unsigned int ni = 0; ni < nCount; ++ni)
-            {
-                unsigned int nb = neighbors1ring[ni];
-                if (nb == UINT32_MAX || nb >= numberOfPoints) continue;
-                // 방문 여부
-                bool alreadyVisited = false;
-                for (unsigned int vi = 0; vi < visitedCount; ++vi)
-                    if (visited[vi] == nb) { alreadyVisited = true; break; }
-                if (alreadyVisited) continue;
-                // 거리 제한
-                float dist2 = length2(positions[nb] - startPos);
-                if (dist2 <= radius * radius)
-                {
-                    if (visitedCount < MAX_FRONTIER)
-                    {
-                        visited[visitedCount++] = nb;
-                        if (resultSize < maxNeighbors)
-                            result[resultSize++] = nb;
-                        if (nextFrontierSize < MAX_FRONTIER)
-                            nextFrontier[nextFrontierSize++] = nb;
-                    }
-                }
-            }
-        }
-        if (nextFrontierSize == 0) break;
-        for (unsigned int i = 0; i < nextFrontierSize; ++i)
-            frontier[i] = nextFrontier[i];
-        h_frontierSize = nextFrontierSize;
-    }
-
-    // 결과 저장
-    unsigned int outCount = min(resultSize, maxNeighbors);
-    for (unsigned int i = 0; i < outCount; ++i)
-        neighbors[i] = result[i];
-    *neighborSize = outCount;
-}
-*/
-
-__global__ void Kernel_RadiusLaplacianSmooth_WithNeighbors(
+__global__ void Kernel_RadiusLaplacianSmooth(
     const float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
-    const unsigned int* allNeighbors,   // [numberOfPoints * MAX_NEIGHBORS]
-    const unsigned int* allNeighborSizes, // [numberOfPoints]
-    unsigned int maxNeighbors)
+    const HalfEdge* halfEdges,
+    const unsigned int* vertexToHalfEdge,
+    unsigned int maxNeighbors,
+    float radius,
+    float lambda)
 {
     unsigned int vid = blockIdx.x * blockDim.x + threadIdx.x;
     if (vid >= numberOfPoints) return;
 
-    const unsigned int* neighbors = allNeighbors + vid * maxNeighbors;
-    unsigned int nCount = allNeighborSizes[vid];
-
     float3 center = positions_in[vid];
+
+    // 동적으로 neighbor 구하기
+    unsigned int neighbors[64]; // 충분히 크게! (maxNeighbors)
+    unsigned int nCount = 0;
+
+    DeviceHalfEdgeMesh::GetAllVerticesInRadius_Device(
+        vid, positions_in, numberOfPoints, halfEdges, vertexToHalfEdge,
+        neighbors, nCount, maxNeighbors, radius);
+
     float3 sum = make_float3(0, 0, 0);
     int count = 0;
     for (unsigned int i = 0; i < nCount; ++i)
@@ -1679,7 +1358,12 @@ __global__ void Kernel_RadiusLaplacianSmooth_WithNeighbors(
         ++count;
     }
     if (count > 0)
-        positions_out[vid] = (sum / (float)count);
+    {
+        float3 avg = sum / (float)count;
+        positions_out[vid] = center + lambda * (avg - center);
+    }
     else
+    {
         positions_out[vid] = center;
+    }
 }

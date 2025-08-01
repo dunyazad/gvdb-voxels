@@ -58,22 +58,6 @@ struct HostHalfEdgeMesh
 
     std::vector<unsigned int> GetOneRingVertices(unsigned int v) const;
     std::vector<unsigned int> GetVerticesInRadius(unsigned int startVertex, float radius);
-
-    void ComputeFeatureWeights(std::vector<float>& featureWeights, float sharpAngleDeg);
-
-    void BilateralNormalSmoothing(
-        std::vector<float3>& outNormals,
-        const std::vector<float>& featureWeights,
-        float sigma_s,
-        float sigma_n);
-
-    void TangentPlaneProjection(
-        std::vector<float3>& outPositions,
-        const std::vector<float3>& smoothNormals,
-        const std::vector<float>& featureWeights,
-        float sigma_proj);
-
-    void RobustSmooth(int iterations, float sigma_s, float sigma_n, float sigma_proj, float sharpAngleDeg);
 };
 
 struct DeviceHalfEdgeMesh
@@ -111,7 +95,7 @@ struct DeviceHalfEdgeMesh
     std::vector<unsigned int> GetVerticesInRadius(unsigned int startVertex, float radius);
 
     void LaplacianSmoothing(unsigned int iterations = 1, float lambda = 0.5f, bool fixBorderVertices = false);
-    void RadiusLaplacianSmoothing(float radius, unsigned int iterations);
+    void RadiusLaplacianSmoothing(float radius = 0.3f, unsigned int iterations = 1, float lambda = 0.5f);
 
     __host__ __device__ static uint64_t PackEdge(unsigned int v0, unsigned int v1);
     __device__ static bool HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value);
@@ -220,10 +204,12 @@ __global__ void Kernel_GetAllVerticesInRadius(
     float radius
 );
 
-__global__ void Kernel_RadiusLaplacianSmooth_WithNeighbors(
+__global__ void Kernel_RadiusLaplacianSmooth(
     const float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
-    const unsigned int* allNeighbors,   // [numberOfPoints * MAX_NEIGHBORS]
-    const unsigned int* allNeighborSizes, // [numberOfPoints]
-    unsigned int maxNeighbors);
+    const HalfEdge* halfEdges,
+    const unsigned int* vertexToHalfEdge,
+    unsigned int maxNeighbors,
+    float radius,
+    float lambda);
