@@ -57,6 +57,7 @@ struct HostHalfEdgeMesh
     bool PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const;
 
     std::vector<unsigned int> GetOneRingVertices(unsigned int v) const;
+    std::vector<unsigned int> GetVerticesInRadius(unsigned int startVertex, float radius);
 
     void ComputeFeatureWeights(std::vector<float>& featureWeights, float sharpAngleDeg);
 
@@ -107,6 +108,7 @@ struct DeviceHalfEdgeMesh
     bool PickFace(const float3& rayOrigin, const float3& rayDir,int& outHitIndex, float& outHitT) const;
 
     std::vector<unsigned int> GetOneRingVertices(unsigned int v, bool fixBorderVertices = false) const;
+    std::vector<unsigned int> GetVerticesInRadius(unsigned int startVertex, float radius);
 
     void LaplacianSmoothing(unsigned int iterations = 1, float lambda = 0.5f, bool fixBorderVertices = false);
 
@@ -179,3 +181,18 @@ __global__ void Kernel_DeviceHalfEdgeMesh_OneRing(
     bool fixBorderVertices,
     unsigned int* outBuffer, // outBuffer[0:count-1]에 결과 저장
     unsigned int* outCount);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_GetVerticesInRadius(
+    const float3* positions,
+    unsigned int numberOfPoints,
+    const HalfEdge* halfEdges,
+    const unsigned int* vertexToHalfEdge,
+    const unsigned int* frontier,
+    unsigned int frontierSize,
+    unsigned int* visited,
+    unsigned int* nextFrontier,
+    unsigned int* nextFrontierSize,
+    unsigned int* result,
+    unsigned int* resultSize,
+    unsigned int startVertex,
+    float radius);

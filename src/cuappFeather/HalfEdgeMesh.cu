@@ -3,6 +3,9 @@
 
 #include <set>
 
+#define MAX_FRONTIER (1 << 16)
+#define MAX_RESULT   (1 << 20)
+
 HostHalfEdgeMesh::HostHalfEdgeMesh() {}
 
 HostHalfEdgeMesh::HostHalfEdgeMesh(const HostHalfEdgeMesh& other)
@@ -738,6 +741,100 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::GetOneRingVertices(unsigned int v,
     return result;
 }
 
+std::vector<unsigned int> DeviceHalfEdgeMesh::GetVerticesInRadius(unsigned int startVertex, float radius)
+{
+    if (startVertex >= numberOfPoints)
+    {
+        printf("[ERROR] startVertex(%u) >= numberOfPoints(%u)\n", startVertex, numberOfPoints);
+        return {};
+    }
+    if (!positions || !halfEdges || !vertexToHalfEdge)
+    {
+        printf("[ERROR] DeviceHalfEdgeMesh not initialized.\n");
+        return {};
+    }
+
+    unsigned int* d_visited = nullptr;
+    unsigned int* d_frontier[2] = { nullptr, nullptr };
+    unsigned int* d_frontierSize = nullptr;
+    unsigned int* d_nextFrontierSize = nullptr;
+    unsigned int* d_result = nullptr;
+    unsigned int* d_resultSize = nullptr;
+
+    // 1. 할당 및 초기화
+    CUDA_MALLOC(&d_visited, sizeof(unsigned int) * numberOfPoints);
+    CUDA_MEMSET(d_visited, 0, sizeof(unsigned int) * numberOfPoints);
+    CUDA_MALLOC(&d_frontier[0], sizeof(unsigned int) * MAX_FRONTIER);
+    CUDA_MALLOC(&d_frontier[1], sizeof(unsigned int) * MAX_FRONTIER);
+    CUDA_MALLOC(&d_frontierSize, sizeof(unsigned int));
+    CUDA_MALLOC(&d_nextFrontierSize, sizeof(unsigned int));
+    CUDA_MALLOC(&d_result, sizeof(unsigned int) * MAX_RESULT);
+    CUDA_MALLOC(&d_resultSize, sizeof(unsigned int));
+    CUDA_MEMSET(d_resultSize, 0, sizeof(unsigned int));
+
+    // 2. 시작점 초기화
+    unsigned int one = 1;
+    CUDA_COPY_H2D(&d_visited[startVertex], &one, sizeof(unsigned int));
+    CUDA_COPY_H2D(d_frontier[0], &startVertex, sizeof(unsigned int));
+    unsigned int h_frontierSize = 1;
+    CUDA_COPY_H2D(d_frontierSize, &h_frontierSize, sizeof(unsigned int));
+    CUDA_COPY_H2D(d_result, &startVertex, sizeof(unsigned int));
+    unsigned int resultInit = 1;
+    CUDA_COPY_H2D(d_resultSize, &resultInit, sizeof(unsigned int));
+
+    int iter = 0;
+    while (true)
+    {
+        unsigned int currFrontierSize = 0;
+        CUDA_COPY_D2H(&currFrontierSize, d_frontierSize, sizeof(unsigned int));
+        if (currFrontierSize == 0) break;
+
+        if (currFrontierSize >= MAX_FRONTIER)
+        {
+            printf("[BFS][ERROR] frontier buffer overflow. Increase MAX_FRONTIER or reduce radius.\n");
+            break;
+        }
+
+        CUDA_MEMSET(d_nextFrontierSize, 0, sizeof(unsigned int));
+
+        LaunchKernel(Kernel_DeviceHalfEdgeMesh_GetVerticesInRadius, currFrontierSize,
+            positions, numberOfPoints, halfEdges, vertexToHalfEdge,
+            d_frontier[iter % 2], currFrontierSize,
+            d_visited,
+            d_frontier[(iter + 1) % 2], d_nextFrontierSize,
+            d_result, d_resultSize,
+            startVertex, radius);   // ← startVertex만 넘김
+        CUDA_SYNC();
+
+        CUDA_COPY_D2D(d_frontierSize, d_nextFrontierSize, sizeof(unsigned int));
+        iter++;
+
+        // result size overflow 체크
+        unsigned int h_resultSize = 0;
+        CUDA_COPY_D2H(&h_resultSize, d_resultSize, sizeof(unsigned int));
+        if (h_resultSize >= MAX_RESULT)
+        {
+            printf("[BFS][ERROR] result buffer overflow. Increase MAX_RESULT or reduce radius.\n");
+            break;
+        }
+    }
+
+    unsigned int h_resultSize = 0;
+    CUDA_COPY_D2H(&h_resultSize, d_resultSize, sizeof(unsigned int));
+    std::vector<unsigned int> h_result(h_resultSize);
+    CUDA_COPY_D2H(h_result.data(), d_result, sizeof(unsigned int) * h_resultSize);
+
+    CUDA_FREE(d_visited);
+    CUDA_FREE(d_frontier[0]);
+    CUDA_FREE(d_frontier[1]);
+    CUDA_FREE(d_frontierSize);
+    CUDA_FREE(d_nextFrontierSize);
+    CUDA_FREE(d_result);
+    CUDA_FREE(d_resultSize);
+
+    return h_result;
+}
+
 void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambda, bool fixBorderVertices)
 {
     if (numberOfPoints == 0 || numberOfFaces == 0) return;
@@ -1258,5 +1355,57 @@ __global__ void Kernel_DeviceHalfEdgeMesh_OneRing(
             outBuffer[i] = neighbors[i];
         }
         *outCount = nCount;
+    }
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_GetVerticesInRadius(
+    const float3* positions,
+    unsigned int numberOfPoints,
+    const HalfEdge* halfEdges,
+    const unsigned int* vertexToHalfEdge,
+    const unsigned int* frontier,
+    unsigned int frontierSize,
+    unsigned int* visited,
+    unsigned int* nextFrontier,
+    unsigned int* nextFrontierSize,
+    unsigned int* result,
+    unsigned int* resultSize,
+    unsigned int startVertex,
+    float radius)
+{
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= frontierSize) return;
+
+    unsigned int v = frontier[idx];
+
+    float3 startPos = positions[startVertex];
+
+    // 1-ring neighbors (최대 32개까지)
+    unsigned int neighbors[32];
+    unsigned int nCount = 0;
+    DeviceHalfEdgeMesh::GetOneRingVertices_Device(
+        v, halfEdges, vertexToHalfEdge, numberOfPoints, false, neighbors, nCount, 32);
+
+    for (unsigned int i = 0; i < nCount; ++i)
+    {
+        unsigned int nb = neighbors[i];
+        if (nb == UINT32_MAX || nb >= numberOfPoints)
+            continue;
+        // 방문 체크 (visited[nb] == 0이면 방문X)
+        unsigned int old = atomicExch(&visited[nb], 1);
+        if (old == 0)
+        {
+            float dist2 = length2(positions[nb] - startPos);
+            if (dist2 <= radius * radius)
+            {
+                unsigned int nfIdx = atomicAdd(nextFrontierSize, 1);
+                if (nfIdx < MAX_FRONTIER)
+                    nextFrontier[nfIdx] = nb;
+
+                unsigned int resIdx = atomicAdd(resultSize, 1);
+                if (resIdx < MAX_RESULT)
+                    result[resIdx] = nb;
+            }
+        }
     }
 }

@@ -493,29 +493,35 @@ int main(int argc, char** argv)
 					auto d1 = glm::distance2(hitPosition, v1);
 					auto d2 = glm::distance2(hitPosition, v2);
 					unsigned int vi = -1;
+					glm::vec3 nearest = v0;
+					glm::vec3 nearestNormal = v0;
 					if (d0 < d1 && d0 < d2)
 					{
-						auto vn = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.x]));
-						VD::AddWiredBox("Nearest", v0, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						nearest = v0;
+						nearestNormal = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.x]));
 						vi = f.x;
 					}
 					else if (d1 < d0 && d1 < d2)
 					{
-						auto vn = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.y]));
-						VD::AddWiredBox("Nearest", v1, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						nearest = v1;
+						nearestNormal = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.y]));
 						vi = f.y;
 					}
 					else if (d2 < d0 && d2 < d1)
 					{
-						auto vn = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.z]));
-						VD::AddWiredBox("Nearest", v2, vn, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+						nearest = v2;
+						nearestNormal = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.z]));
 						vi = f.z;
 					}
+
+					VD::AddWiredBox("Nearest", nearest, nearestNormal, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+
 
 					printf("[d_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
 
 					printf("OneRing Center : %d\n", vi);
-					auto vis = cudaInstance.d_mesh.GetOneRingVertices(vi);
+					//auto vis = cudaInstance.d_mesh.GetOneRingVertices(vi);
+					auto vis = cudaInstance.d_mesh.GetVerticesInRadius(vi, 0.2f);
 					for (auto& vi : vis)
 					{
 						printf("%d, ", vi);
@@ -527,6 +533,7 @@ int main(int argc, char** argv)
 						VD::AddText("OneRingVertices", ss.str(), position, Color::white());
 					}
 					printf("\n");
+					VD::AddSphere("Range", nearest, nearestNormal, 0.2f, glm::vec4(1.0f, 1.0f, 1.0f, 0.3f));
 				}
 			}
 			});

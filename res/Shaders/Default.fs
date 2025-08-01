@@ -17,7 +17,7 @@ void main() {
     float lighting = max(dot(normalize(vNormal), lightDir), 0.2); // Diffuse shading with ambient
     if(0 == useSolidColor)
     {
-        FragColor = vColor * lighting; // Apply lighting to color
+        FragColor = vec4(vColor.rgb * lighting, vColor.a); // Apply lighting to color
     }
     else
     {
