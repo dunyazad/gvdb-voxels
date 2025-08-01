@@ -57,6 +57,22 @@ struct HostHalfEdgeMesh
     bool PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const;
 
     std::vector<unsigned int> GetOneRingVertices(unsigned int v) const;
+
+    void ComputeFeatureWeights(std::vector<float>& featureWeights, float sharpAngleDeg);
+
+    void BilateralNormalSmoothing(
+        std::vector<float3>& outNormals,
+        const std::vector<float>& featureWeights,
+        float sigma_s,
+        float sigma_n);
+
+    void TangentPlaneProjection(
+        std::vector<float3>& outPositions,
+        const std::vector<float3>& smoothNormals,
+        const std::vector<float>& featureWeights,
+        float sigma_proj);
+
+    void RobustSmooth(int iterations, float sigma_s, float sigma_n, float sigma_proj, float sharpAngleDeg);
 };
 
 struct DeviceHalfEdgeMesh
@@ -90,9 +106,9 @@ struct DeviceHalfEdgeMesh
 
     bool PickFace(const float3& rayOrigin, const float3& rayDir,int& outHitIndex, float& outHitT) const;
 
-    std::vector<unsigned int> GetOneRingVertices(unsigned int v) const;
+    std::vector<unsigned int> GetOneRingVertices(unsigned int v, bool fixBorderVertices = false) const;
 
-    void LaplacianSmoothing(unsigned int iterations = 1, float lambda = 0.5f);
+    void LaplacianSmoothing(unsigned int iterations = 1, float lambda = 0.5f, bool fixBorderVertices = false);
 
     __host__ __device__ static uint64_t PackEdge(unsigned int v0, unsigned int v1);
     __device__ static bool HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value);
@@ -110,6 +126,7 @@ struct DeviceHalfEdgeMesh
             const HalfEdge* halfEdges,
             const unsigned int* vertexToHalfEdge,
             unsigned int numberOfPoints,
+            bool fixBorderVertices,
             unsigned int* outNeighbors,
             unsigned int& outCount,
             unsigned int maxNeighbors = 32);
@@ -139,19 +156,11 @@ __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
+    bool fixeborderVertices,
     const HalfEdge* halfEdges,
     unsigned int numberOfHalfEdges,
     unsigned int* vertexToHalfEdge,
     float lambda);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmoothNRing(
-    const HalfEdge* halfEdges,
-    const unsigned int* vertexToHalfEdge,
-    const float3* positions_in,
-    float3* positions_out,
-    unsigned int numberOfPoints,
-    float lambda,
-    int maxRing);
 
 __global__ void Kernel_DeviceHalfEdgeMesh_PickFace(
     const float3 rayOrigin,
@@ -162,10 +171,11 @@ __global__ void Kernel_DeviceHalfEdgeMesh_PickFace(
     int* outHitIndex,
     float* outHitT);
 
-__global__ void Kernel_ExampleOneRing(
+__global__ void Kernel_DeviceHalfEdgeMesh_OneRing(
     const HalfEdge* halfEdges,
     const unsigned int* vertexToHalfEdge,
     unsigned int numberOfPoints,
     unsigned int v, // 조사할 vertex index
+    bool fixBorderVertices,
     unsigned int* outBuffer, // outBuffer[0:count-1]에 결과 저장
     unsigned int* outCount);

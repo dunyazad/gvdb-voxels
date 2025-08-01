@@ -125,7 +125,7 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
 
     d_input = h_input;
 
-    vhm.Initialize(0.1f, d_input.numberOfPoints * 8, 32);
+    vhm.Initialize(0.1f, d_input.numberOfPoints * 32, 32);
 
     vhm.Occupy(d_input, 3);
 
@@ -151,7 +151,9 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
 
     //h_mesh.DeserializePLY("../../res/3D/HostHalfEdgeMesh.ply");
 
-    //h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh.ply", false);
+    //h_mesh.RobustSmooth(5, 2.0f, 0.1f, 2.0f, 45.0f);
+
+    h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh.ply", false);
 
     CUDA_TE(ProcessPointCloud);
 

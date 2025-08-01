@@ -102,3 +102,7 @@ typedef double f64;
 #ifndef CUDA_SYNC
 #define CUDA_SYNC() cudaDeviceSynchronize();
 #endif
+
+#ifndef PI
+#define PI 3.14159265358979323846
+#endif

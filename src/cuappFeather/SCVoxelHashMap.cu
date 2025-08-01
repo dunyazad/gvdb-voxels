@@ -150,8 +150,9 @@ void SCVoxelHashMap::MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue)
 
 	mesh.BuildHalfEdges();
 
-	//mesh.LaplacianSmoothing(5, 1.0f);
-	//mesh.LaplacianSmoothingNRing(2, 0.15f, 1);
+	//SCVoxelHashMap::SurfaceProjection_SDF(info, mesh);
+
+	mesh.LaplacianSmoothing(5, 1.0f, true);
 
 	cudaFree(d_numberOfPoints);
 	cudaFree(d_numberOfFaces);
@@ -160,6 +161,18 @@ void SCVoxelHashMap::MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue)
 
 	nvtxRangePop();
 }
+
+void SCVoxelHashMap::SurfaceProjection_SDF(SCVoxelHashMapInfo info, DeviceHalfEdgeMesh& mesh, int maxIters, float stepScale)
+{
+	unsigned int numberOfPoints = mesh.numberOfPoints;
+	float3* positions = mesh.positions;
+	float3* normals = mesh.normals;
+
+	LaunchKernel(Kernel_SCVoxelHashMap_SurfaceProjection_SDF, numberOfPoints,
+		info, positions, normals, numberOfPoints, maxIters, stepScale);
+	CUDA_SYNC();
+}
+
 
 __host__ __device__ uint64_t SCVoxelHashMap::expandBits(uint32_t v)
 {
@@ -564,6 +577,75 @@ __device__ unsigned int SCVoxelHashMap::GetZeroCrossingIndex(
 	}
 }
 
+__device__ float SCVoxelHashMap::SampleSDF(const SCVoxelHashMapInfo& info, const float3& p)
+{
+	int3 idx = SCVoxelHashMap::PositionToIndex(p, info.voxelSize);
+	auto v = SCVoxelHashMap::GetVoxel((SCVoxelHashMapInfo&)info, idx);
+	if (!v || v->count == 0) return FLT_MAX;
+	return v->sdfSum / (float)max(1u, v->count);
+}
+
+__device__ float3 SCVoxelHashMap::SampleSDFGradient(const SCVoxelHashMapInfo& info, const float3& p)
+{
+	// central difference
+	const float h = info.voxelSize * 0.5f;
+	float sdf_x1 = SampleSDF(info, p + make_float3(h, 0, 0));
+	float sdf_x0 = SampleSDF(info, p - make_float3(h, 0, 0));
+	float sdf_y1 = SampleSDF(info, p + make_float3(0, h, 0));
+	float sdf_y0 = SampleSDF(info, p - make_float3(0, h, 0));
+	float sdf_z1 = SampleSDF(info, p + make_float3(0, 0, h));
+	float sdf_z0 = SampleSDF(info, p - make_float3(0, 0, h));
+	float3 grad = make_float3(
+		(sdf_x1 - sdf_x0) / (2.0f * h),
+		(sdf_y1 - sdf_y0) / (2.0f * h),
+		(sdf_z1 - sdf_z0) / (2.0f * h)
+	);
+	return normalize(grad);
+}
+
+__device__ float SCVoxelHashMap::TrilinearSampleSDF(const SCVoxelHashMapInfo& info, const float3& p)
+{
+	float3 ip = p / info.voxelSize;
+	int3 base = make_int3(floorf(ip.x), floorf(ip.y), floorf(ip.z));
+	float3 frac = ip - make_float3(base.x, base.y, base.z);
+
+	float sdf = 0;
+	float wsum = 0;
+	for (int dz = 0; dz <= 1; ++dz)
+		for (int dy = 0; dy <= 1; ++dy)
+			for (int dx = 0; dx <= 1; ++dx)
+			{
+				int3 idx = base + make_int3(dx, dy, dz);
+				float w = ((dx ? frac.x : 1 - frac.x) *
+					(dy ? frac.y : 1 - frac.y) *
+					(dz ? frac.z : 1 - frac.z));
+				auto v = SCVoxelHashMap::GetVoxel((SCVoxelHashMapInfo&)info, idx);
+				if (v && v->count > 0)
+				{
+					float s = v->sdfSum / (float)max(1u, v->count);
+					if (fabsf(s) < FLT_MAX / 2) { sdf += w * s; wsum += w; }
+				}
+			}
+	return wsum > 0 ? sdf / wsum : FLT_MAX;
+}
+
+__device__ float3 SCVoxelHashMap::TrilinearSampleSDFGradient(const SCVoxelHashMapInfo& info, const float3& p)
+{
+	const float h = info.voxelSize * 0.5f;
+	float sdf_x1 = TrilinearSampleSDF(info, p + make_float3(h, 0, 0));
+	float sdf_x0 = TrilinearSampleSDF(info, p - make_float3(h, 0, 0));
+	float sdf_y1 = TrilinearSampleSDF(info, p + make_float3(0, h, 0));
+	float sdf_y0 = TrilinearSampleSDF(info, p - make_float3(0, h, 0));
+	float sdf_z1 = TrilinearSampleSDF(info, p + make_float3(0, 0, h));
+	float sdf_z0 = TrilinearSampleSDF(info, p - make_float3(0, 0, h));
+	float3 grad = make_float3(
+		(sdf_x1 - sdf_x0) / (2.0f * h),
+		(sdf_y1 - sdf_y0) / (2.0f * h),
+		(sdf_z1 - sdf_z0) / (2.0f * h)
+	);
+	return normalize(grad);
+}
+
 __global__ void Kernel_SCVoxelHashMap_MarchingCubes(
 	SCVoxelHashMapInfo info, float isoValue, uint3* d_faces, unsigned int* d_numberOfFaces)
 {
@@ -607,4 +689,52 @@ __global__ void Kernel_SCVoxelHashMap_MarchingCubes(
 	//	auto index = atomicAdd(d_numberOfFaces, 1u);
 	//	d_faces[index] = voxel->zeroCrossingPointIndex;
 	//}
+}
+
+__global__ void Kernel_SCVoxelHashMap_SurfaceProjection_SDF(
+	SCVoxelHashMapInfo info,
+	float3* positions,
+	float3* normals,
+	unsigned int numberOfPoints,
+	int maxIters,
+	float stepScale)
+{
+	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+	if (tid >= numberOfPoints) return;
+
+	float3 p = positions[tid];
+
+	// Simple Sampling
+	/*
+	for (int iter = 0; iter < maxIters; ++iter)
+	{
+		float sdf = SCVoxelHashMap::SampleSDF(info, p);
+		if (fabsf(sdf) < info.voxelSize * 0.05f)
+			break;
+		float3 grad = SCVoxelHashMap::SampleSDFGradient(info, p);
+		if (length(grad) < 1e-6f) break;
+		p = p - sdf * grad * stepScale;
+	}
+	*/
+
+	for (int iter = 0; iter < maxIters; ++iter)
+	{
+		float sdf = SCVoxelHashMap::TrilinearSampleSDF(info, p);
+		if (fabsf(sdf) > info.voxelSize * 2.0f || sdf == FLT_MAX) break;
+		if (fabsf(sdf) < info.voxelSize * 0.05f) break;
+		float3 grad = SCVoxelHashMap::TrilinearSampleSDFGradient(info, p);
+		float glen = length(grad);
+		if (glen < 1e-3f || isnan(glen)) break;
+		p = p - sdf * grad * stepScale;
+	}
+
+	positions[tid] = p;
+
+	// Update normal using SDF gradient (optional)
+	if (normals)
+	{
+		float3 n = SCVoxelHashMap::SampleSDFGradient(info, p);
+		if (length(n) > 1e-6f)
+			normals[tid] = n;
+	}
 }

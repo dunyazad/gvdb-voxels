@@ -313,7 +313,9 @@ std::vector<unsigned int> HostHalfEdgeMesh::GetOneRingVertices(unsigned int v) c
     std::vector<unsigned int> neighbors;
     if (!vertexToHalfEdge || v >= numberOfPoints) return neighbors;
 
-    auto ishe = vertexToHalfEdge[v];
+    unsigned int ishe = vertexToHalfEdge[v];
+    if (ishe == UINT32_MAX) return neighbors;
+
     auto ihe = ishe;
     auto lihe = ihe;
     bool borderFound = false;
@@ -383,6 +385,138 @@ std::vector<unsigned int> HostHalfEdgeMesh::GetOneRingVertices(unsigned int v) c
     return neighbors;
 }
 
+void HostHalfEdgeMesh::ComputeFeatureWeights(std::vector<float>& featureWeights, float sharpAngleDeg)
+{
+    featureWeights.resize(numberOfPoints, 1.0f);
+    float cosThr = std::cos(sharpAngleDeg * PI / 180.0f);
+
+    for (unsigned int vid = 0; vid < numberOfPoints; ++vid)
+    {
+        float3 n0 = normals[vid];
+        std::vector<unsigned int> neighbors = GetOneRingVertices(vid);
+
+        for (unsigned int nb : neighbors)
+        {
+            float3 n1 = normals[nb];
+            float dotn = n0.x * n1.x + n0.y * n1.y + n0.z * n1.z;
+            if (dotn < cosThr)
+            {
+                featureWeights[vid] = 0.1f; // 샤프엣지, feature
+                break;
+            }
+        }
+    }
+}
+
+void HostHalfEdgeMesh::BilateralNormalSmoothing(
+    std::vector<float3>& outNormals,
+    const std::vector<float>& featureWeights,
+    float sigma_s,
+    float sigma_n)
+{
+    outNormals.resize(numberOfPoints);
+
+    for (unsigned int vid = 0; vid < numberOfPoints; ++vid)
+    {
+        float3 vpos = positions[vid];
+        float3 vnor = normals[vid];
+        float w_sum = 0.0f;
+        float3 n_sum = make_float3(0, 0, 0);
+
+        std::vector<unsigned int> neighbors = GetOneRingVertices(vid);
+        for (unsigned int nb : neighbors)
+        {
+            float3 npos = positions[nb];
+            float3 nnor = normals[nb];
+
+            float dist2 = length2(vpos - npos);
+            float angle2 = length2(vnor - nnor); // 혹은 1 - dot(vnor, nnor)
+
+            float w_spatial = std::exp(-dist2 / (2.0f * sigma_s * sigma_s));
+            float w_normal = std::exp(-angle2 / (2.0f * sigma_n * sigma_n));
+            float w_feature = std::min(featureWeights[vid], featureWeights[nb]);
+
+            float w = w_spatial * w_normal * w_feature;
+            n_sum += nnor * w;
+            w_sum += w;
+        }
+
+        if (w_sum > 0)
+        {
+            float3 nout = n_sum / w_sum;
+            outNormals[vid] = normalize(nout);
+        }
+        else
+        {
+            outNormals[vid] = vnor;
+        }
+    }
+}
+
+void HostHalfEdgeMesh::TangentPlaneProjection(
+    std::vector<float3>& outPositions,
+    const std::vector<float3>& smoothNormals,
+    const std::vector<float>& featureWeights,
+    float sigma_proj)
+{
+    outPositions.resize(numberOfPoints);
+
+    for (unsigned int vid = 0; vid < numberOfPoints; ++vid)
+    {
+        float3 vpos = positions[vid];
+        float3 vnor = smoothNormals[vid];
+
+        float3 p_sum = make_float3(0, 0, 0);
+        float w_sum = 0.0f;
+
+        std::vector<unsigned int> neighbors = GetOneRingVertices(vid);
+        for (unsigned int nb : neighbors)
+        {
+            float3 npos = positions[nb];
+
+            // tangent plane projection
+            float3 delta = npos - vpos;
+            float d = delta.x * vnor.x + delta.y * vnor.y + delta.z * vnor.z;
+            float3 proj = npos - vnor * d;
+
+            float w_spatial = std::exp(-length2(delta) / (2.0f * sigma_proj * sigma_proj));
+            float w_feature = std::min(featureWeights[vid], featureWeights[nb]);
+            float w = w_spatial * w_feature;
+            p_sum += proj * w;
+            w_sum += w;
+        }
+
+        // 본인 좌표 포함(안정성, optional)
+        p_sum += vpos;
+        w_sum += 1.0f;
+
+        if (w_sum > 0)
+            outPositions[vid] = p_sum / w_sum;
+        else
+            outPositions[vid] = vpos;
+    }
+}
+
+void HostHalfEdgeMesh::RobustSmooth(int iterations, float sigma_s, float sigma_n, float sigma_proj, float sharpAngleDeg)
+{
+    std::vector<float> featureWeights(numberOfPoints, 1.0f);
+    std::vector<float3> smoothNormals(numberOfPoints);
+    std::vector<float3> smoothPositions(numberOfPoints);
+
+    for (int it = 0; it < iterations; ++it)
+    {
+        ComputeFeatureWeights(featureWeights, sharpAngleDeg);
+        BilateralNormalSmoothing(smoothNormals, featureWeights, sigma_s, sigma_n);
+        TangentPlaneProjection(smoothPositions, smoothNormals, featureWeights, sigma_proj);
+
+        // apply results
+        for (unsigned int vid = 0; vid < numberOfPoints; ++vid)
+        {
+            normals[vid] = smoothNormals[vid];
+            positions[vid] = smoothPositions[vid];
+        }
+    }
+}
 
 
 
@@ -558,7 +692,7 @@ bool DeviceHalfEdgeMesh::PickFace(const float3& rayOrigin, const float3& rayDir,
     return (outHitIndex >= 0);
 }
 
-std::vector<unsigned int> DeviceHalfEdgeMesh::GetOneRingVertices(unsigned int v) const
+std::vector<unsigned int> DeviceHalfEdgeMesh::GetOneRingVertices(unsigned int v, bool fixBorderVertices) const
 {
     // 파라미터 체크
     assert(v < numberOfPoints);
@@ -573,11 +707,12 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::GetOneRingVertices(unsigned int v)
     cudaMemset(d_count, 0, sizeof(unsigned int));
 
     // 커널 호출 (단일 스레드, 하나의 vertex만 추출)
-    Kernel_ExampleOneRing << <1, 1 >> > (
+    Kernel_DeviceHalfEdgeMesh_OneRing << <1, 1 >> > (
         halfEdges,
         vertexToHalfEdge,
         numberOfPoints,
         v,
+        fixBorderVertices,
         d_neighbors,
         d_count
         );
@@ -603,7 +738,7 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::GetOneRingVertices(unsigned int v)
     return result;
 }
 
-void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambda)
+void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambda, bool fixBorderVertices)
 {
     if (numberOfPoints == 0 || numberOfFaces == 0) return;
 
@@ -618,7 +753,7 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
     for (unsigned int it = 0; it < iterations; ++it)
     {
         LaunchKernel(Kernel_DeviceHalfEdgeMesh_LaplacianSmooth, numberOfPoints,
-            positionsA, positionsB, numberOfPoints, halfEdges, numberOfHalfEdges, vertexToHalfEdge, lambda);
+            positionsA, positionsB, numberOfPoints, fixBorderVertices, halfEdges, numberOfHalfEdges, vertexToHalfEdge, lambda);
         std::swap(positionsA, positionsB);
     }
 
@@ -730,6 +865,7 @@ __device__ void DeviceHalfEdgeMesh::GetOneRingVertices_Device(
     const HalfEdge* halfEdges,
     const unsigned int* vertexToHalfEdge,
     unsigned int numberOfPoints,
+    bool fixBorderVertices,
     unsigned int* outNeighbors,
     unsigned int& outCount,
     unsigned int maxNeighbors)
@@ -777,6 +913,8 @@ __device__ void DeviceHalfEdgeMesh::GetOneRingVertices_Device(
         outCount = 0;
         ishe = lihe;
         ihe = lihe;
+        if (fixBorderVertices) return;
+
         do
         {
             const HalfEdge& he = halfEdges[ihe];
@@ -937,11 +1075,104 @@ __global__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdgeMapping(
     // atomicMin 방식으로 병렬 충돌 방지
     atomicMin(&vertexToHalfEdge[v], heIdx);
 }
+//
+//__global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
+//    float3* positions_in,
+//    float3* positions_out,
+//    unsigned int numberOfPoints,
+//    const HalfEdge* halfEdges,
+//    unsigned int numberOfHalfEdges,
+//    unsigned int* vertexToHalfEdge,
+//    float lambda)
+//{
+//    unsigned int vid = blockIdx.x * blockDim.x + threadIdx.x;
+//    if (vid >= numberOfPoints) return;
+//
+//    /*
+//    float3 center = positions_in[vid];
+//    float3 sum = make_float3(0, 0, 0);
+//    unsigned int count = 0;
+//
+//    for (unsigned int i = 0; i < numberOfHalfEdges; ++i)
+//    {
+//        if (halfEdges[i].vertexIndex != vid) continue;
+//
+//        int opp = halfEdges[i].oppositeIndex;
+//        if (opp == UINT32_MAX) continue;
+//
+//        int neighbor = halfEdges[opp].vertexIndex;
+//        if (neighbor == vid || neighbor == UINT32_MAX) continue;
+//
+//        sum += positions_in[neighbor];
+//        count++;
+//    }
+//
+//    if (count > 0)
+//    {
+//        float3 avg = sum / (float)count;
+//        positions_out[vid] = center + lambda * (avg - center);
+//    }
+//    else
+//    {
+//        positions_out[vid] = center;
+//    }
+//    */
+//
+//    unsigned int heStart = vertexToHalfEdge[vid];
+//    if (UINT32_MAX == heStart) return;
+//
+//    float3 center = positions_in[vid];
+//    
+//    if (UINT32_MAX == halfEdges[heStart].oppositeIndex)
+//    {
+//        positions_out[vid] = center;
+//        return;
+//    }
+//
+//    float3 sum = make_float3(0, 0, 0);
+//    unsigned int count = 0;
+//
+//    unsigned int he = heStart;
+//    do
+//    {
+//        int opp = halfEdges[he].oppositeIndex;
+//        if (opp == UINT32_MAX)
+//        {
+//            positions_out[vid] = center;
+//            return;
+//        }
+//
+//        unsigned int neighbor = halfEdges[opp].vertexIndex;
+//        if (neighbor >= numberOfPoints)
+//        {
+//            positions_out[vid] = center;
+//            return;
+//        }
+//
+//        sum += positions_in[neighbor];
+//        count++;
+//
+//        he = halfEdges[opp].nextIndex;
+//
+//    } while (he != heStart);
+//
+//    if (count > 0)
+//    {
+//        float3 avg = sum / (float)count;
+//        positions_out[vid] = center + lambda * (avg - center);
+//    }
+//    else
+//    {
+//        positions_out[vid] = center;
+//    }
+//}
+
 
 __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
+    bool fixeborderVertices,
     const HalfEdge* halfEdges,
     unsigned int numberOfHalfEdges,
     unsigned int* vertexToHalfEdge,
@@ -950,180 +1181,38 @@ __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     unsigned int vid = blockIdx.x * blockDim.x + threadIdx.x;
     if (vid >= numberOfPoints) return;
 
-    /*
-    float3 center = positions_in[vid];
-    float3 sum = make_float3(0, 0, 0);
-    unsigned int count = 0;
+    // 1-ring 이웃 인덱스 추출
+    const unsigned int MAX_NEIGHBORS = 32;
+    unsigned int neighbors[MAX_NEIGHBORS];
+    unsigned int nCount = 0;
 
-    for (unsigned int i = 0; i < numberOfHalfEdges; ++i)
-    {
-        if (halfEdges[i].vertexIndex != vid) continue;
-
-        int opp = halfEdges[i].oppositeIndex;
-        if (opp == UINT32_MAX) continue;
-
-        int neighbor = halfEdges[opp].vertexIndex;
-        if (neighbor == vid || neighbor == UINT32_MAX) continue;
-
-        sum += positions_in[neighbor];
-        count++;
-    }
-
-    if (count > 0)
-    {
-        float3 avg = sum / (float)count;
-        positions_out[vid] = center + lambda * (avg - center);
-    }
-    else
-    {
-        positions_out[vid] = center;
-    }
-    */
-
-    unsigned int heStart = vertexToHalfEdge[vid];
-    if (UINT32_MAX == heStart) return;
+    DeviceHalfEdgeMesh::GetOneRingVertices_Device(
+        vid,
+        halfEdges,
+        vertexToHalfEdge,
+        numberOfPoints,
+        fixeborderVertices,
+        neighbors,
+        nCount,
+        MAX_NEIGHBORS);
 
     float3 center = positions_in[vid];
-    
-    if (UINT32_MAX == halfEdges[heStart].oppositeIndex)
+    if (nCount == 0)
     {
         positions_out[vid] = center;
         return;
     }
 
     float3 sum = make_float3(0, 0, 0);
-    unsigned int count = 0;
-
-    unsigned int he = heStart;
-    do
+    for (unsigned int i = 0; i < nCount; ++i)
     {
-        int opp = halfEdges[he].oppositeIndex;
-        if (opp == UINT32_MAX)
-        {
-            positions_out[vid] = center;
-            return;
-        }
-
-        unsigned int neighbor = halfEdges[opp].vertexIndex;
-        if (neighbor >= numberOfPoints)
-        {
-            positions_out[vid] = center;
-            return;
-        }
-
-        sum += positions_in[neighbor];
-        count++;
-
-        he = halfEdges[opp].nextIndex;
-
-    } while (he != heStart);
-
-    if (count > 0)
-    {
-        float3 avg = sum / (float)count;
-        positions_out[vid] = center + lambda * (avg - center);
-    }
-    else
-    {
-        positions_out[vid] = center;
-    }
-}
-
-__global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmoothNRing(
-    float3* positions_in,
-    float3* positions_out,
-    unsigned int numberOfPoints,
-    const HalfEdge* halfEdges,
-    const unsigned int* vertexToHalfEdge,
-    unsigned int nRing,
-    float lambda)
-{
-    unsigned int threadId = blockIdx.x * blockDim.x + threadIdx.x;
-    if (threadId >= numberOfPoints) return;
-
-    int startHE = vertexToHalfEdge[threadId];
-    if (startHE == UINT32_MAX) {
-        positions_out[threadId] = positions_in[threadId];
-        return;
+        unsigned int nb = neighbors[i];
+        if (nb < numberOfPoints)
+            sum += positions_in[nb];
     }
 
-    // Ring traversal
-    constexpr int MAX_RING = 64;
-    unsigned int neighborIndices[MAX_RING];
-    unsigned int currentFront[MAX_RING];
-    unsigned int nextFront[MAX_RING];
-    unsigned int currentCount = 0, nextCount = 0;
-    bool visited[MAX_RING] = {};
-
-    // Initialize front with 1-ring neighbors
-    int he = startHE;
-    do {
-        int oppHE = halfEdges[he].oppositeIndex;
-        if (oppHE == UINT32_MAX) break;
-        int neighborVertex = halfEdges[oppHE].vertexIndex;
-
-        if (currentCount < MAX_RING && !visited[neighborVertex]) {
-            neighborIndices[currentCount] = neighborVertex;
-            currentFront[currentCount] = neighborVertex;
-            visited[neighborVertex] = true;
-            ++currentCount;
-        }
-
-        he = halfEdges[halfEdges[oppHE].nextIndex].nextIndex;
-    } while (he != startHE);
-
-    // n-ring propagation
-    for (unsigned int ring = 1; ring < nRing; ++ring) {
-        nextCount = 0;
-        for (unsigned int i = 0; i < currentCount; ++i) {
-            int currentVertex = currentFront[i];
-            int he2 = vertexToHalfEdge[currentVertex];
-            if (he2 == UINT32_MAX) continue;
-
-            int heLoop = he2;
-            do {
-                int oppHE = halfEdges[heLoop].oppositeIndex;
-                if (oppHE == UINT32_MAX) break;
-                int neighborVertex = halfEdges[oppHE].vertexIndex;
-
-                if (nextCount < MAX_RING && !visited[neighborVertex]) {
-                    neighborIndices[currentCount + nextCount] = neighborVertex;
-                    nextFront[nextCount] = neighborVertex;
-                    visited[neighborVertex] = true;
-                    ++nextCount;
-                }
-
-                heLoop = halfEdges[halfEdges[oppHE].nextIndex].nextIndex;
-            } while (heLoop != he2);
-        }
-
-        for (unsigned int i = 0; i < nextCount; ++i)
-            currentFront[i] = nextFront[i];
-        currentCount += nextCount;
-    }
-
-    float3 sum = make_float3(0, 0, 0);
-    int valid = 0;
-    for (unsigned int i = 0; i < currentCount; ++i)
-    {
-        if (neighborIndices[i] < numberOfPoints)
-        {
-            sum += positions_in[neighborIndices[i]];
-            ++valid;
-        }
-    }
-
-    float3 self = positions_in[threadId];
-    if (valid > 0)
-    {
-        float3 avg = sum / (float)valid;
-        float3 displacement = avg - self;
-        positions_out[threadId] = self + lambda * displacement;
-    }
-    else
-    {
-        positions_out[threadId] = self;
-    }
+    float3 avg = sum / (float)nCount;
+    positions_out[vid] = center + lambda * (avg - center);
 }
 
 __global__ void Kernel_DeviceHalfEdgeMesh_PickFace(
@@ -1149,11 +1238,12 @@ __global__ void Kernel_DeviceHalfEdgeMesh_PickFace(
     }
 }
 
-__global__ void Kernel_ExampleOneRing(
+__global__ void Kernel_DeviceHalfEdgeMesh_OneRing(
     const HalfEdge* halfEdges,
     const unsigned int* vertexToHalfEdge,
     unsigned int numberOfPoints,
     unsigned int v, // 조사할 vertex index
+    bool fixBorderVertices, 
     unsigned int* outBuffer, // outBuffer[0:count-1]에 결과 저장
     unsigned int* outCount)
 {
@@ -1162,7 +1252,7 @@ __global__ void Kernel_ExampleOneRing(
         unsigned int neighbors[32];
         unsigned int nCount = 0;
         DeviceHalfEdgeMesh::GetOneRingVertices_Device(
-            v, halfEdges, vertexToHalfEdge, numberOfPoints, neighbors, nCount, 32);
+            v, halfEdges, vertexToHalfEdge, numberOfPoints, fixBorderVertices, neighbors, nCount, 32);
         for (unsigned int i = 0; i < nCount; ++i)
         {
             outBuffer[i] = neighbors[i];
