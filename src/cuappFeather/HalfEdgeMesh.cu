@@ -1085,6 +1085,95 @@ __device__ void DeviceHalfEdgeMesh::GetOneRingVertices_Device(
     }
 }
 
+__device__ void DeviceHalfEdgeMesh::GetAllVerticesInRadius_Device(
+    unsigned int vid,
+    const float3* positions,
+    unsigned int numberOfPoints,
+    const HalfEdge* halfEdges,
+    const unsigned int* vertexToHalfEdge,
+    unsigned int* neighbors,        // [MAX_NEIGHBORS] output
+    unsigned int& outCount,         // output count
+    unsigned int maxNeighbors,
+    float radius)
+{
+    outCount = 0;
+    if (vid >= numberOfPoints) return;
+
+    // 임시 버퍼들 (로컬 stack)
+    unsigned int visited[MAX_NEIGHBORS];
+    unsigned int frontier[MAX_NEIGHBORS];
+    unsigned int nextFrontier[MAX_NEIGHBORS];
+
+    unsigned int visitedCount = 0;
+    unsigned int frontierSize = 0;
+    unsigned int nextFrontierSize = 0;
+
+    // 초기값: 자기 자신
+    frontier[0] = vid;
+    frontierSize = 1;
+    visited[0] = vid;
+    visitedCount = 1;
+
+    neighbors[0] = vid;
+    outCount = 1;
+
+    float3 startPos = positions[vid];
+
+    // BFS Loop
+    while (frontierSize > 0 && outCount < maxNeighbors)
+    {
+        nextFrontierSize = 0;
+
+        for (unsigned int fi = 0; fi < frontierSize; ++fi)
+        {
+            unsigned int v = frontier[fi];
+            // 1-ring neighbors
+            unsigned int ringNeighbors[32];
+            unsigned int nCount = 0;
+            DeviceHalfEdgeMesh::GetOneRingVertices_Device(
+                v, halfEdges, vertexToHalfEdge, numberOfPoints, false, ringNeighbors, nCount, 32);
+
+            for (unsigned int ni = 0; ni < nCount; ++ni)
+            {
+                unsigned int nb = ringNeighbors[ni];
+                if (nb == UINT32_MAX || nb >= numberOfPoints)
+                    continue;
+
+                // 이미 방문했는지 확인
+                bool alreadyVisited = false;
+                for (unsigned int vi = 0; vi < visitedCount; ++vi)
+                {
+                    if (visited[vi] == nb)
+                    {
+                        alreadyVisited = true;
+                        break;
+                    }
+                }
+                if (alreadyVisited)
+                    continue;
+
+                // 거리 체크
+                float dist2 = length2(positions[nb] - startPos);
+                if (dist2 <= radius * radius)
+                {
+                    // 방문 및 결과 추가
+                    if (visitedCount < maxNeighbors)
+                        visited[visitedCount++] = nb;
+                    if (outCount < maxNeighbors)
+                        neighbors[outCount++] = nb;
+                    if (nextFrontierSize < maxNeighbors)
+                        nextFrontier[nextFrontierSize++] = nb;
+                }
+            }
+        }
+
+        // frontier 업데이트
+        frontierSize = nextFrontierSize;
+        for (unsigned int i = 0; i < nextFrontierSize; ++i)
+            frontier[i] = nextFrontier[i];
+    }
+}
+
 __global__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
     const uint3* faces,
     unsigned int numberOfFaces,
@@ -1223,7 +1312,7 @@ __global__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdgeMapping(
     // atomicMin 방식으로 병렬 충돌 방지
     atomicMin(&vertexToHalfEdge[v], heIdx);
 }
-//
+
 //__global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
 //    float3* positions_in,
 //    float3* positions_out,
@@ -1468,8 +1557,21 @@ __global__ void Kernel_GetAllVerticesInRadius(
     unsigned int* allNeighbors,   // [numberOfPoints * MAX_NEIGHBORS]
     unsigned int* allNeighborSizes, // [numberOfPoints]
     unsigned int maxNeighbors,
-    float radius
-)
+    float radius)
+{
+    unsigned int vid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (vid >= numberOfPoints) return;
+
+    unsigned int* neighbors = allNeighbors + vid * maxNeighbors;
+    unsigned int outCount = 0;
+
+    DeviceHalfEdgeMesh::GetAllVerticesInRadius_Device(
+        vid, positions, numberOfPoints, halfEdges, vertexToHalfEdge,
+        neighbors, outCount, maxNeighbors, radius);
+
+    allNeighborSizes[vid] = outCount;
+}
+    /*
 {
     unsigned int vid = blockIdx.x * blockDim.x + threadIdx.x;
     if (vid >= numberOfPoints) return;
@@ -1550,6 +1652,7 @@ __global__ void Kernel_GetAllVerticesInRadius(
         neighbors[i] = result[i];
     *neighborSize = outCount;
 }
+*/
 
 __global__ void Kernel_RadiusLaplacianSmooth_WithNeighbors(
     const float3* positions_in,

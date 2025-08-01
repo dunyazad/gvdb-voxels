@@ -133,6 +133,17 @@ struct DeviceHalfEdgeMesh
             unsigned int* outNeighbors,
             unsigned int& outCount,
             unsigned int maxNeighbors = 32);
+
+    __device__ static void GetAllVerticesInRadius_Device(
+        unsigned int vid,
+        const float3* positions,
+        unsigned int numberOfPoints,
+        const HalfEdge* halfEdges,
+        const unsigned int* vertexToHalfEdge,
+        unsigned int* neighbors,        // [MAX_NEIGHBORS] output
+        unsigned int& outCount,         // output count
+        unsigned int maxNeighbors,
+        float radius);
 };
 
 __global__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
