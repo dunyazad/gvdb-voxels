@@ -337,8 +337,8 @@ int main(int argc, char** argv)
 			}
 			else if (GLFW_KEY_SPACE == event.keyCode)
 			{
-				cudaInstance.d_mesh.RadiusLaplacianSmoothing(0.5f, 10, 0.05f);
-				cudaInstance.d_mesh.LaplacianSmoothing(2, 1.0f, false);
+				//cudaInstance.d_mesh.RadiusLaplacianSmoothing(0.5f, 10, 0.05f);
+				cudaInstance.d_mesh.LaplacianSmoothing(5, 1.0f, true);
 				cudaInstance.interop.UploadFromDevice(cudaInstance.d_mesh);
 			}
 			else if (GLFW_KEY_PAGE_DOWN == event.keyCode)

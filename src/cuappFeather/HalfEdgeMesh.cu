@@ -198,7 +198,6 @@ void HostHalfEdgeMesh::BuildVertexToHalfEdgeMapping()
     }
 }
 
-
 bool HostHalfEdgeMesh::SerializePLY(const std::string& filename, bool useAlpha)
 {
     PLYFormat ply;
@@ -391,6 +390,72 @@ std::vector<unsigned int> HostHalfEdgeMesh::GetOneRingVertices(unsigned int v) c
     return neighbors;
 }
 
+bool HostHalfEdgeMesh::CollapseEdge(unsigned int heIdx)
+{
+    if (heIdx >= numberOfFaces * 3)
+        return false;
+
+    HalfEdge& he = halfEdges[heIdx];
+    unsigned int v0 = he.vertexIndex;
+    unsigned int oppIdx = he.oppositeIndex;
+    if (oppIdx == UINT32_MAX)
+        return false; // 경계 에지(반대쪽 없음)에서는 collapse 금지
+
+    HalfEdge& oppHe = halfEdges[oppIdx];
+    unsigned int v1 = oppHe.vertexIndex;
+    if (v0 == v1)
+        return false; // degenerate
+
+    // v0/v1에 연결된 모든 face/halfedge의 vertex를 v0로 대체
+    for (unsigned int i = 0; i < numberOfFaces * 3; ++i)
+    {
+        if (halfEdges[i].vertexIndex == v1)
+            halfEdges[i].vertexIndex = v0;
+    }
+    for (unsigned int fi = 0; fi < numberOfFaces; ++fi)
+    {
+        uint3& f = faces[fi];
+        if (f.x == v1) f.x = v0;
+        if (f.y == v1) f.y = v0;
+        if (f.z == v1) f.z = v0;
+    }
+    if (vertexToHalfEdge)
+    {
+        for (unsigned int i = 0; i < numberOfPoints; ++i)
+        {
+            if (vertexToHalfEdge[i] != UINT32_MAX)
+            {
+                unsigned int hei = vertexToHalfEdge[i];
+                if (hei < numberOfFaces * 3 && halfEdges[hei].vertexIndex == v1)
+                    vertexToHalfEdge[i] = heIdx;
+            }
+        }
+    }
+
+    // 위치를 평균으로 이동 (더 나은 방법도 있으나 기본 평균)
+    positions[v0] = (positions[v0] + positions[v1]) * 0.5f;
+    if (normals)
+        normals[v0] = normalize(normals[v0] + normals[v1]);
+    if (colors)
+        colors[v0] = (colors[v0] + colors[v1]) * 0.5f;
+
+    // degenerate face(두 vertex가 같아진 삼각형) 제거
+    std::vector<uint3> newFaces;
+    for (unsigned int fi = 0; fi < numberOfFaces; ++fi)
+    {
+        uint3 f = faces[fi];
+        if (f.x != f.y && f.y != f.z && f.z != f.x)
+            newFaces.push_back(f);
+    }
+    unsigned int newFaceCount = static_cast<unsigned int>(newFaces.size());
+    memcpy(faces, newFaces.data(), sizeof(uint3) * newFaceCount);
+    numberOfFaces = newFaceCount;
+
+    // HalfEdge/Face 등 topology 재구성
+    BuildHalfEdges();
+
+    return true;
+}
 
 
 
@@ -539,6 +604,116 @@ void DeviceHalfEdgeMesh::BuildHalfEdges()
     CUDA_SYNC();
 
     edgeMap.Terminate();
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_CompactVertices(
+    unsigned int* vertexToHalfEdge,
+    unsigned int* vertexIndexMapping,
+    unsigned int* vertexIndexMappingIndex,
+    const float3* oldPositions,
+    const float3* oldNormals,
+    const float3* oldColors,
+    float3* newPositions,
+    float3* newNormals,
+    float3* newColors,
+    unsigned int numberOfPoints)
+{
+    unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadid >= numberOfPoints) return;
+
+    if (UINT32_MAX == vertexToHalfEdge[threadid]) return;
+
+    auto index = atomicAdd(vertexIndexMappingIndex, 1);
+    vertexIndexMapping[threadid] = index;
+    newPositions[index] = oldPositions[threadid];
+    newNormals[index] = oldNormals[threadid];
+    newColors[index] = oldColors[threadid];
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_RemapVertexToHalfEdge(
+    unsigned int* vertexToHalfEdge,
+    unsigned int* newVertexToHalfEdge,
+    unsigned int* vertexIndexMapping,
+    unsigned int numberOfPoints)
+{
+    unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadid >= numberOfPoints) return;
+
+    if (vertexIndexMapping[threadid] == UINT32_MAX) return;
+
+    unsigned int newIndex = vertexIndexMapping[threadid];
+    newVertexToHalfEdge[newIndex] = vertexToHalfEdge[threadid];
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_RemapVertexIndexOfFacesAndHalfEdges(uint3* faces, HalfEdge* halfEdges, unsigned int numberOfFaces, unsigned int* vertexIndexMapping)
+{
+    unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadid >= numberOfFaces) return;
+
+    auto& f = faces[threadid];
+    f.x = vertexIndexMapping[f.x];
+    f.y = vertexIndexMapping[f.y];
+    f.z = vertexIndexMapping[f.z];
+
+    halfEdges[threadid * 3].vertexIndex = vertexIndexMapping[halfEdges[threadid * 3].vertexIndex];
+    halfEdges[threadid * 3 + 1].vertexIndex = vertexIndexMapping[halfEdges[threadid * 3 + 1].vertexIndex];
+    halfEdges[threadid * 3 + 2].vertexIndex = vertexIndexMapping[halfEdges[threadid * 3 + 2].vertexIndex];
+}
+
+void DeviceHalfEdgeMesh::RemoveIsolatedVertices()
+{
+    unsigned int* vertexIndexMapping = nullptr;
+    CUDA_MALLOC(&vertexIndexMapping, sizeof(unsigned int) * numberOfPoints);
+    CUDA_MEMSET(vertexIndexMapping, 0xFF, sizeof(unsigned int) * numberOfPoints);
+    unsigned int* vertexIndexMappingIndex = nullptr;
+    CUDA_MALLOC(&vertexIndexMappingIndex, sizeof(unsigned int));
+    CUDA_MEMSET(vertexIndexMappingIndex, 0, sizeof(unsigned int));
+
+    float3* newPositions = nullptr;
+    CUDA_MALLOC(&newPositions, sizeof(float3) * numberOfPoints);
+    float3* newNormals = nullptr;
+    CUDA_MALLOC(&newNormals, sizeof(float3) * numberOfPoints);
+    float3* newColors = nullptr;
+    CUDA_MALLOC(&newColors, sizeof(float3) * numberOfPoints);
+
+    unsigned int* newVertexToHalfEdge = nullptr;
+    CUDA_MALLOC(&newVertexToHalfEdge, sizeof(unsigned int) * numberOfPoints);
+
+    unsigned int numberOfNewPoints = 0;
+    LaunchKernel(Kernel_DeviceHalfEdgeMesh_CompactVertices, numberOfPoints,
+        vertexToHalfEdge, vertexIndexMapping, vertexIndexMappingIndex,
+        positions, normals, colors, newPositions, newNormals, newColors, numberOfPoints);
+
+    LaunchKernel(Kernel_DeviceHalfEdgeMesh_RemapVertexToHalfEdge, numberOfPoints,
+        vertexToHalfEdge, newVertexToHalfEdge, vertexIndexMapping, numberOfPoints);
+
+    CUDA_COPY_D2H(&numberOfNewPoints, vertexIndexMappingIndex, sizeof(unsigned int));
+    CUDA_SYNC();
+
+    numberOfPoints = numberOfNewPoints;
+    float3* oldPositions = positions;
+    float3* oldNormals = normals;
+    float3* oldColors = colors;
+
+    positions = newPositions;
+    normals = newNormals;
+    colors = newColors;
+
+    unsigned int* oldVertexToHalfEdge = vertexToHalfEdge;
+    vertexToHalfEdge = newVertexToHalfEdge;
+
+    LaunchKernel(Kernel_DeviceHalfEdgeMesh_RemapVertexIndexOfFacesAndHalfEdges, numberOfFaces,
+        faces, halfEdges, numberOfFaces, vertexIndexMapping);
+    CUDA_SYNC();
+
+    CUDA_FREE(oldPositions);
+    CUDA_FREE(oldNormals);
+    CUDA_FREE(oldColors);
+
+    CUDA_FREE(oldVertexToHalfEdge);
+
+    CUDA_FREE(vertexIndexMapping);
+    CUDA_FREE(vertexIndexMappingIndex);
 }
 
 bool DeviceHalfEdgeMesh::PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const
@@ -1162,7 +1337,7 @@ __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
-    bool fixeborderVertices,
+    bool fixborderVertices,
     const HalfEdge* halfEdges,
     unsigned int numberOfHalfEdges,
     unsigned int* vertexToHalfEdge,
@@ -1180,7 +1355,7 @@ __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
         halfEdges,
         vertexToHalfEdge,
         numberOfPoints,
-        fixeborderVertices,
+        fixborderVertices,
         neighbors,
         nCount,
         MAX_NEIGHBORS);

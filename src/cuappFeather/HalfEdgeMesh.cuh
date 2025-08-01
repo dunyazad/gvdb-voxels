@@ -57,7 +57,8 @@ struct HostHalfEdgeMesh
     bool PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const;
 
     std::vector<unsigned int> GetOneRingVertices(unsigned int v) const;
-    std::vector<unsigned int> GetVerticesInRadius(unsigned int startVertex, float radius);
+    
+    bool CollapseEdge(unsigned int heIdx);
 };
 
 struct DeviceHalfEdgeMesh
@@ -88,6 +89,7 @@ struct DeviceHalfEdgeMesh
 
     void BuildHalfEdges();
     void BuildVertexToHalfEdgeMapping();
+    void RemoveIsolatedVertices();
 
     bool PickFace(const float3& rayOrigin, const float3& rayDir,int& outHitIndex, float& outHitT) const;
 
@@ -154,7 +156,7 @@ __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
-    bool fixeborderVertices,
+    bool fixborderVertices,
     const HalfEdge* halfEdges,
     unsigned int numberOfHalfEdges,
     unsigned int* vertexToHalfEdge,

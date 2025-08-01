@@ -25,14 +25,14 @@ typedef unsigned long ui64;
 typedef float f32;
 typedef double f64;
 
-#define i8_max (INT8_MAX)
-#define i8_min (-INT8_MAX)
+#define i8_max  (INT8_MAX)
+#define i8_min  (INT8_MIN)
 #define i16_max (INT16_MAX)
-#define i16_min (-INT16_MAX)
+#define i16_min (INT16_MIN)
 #define i32_max (INT32_MAX)
-#define i32_min (-INT32_MAX)
+#define i32_min (INT32_MIN)
 #define i64_max (INT64_MAX)
-#define i64_min (-INT64_MAX)
+#define i64_min (INT64_MIN)
 
 #define ui8_max (UINT8_MAX)
 #define ui16_max (UINT16_MAX)
@@ -40,9 +40,9 @@ typedef double f64;
 #define ui64_max (UINT64_MAX)
 
 #define f32_max (FLT_MAX)
-#define f32_min (-FLT_MAX)
+#define f32_min (FLT_MIN)
 #define f64_max (DBL_MAX)
-#define f64_min (-DBL_MAX)
+#define f64_min (DBL_MIN)
 
 
 #ifndef LaunchKernel

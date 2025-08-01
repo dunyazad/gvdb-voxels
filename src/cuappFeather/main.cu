@@ -132,28 +132,31 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
     HostPointCloud result = vhm.Serialize();
     result.CompactValidPoints();
 
-    //PLYFormat plyVoxel;
-    //for (size_t i = 0; i < result.numberOfPoints; i++)
-    //{
-    //    auto& p = result.positions[i];
-    //    if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
-    //    auto& n = result.normals[i];
-    //    auto& c = result.colors[i];
-
-    //    plyVoxel.AddCube(p.x, p.y, p.z, n.x, n.y, n.z, c.x, c.y, c.z, 1.0f, 0.2f);
-    //}
-    //plyVoxel.Serialize("../../res/3D/VoxelHashMapVoxel.ply");
-
     CUDA_TS(MarchingCubes);
     vhm.MarchingCubes(d_mesh);
     CUDA_TE(MarchingCubes);
+
+    printf("d_mesh.numberOfPoints : %d\n", d_mesh.numberOfPoints);
+
+    d_mesh.RemoveIsolatedVertices();
+
+    printf("d_mesh.numberOfPoints : %d\n", d_mesh.numberOfPoints);
+
     h_mesh.CopyFromDevice(d_mesh);
 
-    //h_mesh.DeserializePLY("../../res/3D/HostHalfEdgeMesh.ply");
+    //h_mesh.SerializePLY("../../res/3D/host_mesh.ply");
 
-    //h_mesh.RobustSmooth(5, 2.0f, 0.1f, 2.0f, 45.0f);
+    printf("h_mesh.numberOfPoints : %d\n", h_mesh.numberOfPoints);
 
-    //h_mesh.SerializePLY("../../res/3D/HostHalfEdgeMesh.ply", false);
+    vhm.Terminate();
+
+    for (size_t i = 0; i < h_mesh.numberOfPoints; i++)
+    {
+        if (UINT32_MAX == h_mesh.vertexToHalfEdge[i])
+        {
+            printf("Vertex : %d has no half-edge.\n", i);
+        }
+    }
 
     CUDA_TE(ProcessPointCloud);
 
