@@ -95,7 +95,7 @@ __host__ __device__ inline float length2(const float2& v)
 
 __host__ __device__ inline float length(const float2& v)
 {
-    return sqrt(length2(v));
+    return sqrtf(length2(v));
 }
 
 __host__ __device__ inline float2 normalize(const float2& v)
@@ -204,7 +204,7 @@ __host__ __device__ inline float length2(const float3& v)
 
 __host__ __device__ inline float length(const float3& v)
 {
-    return sqrt(length2(v));
+    return sqrtf(length2(v));
 }
 
 __host__ __device__ inline float3 normalize(const float3& v)
@@ -323,7 +323,7 @@ __host__ __device__ inline float length2(const float4& v)
 
 __host__ __device__ inline float length(const float4& v)
 {
-    return sqrt(length2(v));
+    return sqrtf(length2(v));
 }
 
 __host__ __device__ inline float4 normalize(const float4& v)

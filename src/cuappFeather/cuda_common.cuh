@@ -12,6 +12,9 @@
 
 #include <Serialization.hpp>
 
+#define alog(...) printf("\033[38;5;1m\033[48;5;15m(^(OO)^) /V/\033[0m\t" __VA_ARGS__)
+#define alogt(tag, ...) printf("\033[38;5;1m\033[48;5;15m [%d] (^(OO)^) /V/\033[0m\t" tag, __VA_ARGS__)
+
 typedef char i8;
 typedef short i16;
 typedef int i32;
@@ -25,6 +28,8 @@ typedef unsigned long ui64;
 typedef float f32;
 typedef double f64;
 
+#ifdef MIN_MAX_DEFINITIONS
+#define MIN_MAX_DEFINITIONS
 #define i8_max  (INT8_MAX)
 #define i8_min  (INT8_MIN)
 #define i16_max (INT16_MAX)
@@ -43,7 +48,7 @@ typedef double f64;
 #define f32_min (FLT_MIN)
 #define f64_max (DBL_MAX)
 #define f64_min (DBL_MIN)
-
+#endif
 
 #ifndef LaunchKernel
 #define LaunchKernel_256(KERNEL, NOE, ...) { nvtxRangePushA(#KERNEL); auto NOT = 256; auto NOB = (NOE + NOT - 1) / NOT; KERNEL<<<NOB, NOT>>>(__VA_ARGS__); nvtxRangePop(); }

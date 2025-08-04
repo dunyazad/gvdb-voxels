@@ -154,7 +154,7 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
     {
         if (UINT32_MAX == h_mesh.vertexToHalfEdge[i])
         {
-            printf("Vertex : %d has no half-edge.\n", i);
+            printf("Vertex : %llu has no half-edge.\n", i);
         }
     }
 

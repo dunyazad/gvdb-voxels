@@ -586,7 +586,7 @@ void DeviceHalfEdgeMesh::BuildHalfEdges()
 {
     if (numberOfFaces == 0 || faces == nullptr) return;
 
-    size_t numHalfEdges = numberOfFaces * 3;
+    unsigned int numHalfEdges = numberOfFaces * 3;
     HashMap<uint64_t, unsigned int> edgeMap;
     edgeMap.Initialize(numHalfEdges * 2);
 
