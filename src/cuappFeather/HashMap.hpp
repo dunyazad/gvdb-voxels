@@ -23,7 +23,7 @@ __host__ __device__ inline uint64_t empty_key<uint64_t>()
 
 // Hash entry structure
 template<typename Key, typename Value>
-struct HashEntry
+struct HashMapEntry
 {
     Key key;
     Value value;
@@ -32,7 +32,7 @@ struct HashEntry
 template<typename Key, typename Value>
 struct HashMapInfo
 {
-    HashEntry<Key, Value>* entries = nullptr;
+    HashMapEntry<Key, Value>* entries = nullptr;
     size_t capacity = 1024 * 1024 * 1024;
     uint8_t maxProbe = 64;
 
@@ -61,8 +61,8 @@ struct HashMap
         info.capacity = capacity;
         info.maxProbe = maxProbe;
 
-        CUDA_CHECK(cudaMalloc(&info.entries, sizeof(HashEntry<Key, Value>) * info.capacity));
-        CUDA_CHECK(cudaMemset(info.entries, 0xFF, sizeof(HashEntry<Key, Value>) * info.capacity));
+        CUDA_CHECK(cudaMalloc(&info.entries, sizeof(HashMapEntry<Key, Value>) * info.capacity));
+        CUDA_CHECK(cudaMemset(info.entries, 0xFF, sizeof(HashMapEntry<Key, Value>) * info.capacity));
     }
 
     void Terminate()
@@ -78,7 +78,7 @@ struct HashMap
     {
         if (info.entries != nullptr)
         {
-            CUDA_CHECK(cudaMemset(info.entries, value, sizeof(HashEntry<Key, Value>) * info.capacity));
+            CUDA_CHECK(cudaMemset(info.entries, value, sizeof(HashMapEntry<Key, Value>) * info.capacity));
         }
     }
 

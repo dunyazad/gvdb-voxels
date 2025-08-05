@@ -3,6 +3,12 @@
 #include <cuda_common.cuh>
 #include <HashMap.hpp>
 
+struct cuAABB
+{
+    float3 min;
+    float3 max;
+};
+
 struct HalfEdge
 {
     unsigned int vertexIndex = UINT32_MAX;
@@ -21,6 +27,9 @@ struct DeviceHalfEdgeMesh;
 
 struct HostHalfEdgeMesh
 {
+    float3 min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+    float3 max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
     float3* positions = nullptr;
     float3* normals = nullptr;
     float3* colors = nullptr;
@@ -46,15 +55,16 @@ struct HostHalfEdgeMesh
     void CopyFromDevice(const DeviceHalfEdgeMesh& deviceMesh);
     void CopyToDevice(DeviceHalfEdgeMesh& deviceMesh) const;
 
+    void RecalcAABB();
+
     uint64_t PackEdge(unsigned int v0, unsigned int v1);
+    bool PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const;
     
     void BuildHalfEdges();
     void BuildVertexToHalfEdgeMapping();
 
     bool SerializePLY(const string& filename, bool useAlpha = false);
     bool DeserializePLY(const string& filename);
-
-    bool PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const;
 
     std::vector<unsigned int> GetOneRingVertices(unsigned int v) const;
     
@@ -63,6 +73,9 @@ struct HostHalfEdgeMesh
 
 struct DeviceHalfEdgeMesh
 {
+    float3 min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+    float3 max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
     float3* positions = nullptr;
     float3* normals = nullptr;
     float3* colors = nullptr;
@@ -87,8 +100,9 @@ struct DeviceHalfEdgeMesh
     void CopyFromHost(const HostHalfEdgeMesh& hostMesh);
     void CopyToHost(HostHalfEdgeMesh& hostMesh) const;
 
+    void RecalcAABB();
+
     void BuildHalfEdges();
-    void BuildVertexToHalfEdgeMapping();
     void RemoveIsolatedVertices();
 
     bool PickFace(const float3& rayOrigin, const float3& rayDir,int& outHitIndex, float& outHitT) const;
@@ -99,16 +113,12 @@ struct DeviceHalfEdgeMesh
     void LaplacianSmoothing(unsigned int iterations = 1, float lambda = 0.5f, bool fixBorderVertices = false);
     void RadiusLaplacianSmoothing(float radius = 0.3f, unsigned int iterations = 1, float lambda = 0.5f);
 
+    vector<cuAABB> GetAABBs();
+    vector<uint64_t> GetMortonCodes();
+
     __host__ __device__ static uint64_t PackEdge(unsigned int v0, unsigned int v1);
     __device__ static bool HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value);
     __device__ static bool HashMapFind(const HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int* outValue);
-
-    __host__ __device__
-        static bool RayTriangleIntersect(const float3& orig, const float3& dir,
-            const float3& v0, const float3& v1, const float3& v2,
-            float& t, float& u, float& v);
-    __device__ static void atomicMinF(float* addr, float val, int* idx, int myIdx);
-    __device__ static void atomicMinWithIndex(float* address, float val, int* idxAddress, int idx);
 
     __device__ static void GetOneRingVertices_Device(
             unsigned int v,
@@ -132,6 +142,8 @@ struct DeviceHalfEdgeMesh
         float radius);
 };
 
+__global__ void Kernel_DeviceHalfEdgeMesh_RecalcAABB(float3* positions, float3* min, float3* max, unsigned int numberOfPoints);
+
 __global__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
     const uint3* faces,
     unsigned int numberOfFaces,
@@ -151,6 +163,27 @@ __global__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdgeMapping(
     const HalfEdge* halfEdges,
     unsigned int* vertexToHalfEdge,
     unsigned int numberOfHalfEdges);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_CompactVertices(
+    unsigned int* vertexToHalfEdge,
+    unsigned int* vertexIndexMapping,
+    unsigned int* vertexIndexMappingIndex,
+    const float3* oldPositions,
+    const float3* oldNormals,
+    const float3* oldColors,
+    float3* newPositions,
+    float3* newNormals,
+    float3* newColors,
+    unsigned int numberOfPoints);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_RemapVertexToHalfEdge(
+    unsigned int* vertexToHalfEdge,
+    unsigned int* newVertexToHalfEdge,
+    unsigned int* vertexIndexMapping,
+    unsigned int numberOfPoints);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_RemapVertexIndexOfFacesAndHalfEdges(
+    uint3* faces, HalfEdge* halfEdges, unsigned int numberOfFaces, unsigned int* vertexIndexMapping);
 
 __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     float3* positions_in,

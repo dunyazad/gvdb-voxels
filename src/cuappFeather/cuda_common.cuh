@@ -4,11 +4,45 @@
 
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
+//#include <device_functions.h>
 #include <device_launch_parameters.h>
 #include <nvtx3/nvToolsExt.h>
 
 #include <cuda_vector_math.cuh>
 #include <marching_cubes_constants.cuh>
+
+// Vector containers
+#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
+
+// Algorithms
+#include <thrust/copy.h>
+#include <thrust/fill.h>
+#include <thrust/sort.h>
+#include <thrust/reduce.h>
+#include <thrust/transform.h>
+#include <thrust/for_each.h>
+#include <thrust/count.h>
+#include <thrust/unique.h>
+#include <thrust/remove.h>
+#include <thrust/scan.h>
+#include <thrust/gather.h>
+#include <thrust/scatter.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/pair.h>
+#include <thrust/tuple.h>
+#include <thrust/execution_policy.h>
+#include <thrust/functional.h>
+#include <thrust/sequence.h>
+#include <thrust/partition.h>
+#include <thrust/merge.h>
+#include <thrust/set_operations.h>
+#include <thrust/binary_search.h>
+
+
 
 #include <Serialization.hpp>
 
@@ -108,6 +142,161 @@ typedef double f64;
 #define CUDA_SYNC() cudaDeviceSynchronize();
 #endif
 
+#ifndef RAW_PTR
+#define RAW_PTR(x) (thrust::raw_pointer_cast((x).data()))
+#endif
+
 #ifndef PI
 #define PI 3.14159265358979323846
 #endif
+
+#ifdef __CUDACC__
+__device__ inline void atomicMinF(float* addr, float val)
+{
+    int* addr_as_i = reinterpret_cast<int*>(addr);
+    int old = *addr_as_i, assumed;
+    do
+    {
+        assumed = old;
+        float f = __int_as_float(assumed);
+        if (val >= f) break;
+        old = atomicCAS(addr_as_i, assumed, __float_as_int(val));
+    } while (old != assumed);
+}
+
+__device__ inline void atomicMinF(float* addr, float val, int* idx, int myIdx)
+{
+    int* intAddr = reinterpret_cast<int*>(addr);
+    int old = *intAddr, assumed;
+
+    do
+    {
+        assumed = old;
+        float oldVal = __int_as_float(assumed);
+
+        if (val >= oldVal) break;
+
+        old = atomicCAS(intAddr, assumed, __float_as_int(val));
+
+        if (old == assumed)
+        {
+            atomicExch(idx, myIdx);
+            break;
+        }
+    } while (true);
+}
+
+__device__ inline void atomicMaxF(float* addr, float val)
+{
+    int* addr_as_i = reinterpret_cast<int*>(addr);
+    int old = *addr_as_i, assumed;
+    do
+    {
+        assumed = old;
+        float f = __int_as_float(assumed);
+        if (val <= f) break;
+        old = atomicCAS(addr_as_i, assumed, __float_as_int(val));
+    } while (old != assumed);
+}
+
+__device__ inline void atomicMaxF(float* addr, float val, int* idx, int myIdx)
+{
+    int* intAddr = reinterpret_cast<int*>(addr);
+    int old = *intAddr, assumed;
+
+    do
+    {
+        assumed = old;
+        float oldVal = __int_as_float(assumed);
+
+        if (val <= oldVal) break;
+
+        old = atomicCAS(intAddr, assumed, __float_as_int(val));
+
+        if (old == assumed)
+        {
+            atomicExch(idx, myIdx);
+            break;
+        }
+    } while (true);
+}
+#endif
+
+__host__ __device__ inline bool RayTriangleIntersect(
+    const float3& orig, const float3& dir,
+    const float3& v0, const float3& v1, const float3& v2,
+    float& t, float& u, float& v)
+{
+    const float EPSILON = 1e-6f;
+    float3 edge1 = v1 - v0;
+    float3 edge2 = v2 - v0;
+    float3 h = cross(dir, edge2);
+    float a = dot(edge1, h);
+    if (fabs(a) < EPSILON) return false;
+    float f = 1.0f / a;
+    float3 s = orig - v0;
+    u = f * dot(s, h);
+    if (u < 0.0f || u > 1.0f) return false;
+    float3 q = cross(s, edge1);
+    v = f * dot(dir, q);
+    if (v < 0.0f || u + v > 1.0f) return false;
+    t = f * dot(edge2, q);
+    return t > EPSILON;
+}
+
+#pragma region Morton Code
+__host__ __device__ inline uint64_t Part1By2(uint32_t n)
+{
+    uint64_t x = n & 0x1FFFFF;
+    x = (x | x << 32) & 0x1F00000000FFFF;
+    x = (x | x << 16) & 0x1F0000FF0000FF;
+    x = (x | x << 8) & 0x100F00F00F00F00F;
+    x = (x | x << 4) & 0x10C30C30C30C30C3;
+    x = (x | x << 2) & 0x1249249249249249;
+    return x;
+}
+
+__host__ __device__ inline uint64_t EncodeMorton3D_21(uint32_t x, uint32_t y, uint32_t z)
+{
+    return (Part1By2(z) << 2) | (Part1By2(y) << 1) | (Part1By2(x));
+}
+
+__host__ __device__ inline uint32_t Compact1By2(uint64_t n)
+{
+    n &= 0x1249249249249249;
+    n = (n ^ (n >> 2)) & 0x10C30C30C30C30C3;
+    n = (n ^ (n >> 4)) & 0x100F00F00F00F00F;
+    n = (n ^ (n >> 8)) & 0x1F0000FF0000FF;
+    n = (n ^ (n >> 16)) & 0x1F00000000FFFF;
+    n = (n ^ (n >> 32)) & 0x1FFFFF;
+    return static_cast<uint32_t>(n);
+}
+
+__host__ __device__ inline void DecodeMorton3D_21(uint64_t code, uint32_t& x, uint32_t& y, uint32_t& z)
+{
+    x = Compact1By2(code >> 0);
+    y = Compact1By2(code >> 1);
+    z = Compact1By2(code >> 2);
+}
+
+__host__ __device__ inline uint64_t Float3ToMorton64(const float3& p, const float3& min_corner, float voxel_size)
+{
+    int3 idx;
+    idx.x = static_cast<int>((p.x - min_corner.x) / voxel_size);
+    idx.y = static_cast<int>((p.y - min_corner.y) / voxel_size);
+    idx.z = static_cast<int>((p.z - min_corner.z) / voxel_size);
+
+    return EncodeMorton3D_21(idx.x & 0x1FFFFF, idx.y & 0x1FFFFF, idx.z & 0x1FFFFF);
+}
+
+__host__ __device__ inline float3 Morton64ToFloat3(uint64_t code, const float3& min_corner, float voxel_size)
+{
+    uint32_t x, y, z;
+    DecodeMorton3D_21(code, x, y, z);
+    float3 p;
+    p.x = min_corner.x + x * voxel_size;
+    p.y = min_corner.y + y * voxel_size;
+    p.z = min_corner.z + z * voxel_size;
+    return p;
+}
+#pragma endregion

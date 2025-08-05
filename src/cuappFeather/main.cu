@@ -7,10 +7,7 @@
 #include <nvtx3/nvToolsExt.h>
 #pragma comment(lib, "nvapi64.lib")
 
-#include <cuda_runtime.h>
-#include <cuda_gl_interop.h>
-#include <device_launch_parameters.h>
-#include <nvtx3/nvToolsExt.h>
+#include <cuda_common.cuh>
 
 #include <iostream>
 #include <unordered_map>
@@ -159,6 +156,18 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
     }
 
     CUDA_TE(ProcessPointCloud);
+
+    //ThrustHostHalfEdgeMesh th_mesh;
+    //th_mesh.DeserializePLY("../../res/3D/HostHalfEdgeMesh_Normal.ply");
+
+    //ThrustDeviceHalfEdgeMesh td_mesh;
+    //td_mesh.CopyFromHost(th_mesh);
+
+    //td_mesh.BuildHalfEdges();
+
+    //th_mesh.CopyFromDevice(td_mesh);
+
+    //th_mesh.SerializePLY("../../res/3D/Result.ply");
 
     return result;
 }

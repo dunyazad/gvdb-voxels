@@ -9,6 +9,7 @@
     <CudaCompile Include="HalfEdgeMesh.cu" />
     <CudaCompile Include="BitVolume.cu" />
     <CudaCompile Include="VEFM.cu" />
+    <CudaCompile Include="ThrustHalfEdgeMesh.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\External\glad\src\glad.c" />
@@ -30,6 +31,8 @@
     <ClInclude Include="BitVolume.cuh" />
     <ClInclude Include="VEFM.cuh" />
     <ClInclude Include="HalfEdgeMeshInterop.h" />
+    <ClInclude Include="ThrustHalfEdgeMesh.cuh" />
+    <ClInclude Include="KdTree.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HashMap.hpp" />

@@ -19,7 +19,7 @@ struct Voxel
 	unsigned int count = 0;
 };
 
-struct VoxelHashEntry
+struct VoxelHashMapEntry
 {
 	VoxelKey key;
 	Voxel voxel;
@@ -27,7 +27,7 @@ struct VoxelHashEntry
 
 struct VoxelHashMapInfo
 {
-	VoxelHashEntry* entries = nullptr;
+	VoxelHashMapEntry* entries = nullptr;
 	size_t capacity = 1 << 24;
 	unsigned int maxProbe = 64;
 	float voxelSize = 0.1f;

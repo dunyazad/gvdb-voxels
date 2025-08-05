@@ -5,7 +5,7 @@ void VoxelHashMap::Initialize(float voxelSize, size_t capacity, unsigned int max
 	info.voxelSize = voxelSize;
 	info.capacity = capacity;
 	info.maxProbe = maxProbe;
-	cudaMalloc(&info.entries, sizeof(VoxelHashEntry) * info.capacity);
+	cudaMalloc(&info.entries, sizeof(VoxelHashMapEntry) * info.capacity);
 
 	LaunchKernel(Kernel_VoxelHashMap_Clear, (unsigned int)info.capacity, info);
 
@@ -413,7 +413,7 @@ __device__ Voxel* VoxelHashMap::GetVoxel(VoxelHashMapInfo& info, const int3& ind
 	for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 	{
 		size_t idx = (hashIdx + probe) % info.capacity;
-		VoxelHashEntry& entry = info.entries[idx];
+		VoxelHashMapEntry& entry = info.entries[idx];
 
 		if (entry.key == key)
 		{
@@ -439,7 +439,7 @@ __device__ Voxel* VoxelHashMap::InsertVoxel(
 	for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 	{
 		size_t slot = (hashIdx + probe) % info.capacity;
-		VoxelHashEntry* entry = &info.entries[slot];
+		VoxelHashMapEntry* entry = &info.entries[slot];
 
 		VoxelKey old = atomicCAS(
 			reinterpret_cast<unsigned long long*>(&entry->key),
@@ -787,7 +787,7 @@ __global__ void Kernel_VoxelHashMap_Occupy(
 	for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 	{
 		size_t slot = (h + probe) % info.capacity;
-		VoxelHashEntry* entry = &info.entries[slot];
+		VoxelHashMapEntry* entry = &info.entries[slot];
 
 		VoxelKey old = atomicCAS(reinterpret_cast<unsigned long long*>(&entry->key), EMPTY_KEY, key);
 
@@ -1490,7 +1490,7 @@ __global__ void Kernel_VoxelHashMap_Dilation(
 					for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 					{
 						size_t idx = (hashIdx + probe) % info.capacity;
-						VoxelHashEntry* entry = &info.entries[idx];
+						VoxelHashMapEntry* entry = &info.entries[idx];
 
 						VoxelKey old = atomicCAS(
 							reinterpret_cast<unsigned long long*>(&entry->key),

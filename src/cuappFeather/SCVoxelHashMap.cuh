@@ -21,7 +21,7 @@ struct SCVoxel
 	uint3 zeroCrossingPointIndex = make_uint3(UINT32_MAX);
 };
 
-struct SCVoxelHashEntry
+struct SCVoxelHashMapEntry
 {
 	SCVoxelKey key;
 	SCVoxel voxel;
@@ -29,7 +29,7 @@ struct SCVoxelHashEntry
 
 struct SCVoxelHashMapInfo
 {
-	SCVoxelHashEntry* entries = nullptr;
+	SCVoxelHashMapEntry* entries = nullptr;
 	size_t capacity = 1 << 24;
 	unsigned int maxProbe = 64;
 	float voxelSize = 0.1f;

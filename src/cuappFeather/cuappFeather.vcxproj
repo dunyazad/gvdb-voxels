@@ -22,6 +22,7 @@
     <CudaCompile Include="Mesh.cu" />
     <CudaCompile Include="PointCloud.cu" />
     <CudaCompile Include="SCVoxelHashMap.cu" />
+    <CudaCompile Include="ThrustHalfEdgeMesh.cu" />
     <CudaCompile Include="VEFM.cu" />
     <CudaCompile Include="VoxelHashMap.cu" />
   </ItemGroup>
@@ -32,12 +33,14 @@
     <ClInclude Include="cuda_vector_math.cuh" />
     <ClInclude Include="DenseGrid.hpp" />
     <ClInclude Include="HalfEdgeMesh.cuh" />
+    <ClInclude Include="KdTree.hpp" />
     <ClInclude Include="main.cuh" />
     <ClInclude Include="marching_cubes_constants.cuh" />
     <ClInclude Include="Mesh.cuh" />
     <ClInclude Include="Octree.cuh" />
     <ClInclude Include="PointCloud.cuh" />
     <ClInclude Include="SCVoxelHashMap.cuh" />
+    <ClInclude Include="ThrustHalfEdgeMesh.cuh" />
     <ClInclude Include="VEFM.cuh" />
     <ClInclude Include="VoxelHashMap.cuh" />
   </ItemGroup>
@@ -117,7 +120,8 @@
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <CodeGeneration>compute_80,sm_80</CodeGeneration>
-      <AdditionalOptions>--std=c++17 --expt-relaxed-constexpr -Xcompiler /wd4819 -G %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>--std=c++17 --expt-relaxed-constexpr -Xcompiler /wd4819 -G --extended-lambda
+ %(AdditionalOptions)</AdditionalOptions>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -141,7 +145,8 @@
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <CodeGeneration>compute_80,sm_80</CodeGeneration>
-      <AdditionalOptions>--std=c++17 --expt-relaxed-constexpr -Xcompiler /wd4819 -G %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>--std=c++17 --expt-relaxed-constexpr -Xcompiler /wd4819 -G --extended-lambda
+ %(AdditionalOptions)</AdditionalOptions>
     </CudaCompile>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

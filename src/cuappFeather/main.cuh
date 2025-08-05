@@ -18,6 +18,7 @@
 #include <HalfEdgeMesh.cuh>
 #include <VEFM.cuh>
 #include <HalfEdgeMeshInterop.h>
+#include <ThrustHalfEdgeMesh.cuh>
 
 #include <Eigen/Core>
 #include <Eigen/Dense>

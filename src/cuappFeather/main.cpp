@@ -340,6 +340,9 @@ int main(int argc, char** argv)
 				//cudaInstance.d_mesh.RadiusLaplacianSmoothing(0.5f, 10, 0.05f);
 				cudaInstance.d_mesh.LaplacianSmoothing(5, 1.0f, true);
 				cudaInstance.interop.UploadFromDevice(cudaInstance.d_mesh);
+
+				VD::Clear("AABB");
+				VD::AddWiredBox("AABB", { {XYZ(cudaInstance.d_mesh.min)}, {XYZ(cudaInstance.d_mesh.max)} }, Color::blue());
 			}
 			else if (GLFW_KEY_PAGE_DOWN == event.keyCode)
 			{
@@ -364,6 +367,37 @@ int main(int argc, char** argv)
 
 						VD::AddLine("BorderLines", { XYZ(v0) }, { XYZ(v1) }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
 					}
+				}
+			}
+			else if (GLFW_KEY_INSERT == event.keyCode)
+			{
+				if (event.action == 1)
+				{
+					static unsigned int count = 0;
+					Feather.RemoveEventCallback<FrameEvent>(appMain);
+					count = 0;
+
+					static vector<cuAABB> aabbs;
+					if (aabbs.empty())
+					{
+						aabbs = cudaInstance.d_mesh.GetAABBs();
+					}
+					Feather.CreateEventCallback<FrameEvent>(appMain, [&](Entity entity, const FrameEvent& event) {
+						for (size_t i = 0; i < 10000; i++)
+						{
+							if (count < aabbs.size())
+							{
+								auto& aabb = aabbs[count++];
+								VD::AddWiredBox("temp", { {XYZ(aabb.min)}, {XYZ(aabb.max)} }, Color::green());
+							}
+							if (count == aabbs.size())
+							{
+								aabbs.clear();
+								Feather.RemoveEventCallback<FrameEvent>(appMain);
+								break;
+							}
+						}
+						});
 				}
 			}
 			});
@@ -789,16 +823,16 @@ int main(int argc, char** argv)
 			float Y = get<1>(M);
 			float Z = get<2>(M);
 
-			auto width = w->GetWidth();
-			auto height = w->GetHeight();
+			//auto width = w->GetWidth();
+			//auto height = w->GetHeight();
 
-			Entity cam = Feather.GetEntityByName("Camera");
-			auto pcam = Feather.GetComponent<PerspectiveCamera>(cam);
+			//Entity cam = Feather.GetEntityByName("Camera");
+			//auto pcam = Feather.GetComponent<PerspectiveCamera>(cam);
 
-			auto projection = pcam->GetProjectionMatrix();
-			auto view = pcam->GetViewMatrix();
+			//auto projection = pcam->GetProjectionMatrix();
+			//auto view = pcam->GetViewMatrix();
 
-			VD::AddWiredBox("AABB", { x, y, z }, { X, Y, Z }, Color::blue());
+			VD::AddWiredBox("AABB", { { x, y, z }, { X, Y, Z } }, Color::blue());
 		}
 		});
 

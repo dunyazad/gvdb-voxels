@@ -5,7 +5,7 @@ void SCVoxelHashMap::Initialize(float voxelSize, size_t capacity, unsigned int m
 	info.voxelSize = voxelSize;
 	info.capacity = capacity;
 	info.maxProbe = maxProbe;
-	cudaMalloc(&info.entries, sizeof(SCVoxelHashEntry) * info.capacity);
+	cudaMalloc(&info.entries, sizeof(SCVoxelHashMapEntry) * info.capacity);
 
 	LaunchKernel(Kernel_SCVoxelHashMap_Clear, (unsigned int)info.capacity, info);
 
@@ -255,7 +255,7 @@ __device__ SCVoxel* SCVoxelHashMap::GetVoxel(SCVoxelHashMapInfo& info, const int
 	for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 	{
 		size_t idx = (hashIdx + probe) % info.capacity;
-		SCVoxelHashEntry& entry = info.entries[idx];
+		SCVoxelHashMapEntry& entry = info.entries[idx];
 
 		if (entry.key == key)
 		{
@@ -279,7 +279,7 @@ __device__ SCVoxel* SCVoxelHashMap::InsertVoxel(
 	for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 	{
 		size_t slot = (hashIdx + probe) % info.capacity;
-		SCVoxelHashEntry* entry = &info.entries[slot];
+		SCVoxelHashMapEntry* entry = &info.entries[slot];
 
 		SCVoxelKey old = atomicCAS(reinterpret_cast<unsigned long long*>(&entry->key), EMPTY_KEY, key);
 
