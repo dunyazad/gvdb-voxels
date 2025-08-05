@@ -995,47 +995,50 @@ vector<cuAABB> DeviceHalfEdgeMesh::GetAABBs()
 }
 
 __global__ void Kernel_DeviceHalfEdgeMesh_GetMortonCodes(
-    float3* positions, uint3* faces, uint64_t* mortonCodes, unsigned int numberOfPoints, unsigned int numberOfFaces)
+    const float3* positions,
+    const uint3* faces,
+    uint64_t* mortonCodes,
+    unsigned int numberOfPoints,
+    unsigned int numberOfFaces,
+    float3 min_corner,
+    float voxel_size)
 {
-    unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (threadid >= numberOfFaces) return;
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= numberOfFaces) return;
 
-    auto& f = faces[threadid];
+    uint3 f = faces[tid];
+    if (f.x >= numberOfPoints || f.y >= numberOfPoints || f.z >= numberOfPoints)
+        return;
 
-    if (f.x >= numberOfPoints) { printf("f.x >= nop"); return; }
-    if (f.y >= numberOfPoints) { printf("f.y >= nop"); return; }
-    if (f.z >= numberOfPoints) { printf("f.z >= nop"); return; }
+    float3 p0 = positions[f.x];
+    float3 p1 = positions[f.y];
+    float3 p2 = positions[f.z];
+    float3 centroid = (p0 + p1 + p2) / 3.0f;
 
-    auto& p0 = positions[f.x];
-    auto& p1 = positions[f.y];
-    auto& p2 = positions[f.z];
-
-    auto centroid = (p0 + p1 + p2) / 3.0f;
-
-    auto min = make_float3(
-        fminf(p0.x, fminf(p1.x, p2.x)),
-        fminf(p0.y, fminf(p1.y, p2.y)),
-        fminf(p0.z, fminf(p1.z, p2.z))
-    );
-
-    //mortonCodes[threadid] = Float3ToMorton64(centroid);
+    mortonCodes[tid] = Float3ToMorton64(centroid, min_corner, voxel_size);
 }
 
 vector<uint64_t> DeviceHalfEdgeMesh::GetMortonCodes()
 {
-    vector<uint64_t> result(numberOfFaces);
+    float3 aabb_extent = max - min;
+    float max_extent = fmaxf(aabb_extent.x, fmaxf(aabb_extent.y, aabb_extent.z));
+    float voxelSize = max_extent / ((1 << 21) - 2); // safety margin
 
-    //uint64_t* mortonCodes = nullptr;
-    //CUDA_MALLOC(&mortonCodes, sizeof(cuAABB) * numberOfFaces);
+    uint64_t* d_mortonCodes = nullptr;
+    CUDA_MALLOC(&d_mortonCodes, sizeof(uint64_t) * numberOfFaces);
 
-    //LaunchKernel(Kernel_DeviceHalfEdgeMesh_GetAABB, numberOfFaces,
-    //    positions, faces, aabbs, numberOfPoints, numberOfFaces);
+    LaunchKernel(
+        Kernel_DeviceHalfEdgeMesh_GetMortonCodes,
+        numberOfFaces,
+        positions, faces, d_mortonCodes, numberOfPoints, numberOfFaces,
+        min, voxelSize
+    );
 
-    //CUDA_COPY_D2H(result.data(), aabbs, sizeof(cuAABB) * numberOfFaces);
-    //CUDA_SYNC();
+    std::vector<uint64_t> result(numberOfFaces);
+    CUDA_COPY_D2H(result.data(), d_mortonCodes, sizeof(uint64_t) * numberOfFaces);
 
-    //CUDA_FREE(aabbs);
-
+    CUDA_FREE(d_mortonCodes);
+    CUDA_SYNC();
     return result;
 }
 

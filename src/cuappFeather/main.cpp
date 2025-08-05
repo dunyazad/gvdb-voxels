@@ -284,10 +284,6 @@ void ApplyHalfEdgeMeshToEntity(Entity entity, const DeviceHalfEdgeMesh& d_mesh)
 	h_mesh.Terminate();
 }
 
-#pragma once
-#include <algorithm>
-#include <cmath>
-
 int main(int argc, char** argv)
 {
 	ForceGPUPerformance();
@@ -372,27 +368,61 @@ int main(int argc, char** argv)
 			else if (GLFW_KEY_INSERT == event.keyCode)
 			{
 				if (event.action == 1)
+					/*
+					{ // AABBs
+						static unsigned int count = 0;
+						Feather.RemoveEventCallback<FrameEvent>(appMain);
+						count = 0;
+
+						static vector<cuAABB> aabbs;
+						if (aabbs.empty())
+						{
+							aabbs = cudaInstance.d_mesh.GetAABBs();
+						}
+						Feather.CreateEventCallback<FrameEvent>(appMain, [&](Entity entity, const FrameEvent& event) {
+							for (size_t i = 0; i < 10000; i++)
+							{
+								if (count < aabbs.size())
+								{
+									auto& aabb = aabbs[count++];
+									VD::AddWiredBox("temp", { {XYZ(aabb.min)}, {XYZ(aabb.max)} }, Color::green());
+								}
+								if (count == aabbs.size())
+								{
+									aabbs.clear();
+									Feather.RemoveEventCallback<FrameEvent>(appMain);
+									break;
+								}
+							}
+							});
+					}
+					*/
 				{
 					static unsigned int count = 0;
 					Feather.RemoveEventCallback<FrameEvent>(appMain);
 					count = 0;
 
-					static vector<cuAABB> aabbs;
-					if (aabbs.empty())
+					static vector<uint64_t> mortonCodes;
+					if (mortonCodes.empty())
 					{
-						aabbs = cudaInstance.d_mesh.GetAABBs();
+						mortonCodes = cudaInstance.d_mesh.GetMortonCodes();
 					}
 					Feather.CreateEventCallback<FrameEvent>(appMain, [&](Entity entity, const FrameEvent& event) {
+						float3 aabb_extent = cudaInstance.d_mesh.max - cudaInstance.d_mesh.min;
+						float max_extent = fmaxf(aabb_extent.x, fmaxf(aabb_extent.y, aabb_extent.z));
+						float voxelSize = max_extent / ((1 << 21) - 2); // safety margin
+
 						for (size_t i = 0; i < 10000; i++)
 						{
-							if (count < aabbs.size())
+							if (count < mortonCodes.size())
 							{
-								auto& aabb = aabbs[count++];
-								VD::AddWiredBox("temp", { {XYZ(aabb.min)}, {XYZ(aabb.max)} }, Color::green());
+								auto mortonCode = mortonCodes[count++];
+								auto position = Morton64ToFloat3(mortonCode, cudaInstance.d_mesh.min, voxelSize);
+								VD::AddWiredBox("temp", { XYZ(position) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(voxelSize * 100.0f), Color::green());
 							}
-							if (count == aabbs.size())
+							if (count == mortonCodes.size())
 							{
-								aabbs.clear();
+								mortonCodes.clear();
 								Feather.RemoveEventCallback<FrameEvent>(appMain);
 								break;
 							}
