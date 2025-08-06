@@ -16,7 +16,7 @@ using VD = VisualDebugging;
 #include "nvapi510/include/nvapi.h"
 #include "nvapi510/include/NvApiDriverSettings.h"
 
-CUDAInstance cudaInstance;
+CUDAInstance cuInstance;
 
 glm::vec3 initialPosition;
 unsigned int halfEdgeIndex = 2000;
@@ -237,13 +237,13 @@ void ApplyHalfEdgeMeshToEntity(Entity entity, const HostHalfEdgeMesh& h_mesh)
 		renderable->Clear();
 	}
 
-	printf("numPoints: %d, numFaces: %d\n", cudaInstance.h_mesh.numberOfPoints, cudaInstance.h_mesh.numberOfFaces);
-	for (unsigned int i = 0; i < cudaInstance.h_mesh.numberOfFaces; ++i)
+	printf("numPoints: %d, numFaces: %d\n", cuInstance.h_mesh.numberOfPoints, cuInstance.h_mesh.numberOfFaces);
+	for (unsigned int i = 0; i < cuInstance.h_mesh.numberOfFaces; ++i)
 	{
-		auto tri = cudaInstance.h_mesh.faces[i];
-		if (tri.x >= cudaInstance.h_mesh.numberOfPoints ||
-			tri.y >= cudaInstance.h_mesh.numberOfPoints ||
-			tri.z >= cudaInstance.h_mesh.numberOfPoints)
+		auto tri = cuInstance.h_mesh.faces[i];
+		if (tri.x >= cuInstance.h_mesh.numberOfPoints ||
+			tri.y >= cuInstance.h_mesh.numberOfPoints ||
+			tri.z >= cuInstance.h_mesh.numberOfPoints)
 		{
 			printf("Invalid face[%u]: %u %u %u\n", i, tri.x, tri.y, tri.z);
 		}
@@ -312,9 +312,9 @@ int main(int argc, char** argv)
 			}
 			else if (GLFW_KEY_F1 == event.keyCode)
 			{
-				for (unsigned int i = 0; i < cudaInstance.h_mesh.numberOfPoints; ++i)
+				for (unsigned int i = 0; i < cuInstance.h_mesh.numberOfPoints; ++i)
 				{
-					auto position = glm::vec3(XYZ(cudaInstance.h_mesh.positions[i]));
+					auto position = glm::vec3(XYZ(cuInstance.h_mesh.positions[i]));
 
 					stringstream ss;
 					ss << i;
@@ -334,22 +334,22 @@ int main(int argc, char** argv)
 			else if (GLFW_KEY_SPACE == event.keyCode)
 			{
 				//cudaInstance.d_mesh.RadiusLaplacianSmoothing(0.5f, 10, 0.05f);
-				cudaInstance.d_mesh.LaplacianSmoothing(5, 1.0f, true);
-				cudaInstance.interop.UploadFromDevice(cudaInstance.d_mesh);
+				cuInstance.d_mesh.LaplacianSmoothing(5, 1.0f, true);
+				cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
 
 				VD::Clear("AABB");
-				VD::AddWiredBox("AABB", { {XYZ(cudaInstance.d_mesh.min)}, {XYZ(cudaInstance.d_mesh.max)} }, Color::blue());
+				VD::AddWiredBox("AABB", { {XYZ(cuInstance.d_mesh.min)}, {XYZ(cuInstance.d_mesh.max)} }, Color::blue());
 			}
 			else if (GLFW_KEY_PAGE_DOWN == event.keyCode)
 			{
-				cudaInstance.h_mesh.CopyFromDevice(cudaInstance.d_mesh);
-				cudaInstance.h_mesh.SerializePLY("../../res/3D/MarchingCubes.ply");
+				cuInstance.h_mesh.CopyFromDevice(cuInstance.d_mesh);
+				cuInstance.h_mesh.SerializePLY("../../res/3D/MarchingCubes.ply");
 			}
 			else if (GLFW_KEY_ENTER == event.keyCode)
 			{
 				printf("Finding Border\n");
 
-				auto& mesh = cudaInstance.h_mesh;
+				auto& mesh = cuInstance.h_mesh;
 
 				for (size_t i = 0; i < mesh.numberOfFaces * 3; i++)
 				{
@@ -405,11 +405,11 @@ int main(int argc, char** argv)
 					static vector<uint64_t> mortonCodes;
 					if (mortonCodes.empty())
 					{
-						mortonCodes = cudaInstance.d_mesh.GetMortonCodes();
+						mortonCodes = cuInstance.d_mesh.GetMortonCodes();
 						std::sort(mortonCodes.begin(), mortonCodes.end());
 					}
 					Feather.CreateEventCallback<FrameEvent>(appMain, [&](Entity entity, const FrameEvent& event) {
-						float3 aabb_extent = cudaInstance.d_mesh.max - cudaInstance.d_mesh.min;
+						float3 aabb_extent = cuInstance.d_mesh.max - cuInstance.d_mesh.min;
 						float max_extent = fmaxf(aabb_extent.x, fmaxf(aabb_extent.y, aabb_extent.z));
 						float voxelSize = max_extent / ((1 << 21) - 2); // safety margin
 
@@ -418,7 +418,7 @@ int main(int argc, char** argv)
 							if (count < mortonCodes.size())
 							{
 								auto mortonCode = mortonCodes[count++];
-								auto position = Morton64ToFloat3(mortonCode, cudaInstance.d_mesh.min, voxelSize);
+								auto position = Morton64ToFloat3(mortonCode, cuInstance.d_mesh.min, voxelSize);
 								VD::AddWiredBox("temp", { XYZ(position) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(voxelSize * 100.0f), Color::green());
 							}
 							if (count == mortonCodes.size())
@@ -435,14 +435,62 @@ int main(int argc, char** argv)
 			{
 				if (event.action == 1)
 				{
-					vector<cuAABB> result;
-					cuAABB mMaabbs;
+					cuInstance.d_mesh.BuildFaceNodeHashMap();
+					////////cudaInstance.d_mesh.DebugPrintFaceNodeHashMap();
+					//////auto unlinked = cuInstance.d_mesh.FindUnlinkedFaceNodes();
+					//////printf("unlinked : %d\n", unlinked.size());
 
-					cudaInstance.d_mesh.GetAABBs(result, mMaabbs);
+					//////vector<float3> positions(cuInstance.d_mesh.numberOfPoints);
+					//////vector<uint3> faces(cuInstance.d_mesh.numberOfFaces);
+					//////CUDA_COPY_D2H(positions.data(), cuInstance.d_mesh.positions, sizeof(float3) * cuInstance.d_mesh.numberOfPoints);
+					//////CUDA_COPY_D2H(faces.data(), cuInstance.d_mesh.faces, sizeof(uint3)* cuInstance.d_mesh.numberOfFaces);
+					//////CUDA_SYNC();
 
-					printf("min : %f, %f, %f\n", XYZ(mMaabbs.min));
-					printf("max : %f, %f, %f\n", XYZ(mMaabbs.max));
-					printf("len : %f, %f, %f\n", XYZ(mMaabbs.max - mMaabbs.min));
+					//////for (auto& i : unlinked)
+					//////{
+					//////	auto& f = faces[i];
+					//////	auto& p0 = positions[f.x];
+					//////	auto& p1 = positions[f.y];
+					//////	auto& p2 = positions[f.z];
+
+					//////	VD::AddTriangle("unlinked", { XYZ(p0) }, { XYZ(p1) }, { XYZ(p2) }, Color::red());
+
+					//////	//printf("[%d] %d, %d, %d\n", i, f.x, f.y, f.z);
+					//////	//printf("[%d] %.4f, %.4f, %.4f - %.4f, %.4f, %.4f - %.4f, %.4f, %.4f\n", i, XYZ(p0), XYZ(p1), XYZ(p2));
+					//////}
+
+					////////auto result = cuInstance.d_mesh.GetFaceNodePositions();
+					////////for (auto& p : result)
+					////////{
+					////////	VD::AddWiredBox("HashMap", { XYZ(p) }, { 0.0f, 0.1f, 0.0f }, { 0.1f, 0.1f, 0.1f }, Color::red());
+					////////}
+
+
+					vector<float3> pcpositions(cuInstance.d_input.numberOfPoints);
+					vector<float3> positions(cuInstance.d_mesh.numberOfPoints);
+					vector<uint3> faces(cuInstance.d_mesh.numberOfFaces);
+					CUDA_COPY_D2H(pcpositions.data(), cuInstance.d_input.positions, sizeof(float3)* cuInstance.d_input.numberOfPoints);
+					CUDA_COPY_D2H(positions.data(), cuInstance.d_mesh.positions, sizeof(float3)* cuInstance.d_mesh.numberOfPoints);
+					CUDA_COPY_D2H(faces.data(), cuInstance.d_mesh.faces, sizeof(uint3) * cuInstance.d_mesh.numberOfFaces);
+					CUDA_SYNC();
+					auto indices = cuInstance.d_mesh.FindNearestTriangleIndices(cuInstance.d_input.positions, cuInstance.d_input.numberOfPoints);
+					printf("indices : %d\n", indices.size());
+					for (size_t i = 0; i < cuInstance.d_input.numberOfPoints; i++)
+					{
+						unsigned int triIdx = indices[i];
+						if (triIdx == UINT32_MAX)
+							continue; // 혹은 Color::gray() 등으로 표기
+
+						auto& f = faces[triIdx];
+						auto& p0 = positions[f.x];
+						auto& p1 = positions[f.y];
+						auto& p2 = positions[f.z];
+						auto centroid = (p0 + p1 + p2) / 3.0f;
+						auto& p = pcpositions[i];
+
+						VD::AddBox("pc", { XYZ(p) }, { 0.0f, 0.1f, 0.0f }, glm::vec3(0.005f), Color::white());
+						VD::AddLine("Nearest Triangles", { XYZ(p) }, { XYZ(centroid) }, Color::red());
+					}
 				}
 			}
 			});
@@ -558,15 +606,15 @@ int main(int argc, char** argv)
 				}
 				*/
 
-				if (cudaInstance.d_mesh.PickFace(
+				if (cuInstance.d_mesh.PickFace(
 					make_float3(ray.origin.x, ray.origin.y, ray.origin.z),
 					make_float3(ray.direction.x, ray.direction.y, ray.direction.z),
 					hitIndex, outHit))
 				{
-					auto& f = cudaInstance.h_mesh.faces[hitIndex];
-					auto& p0 = cudaInstance.h_mesh.positions[f.x];
-					auto& p1 = cudaInstance.h_mesh.positions[f.y];
-					auto& p2 = cudaInstance.h_mesh.positions[f.z];
+					auto& f = cuInstance.h_mesh.faces[hitIndex];
+					auto& p0 = cuInstance.h_mesh.positions[f.x];
+					auto& p1 = cuInstance.h_mesh.positions[f.y];
+					auto& p2 = cuInstance.h_mesh.positions[f.z];
 
 					auto v0 = glm::vec3(XYZ(p0));
 					auto v1 = glm::vec3(XYZ(p1));
@@ -589,57 +637,57 @@ int main(int argc, char** argv)
 						camera->SetEye(hitPosition + (-ray.direction) * manipulator->GetRadius());
 					}
 
-					auto d0 = glm::distance2(hitPosition, v0);
-					auto d1 = glm::distance2(hitPosition, v1);
-					auto d2 = glm::distance2(hitPosition, v2);
-					unsigned int vi = -1;
-					glm::vec3 nearest = v0;
-					glm::vec3 nearestNormal = v0;
-					if (d0 < d1 && d0 < d2)
-					{
-						nearest = v0;
-						nearestNormal = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.x]));
-						vi = f.x;
-					}
-					else if (d1 < d0 && d1 < d2)
-					{
-						nearest = v1;
-						nearestNormal = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.y]));
-						vi = f.y;
-					}
-					else if (d2 < d0 && d2 < d1)
-					{
-						nearest = v2;
-						nearestNormal = glm::vec3(XYZ(cudaInstance.h_mesh.normals[f.z]));
-						vi = f.z;
-					}
+					//auto d0 = glm::distance2(hitPosition, v0);
+					//auto d1 = glm::distance2(hitPosition, v1);
+					//auto d2 = glm::distance2(hitPosition, v2);
+					//unsigned int vi = -1;
+					//glm::vec3 nearest = v0;
+					//glm::vec3 nearestNormal = v0;
+					//if (d0 < d1 && d0 < d2)
+					//{
+					//	nearest = v0;
+					//	nearestNormal = glm::vec3(XYZ(cuInstance.h_mesh.normals[f.x]));
+					//	vi = f.x;
+					//}
+					//else if (d1 < d0 && d1 < d2)
+					//{
+					//	nearest = v1;
+					//	nearestNormal = glm::vec3(XYZ(cuInstance.h_mesh.normals[f.y]));
+					//	vi = f.y;
+					//}
+					//else if (d2 < d0 && d2 < d1)
+					//{
+					//	nearest = v2;
+					//	nearestNormal = glm::vec3(XYZ(cuInstance.h_mesh.normals[f.z]));
+					//	vi = f.z;
+					//}
 
-					VD::AddWiredBox("Nearest", nearest, nearestNormal, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
+					//VD::AddWiredBox("Nearest", nearest, nearestNormal, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
 
 
-					printf("[d_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
+					//printf("[d_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
 
-					printf("OneRing Center : %d\n", vi);
+					//printf("OneRing Center : %d\n", vi);
 
-					float radius = 1.0f;
+					//float radius = 1.0f;
 
-					//auto vis = cudaInstance.d_mesh.GetOneRingVertices(vi);
-					auto vis = cudaInstance.d_mesh.GetVerticesInRadius(vi, radius);
-					for (auto& vi : vis)
-					{
-						printf("%d, ", vi);
-						glm::vec3 position = glm::vec3(XYZ(cudaInstance.h_mesh.positions[vi]));
-						VD::AddWiredBox("OneRing", position, normal, { 0.025f, 0.025, 0.025 }, Color::green());
+					////auto vis = cudaInstance.d_mesh.GetOneRingVertices(vi);
+					//auto vis = cuInstance.d_mesh.GetVerticesInRadius(vi, radius);
+					//for (auto& vi : vis)
+					//{
+					//	printf("%d, ", vi);
+					//	glm::vec3 position = glm::vec3(XYZ(cuInstance.h_mesh.positions[vi]));
+					//	VD::AddWiredBox("OneRing", position, normal, { 0.025f, 0.025, 0.025 }, Color::green());
 
-						stringstream ss;
-						ss << vi;
-						//VD::AddText("OneRingVertices", ss.str(), position, Color::white());
-					}
-					printf("\n");
-					VD::AddSphere("Range", nearest, nearestNormal, radius, glm::vec4(1.0f, 1.0f, 1.0f, 0.3f));
+					//	stringstream ss;
+					//	ss << vi;
+					//	//VD::AddText("OneRingVertices", ss.str(), position, Color::white());
+					//}
+					//printf("\n");
+					//VD::AddSphere("Range", nearest, nearestNormal, radius, glm::vec4(1.0f, 1.0f, 1.0f, 0.3f));
 
-					//cudaInstance.d_mesh.RadiusLaplacianSmoothing(radius, 1);
-					cudaInstance.interop.UploadFromDevice(cudaInstance.d_mesh);
+					////cudaInstance.d_mesh.RadiusLaplacianSmoothing(radius, 1);
+					//cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
 				}
 			}
 			});
@@ -798,19 +846,19 @@ int main(int argc, char** argv)
 				return (seed & 0xFFFFFF) / static_cast<float>(0xFFFFFF);
 			};
 
-			auto result = cudaInstance.ProcessPointCloud(h_pointCloud);
+			auto result = cuInstance.ProcessPointCloud(h_pointCloud);
 			//ApplyPointCloudToEntity(entity, result);
 
 			auto meshEntity = Feather.CreateEntity("MarchingCubesMesh");
 			//ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
 			auto meshRenderable = Feather.CreateComponent<Renderable>(meshEntity);
 			meshRenderable->Initialize(Renderable::GeometryMode::Triangles);
-			cudaInstance.interop.Initialize(meshRenderable);
+			cuInstance.interop.Initialize(meshRenderable);
 			meshRenderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Default.vs"), File("../../res/Shaders/Default.fs")));
 			meshRenderable->AddShader(Feather.CreateShader("TwoSide", File("../../res/Shaders/TwoSide.vs"), File("../../res/Shaders/TwoSide.fs")));
 			meshRenderable->AddShader(Feather.CreateShader("Flat", File("../../res/Shaders/Flat.vs"), File("../../res/Shaders/Flat.gs"), File("../../res/Shaders/Flat.fs")));
 			meshRenderable->SetActiveShaderIndex(0);
-			cudaInstance.interop.UploadFromDevice(cudaInstance.d_mesh);
+			cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
 
 			printf("meshEntity : %d\n", meshEntity);
 

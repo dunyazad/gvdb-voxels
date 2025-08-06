@@ -2,6 +2,7 @@
 
 #include <cuda_common.cuh>
 #include <HashMap.hpp>
+#include <VoxelKey.hpp>
 
 struct cuAABB
 {
@@ -25,14 +26,16 @@ struct HalfEdgeFace
 struct FaceNode
 {
     unsigned int faceIndex = UINT32_MAX;
-    unsigned int faceNodeIndex = UINT32_MAX;
+    unsigned int nextNodeIndex = UINT32_MAX;
 };
 
 struct FaceNodeHashMapEntry
 {
+    VoxelKey key = UINT64_MAX;
     unsigned int length = 0;
     unsigned int headIndex = UINT32_MAX;
     unsigned int tailIndex = UINT32_MAX;
+    int lock = 0;
 };
 
 struct HostHalfEdgeMesh;
@@ -55,8 +58,6 @@ struct HostHalfEdgeMesh
     HalfEdgeFace* halfEdgeFaces = nullptr;
     unsigned int* vertexToHalfEdge = nullptr;
 
-    HashMap<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap;
-
     HostHalfEdgeMesh();
     HostHalfEdgeMesh(const HostHalfEdgeMesh& other);
     HostHalfEdgeMesh& operator=(const HostHalfEdgeMesh& other);
@@ -77,8 +78,6 @@ struct HostHalfEdgeMesh
     
     void BuildHalfEdges();
     void BuildVertexToHalfEdgeMapping();
-
-    void BuildFaceNodeHashMap();
 
     bool SerializePLY(const string& filename, bool useAlpha = false);
     bool DeserializePLY(const string& filename);
@@ -105,6 +104,9 @@ struct DeviceHalfEdgeMesh
     HalfEdgeFace* halfEdgeFaces = nullptr;
     unsigned int* vertexToHalfEdge = nullptr;
 
+    HashMap<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap;
+    FaceNode* faceNodes = nullptr;
+
     DeviceHalfEdgeMesh();
     DeviceHalfEdgeMesh(const HostHalfEdgeMesh& other);
     DeviceHalfEdgeMesh& operator=(const HostHalfEdgeMesh& other);
@@ -121,6 +123,12 @@ struct DeviceHalfEdgeMesh
 
     void BuildHalfEdges();
     void RemoveIsolatedVertices();
+
+    void BuildFaceNodeHashMap();
+    vector<float3> GetFaceNodePositions();
+    void DebugPrintFaceNodeHashMap();
+    std::vector<unsigned int> FindUnlinkedFaceNodes();
+    std::vector<unsigned int> FindNearestTriangleIndices(float3* d_positions, unsigned int numberOfInputPoints);
 
     bool PickFace(const float3& rayOrigin, const float3& rayDir,int& outHitIndex, float& outHitT) const;
 

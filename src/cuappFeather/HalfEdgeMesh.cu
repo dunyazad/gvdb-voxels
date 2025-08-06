@@ -255,11 +255,6 @@ void HostHalfEdgeMesh::BuildVertexToHalfEdgeMapping()
     }
 }
 
-void HostHalfEdgeMesh::BuildFaceNodeHashMap()
-{
-
-}
-
 bool HostHalfEdgeMesh::SerializePLY(const std::string& filename, bool useAlpha)
 {
     PLYFormat ply;
@@ -736,6 +731,389 @@ void DeviceHalfEdgeMesh::RemoveIsolatedVertices()
     CUDA_FREE(vertexIndexMappingIndex);
 
     RecalcAABB();
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap(
+    HashMapInfo<uint64_t, FaceNodeHashMapEntry> info,
+    float3* positions,
+    uint3* faces,
+    FaceNode* faceNodes,
+    float voxelSize,
+    unsigned int numberOfFaces,
+    unsigned int* d_numDropped)
+{
+    unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadid >= numberOfFaces) return;
+
+    auto f = faces[threadid];
+    auto p0 = positions[f.x];
+    auto p1 = positions[f.y];
+    auto p2 = positions[f.z];
+    auto centroid = (p0 + p1 + p2) / 3.0f;
+
+    auto voxelIndex = PositionToIndex(centroid, voxelSize);
+    auto voxelKey = IndexToVoxelKey(voxelIndex);
+    auto hashIdx = VoxelKeyHash(voxelKey, info.capacity);
+
+    bool inserted = false;
+    for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+    {
+        size_t slot = (hashIdx + probe) % info.capacity;
+        HashMapEntry<uint64_t, FaceNodeHashMapEntry>* entry = &info.entries[slot];
+
+        uint64_t old = atomicCAS(
+            reinterpret_cast<unsigned long long*>(&entry->key),
+            EMPTY_KEY, voxelKey);
+
+        if (old == EMPTY_KEY || old == voxelKey)
+        {
+            unsigned int prevHead;
+            do {
+                prevHead = entry->value.headIndex;
+            } while (atomicCAS(&(entry->value.headIndex), prevHead, threadid) != prevHead);
+
+            faceNodes[threadid].faceIndex = threadid;
+            faceNodes[threadid].nextNodeIndex = prevHead;
+
+            // length: atomicAdd로 안전하게 누적
+            unsigned int prevLen = atomicAdd(&(entry->value.length), 1);
+
+            // tailIndex: atomicCAS로 "최초 tail"만 등록
+            // prevHead == UINT32_MAX이면 내가 최초 등록자
+            if (prevHead == UINT32_MAX)
+            {
+                // 최초 등록자는 tailIndex도 자신으로 세팅
+                atomicExch(&(entry->value.tailIndex), threadid);
+            }
+            // (tailIndex는 최초 등록자만 자신의 index로 set됨)
+
+            return;
+        }
+    }
+
+    if (!inserted)
+        atomicAdd(d_numDropped, 1);
+}
+
+// 명시적 FaceNodeHashMapEntry value 필드 전체를 안전하게 초기화하는 커널
+__global__ void Kernel_ExplicitFaceNodeValueInit(
+    HashMapEntry<uint64_t, FaceNodeHashMapEntry>* entries,
+    size_t capacity)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= capacity) return;
+
+    // Key는 EMPTY_KEY로 memset으로 처리되었다고 가정 (이미 되어 있으면 굳이 반복 X)
+    entries[tid].value.headIndex = 0xFFFFFFFF;   // UINT32_MAX
+    entries[tid].value.length = 0;
+    entries[tid].value.tailIndex = 0xFFFFFFFF;   // UINT32_MAX
+    // 필요하면 lock 등 다른 필드도 0 혹은 UINT32_MAX로 명시적 초기화
+}
+
+__global__ void Kernel_CheckFaceNodeHashMapInit(HashMapEntry<uint64_t, FaceNodeHashMapEntry>* entries, size_t capacity)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= capacity) return;
+
+    if (entries[tid].value.headIndex != 0xFFFFFFFF ||
+        entries[tid].value.length != 0xFFFFFFFF ||
+        entries[tid].value.tailIndex != 0xFFFFFFFF)
+    {
+        printf("[!] Bad value at slot %d: headIndex=%u, length=%u, tailIndex=%u\n",
+            tid, entries[tid].value.headIndex, entries[tid].value.length, entries[tid].value.tailIndex);
+    }
+}
+
+
+void DeviceHalfEdgeMesh::BuildFaceNodeHashMap()
+{
+    faceNodeHashMap.Initialize(numberOfFaces * 64);
+    faceNodeHashMap.Clear(0xFFFFFFFF);
+
+    {
+        int threads = 256;
+        int blocks = (faceNodeHashMap.info.capacity + threads - 1) / threads;
+        Kernel_CheckFaceNodeHashMapInit << <blocks, threads >> > (faceNodeHashMap.info.entries, faceNodeHashMap.info.capacity);
+        cudaDeviceSynchronize();
+    }
+
+    if (nullptr == faceNodes)
+    {
+        CUDA_MALLOC(&faceNodes, sizeof(FaceNode) * numberOfFaces);
+    }
+    CUDA_MEMSET(faceNodes, 0xFF, sizeof(FaceNode) * numberOfFaces);
+
+    // [명시적 value 필드 초기화 추가]
+    int threads = 256;
+    int blocks = (faceNodeHashMap.info.capacity + threads - 1) / threads;
+    Kernel_ExplicitFaceNodeValueInit << <blocks, threads >> > (
+        faceNodeHashMap.info.entries,
+        faceNodeHashMap.info.capacity
+        );
+    CUDA_SYNC();
+
+    float voxelSize = 0.1f;
+
+    //printf("Face count: %u, HashMap capacity: %zu, maxProbe: %u\n", numberOfFaces, faceNodeHashMap.info.capacity, faceNodeHashMap.info.maxProbe);
+
+    unsigned int* d_numDropped;
+    cudaMalloc(&d_numDropped, sizeof(unsigned int));
+    cudaMemset(d_numDropped, 0, sizeof(unsigned int));
+
+    LaunchKernel(Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap, numberOfFaces,
+        faceNodeHashMap.info,
+        positions,
+        faces,
+        faceNodes,
+        voxelSize,
+        numberOfFaces,
+        d_numDropped);
+    CUDA_SYNC();
+
+    unsigned int h_numDropped = 0;
+    cudaMemcpy(&h_numDropped, d_numDropped, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+    printf("probe 실패 face 개수: %u\n", h_numDropped);
+
+    //CUDA_FREE(faceNodes);
+    CUDA_FREE(d_numDropped)
+}
+
+vector<float3> DeviceHalfEdgeMesh::GetFaceNodePositions()
+{
+    // 1. host로 데이터 복사
+    std::vector<HashMapEntry<uint64_t, FaceNodeHashMapEntry>> h_entries(faceNodeHashMap.info.capacity);
+    CUDA_COPY_D2H(h_entries.data(), faceNodeHashMap.info.entries,
+        sizeof(HashMapEntry<uint64_t, FaceNodeHashMapEntry>) * faceNodeHashMap.info.capacity);
+
+    std::vector<FaceNode> h_faceNodes(numberOfFaces);
+    CUDA_COPY_D2H(h_faceNodes.data(), faceNodes, sizeof(FaceNode) * numberOfFaces);
+
+    std::vector<float3> h_positions(numberOfPoints);
+    std::vector<uint3> h_faces(numberOfFaces);
+    CUDA_COPY_D2H(h_positions.data(), positions, sizeof(float3) * numberOfPoints);
+    CUDA_COPY_D2H(h_faces.data(), faces, sizeof(uint3) * numberOfFaces);
+
+    std::vector<float3> result;
+
+    for (size_t i = 0; i < h_entries.size(); ++i)
+    {
+        const auto& entry = h_entries[i];
+        if (entry.key == EMPTY_KEY)
+            continue;
+
+        unsigned int idx = entry.value.headIndex;
+        size_t count = 0;
+        while (idx != UINT32_MAX && idx < numberOfFaces && count < entry.value.length)
+        {
+            unsigned int faceIdx = h_faceNodes[idx].faceIndex;
+            if (faceIdx >= numberOfFaces)
+                break; // 잘못된 인덱스면 중단
+
+            const uint3& f = h_faces[faceIdx];
+            const float3& p0 = h_positions[f.x];
+            const float3& p1 = h_positions[f.y];
+            const float3& p2 = h_positions[f.z];
+            float3 centroid = (p0 + p1 + p2) / 3.0f;
+            result.push_back(centroid);
+
+            idx = h_faceNodes[idx].nextNodeIndex;
+            ++count;
+        }
+    }
+    return result;
+}
+
+void DeviceHalfEdgeMesh::DebugPrintFaceNodeHashMap()
+{
+    std::vector<HashMapEntry<uint64_t, FaceNodeHashMapEntry>> h_entries(faceNodeHashMap.info.capacity);
+    CUDA_COPY_D2H(h_entries.data(), faceNodeHashMap.info.entries,
+        sizeof(HashMapEntry<uint64_t, FaceNodeHashMapEntry>) * faceNodeHashMap.info.capacity);
+    std::vector<FaceNode> h_faceNodes(numberOfFaces);
+    CUDA_COPY_D2H(h_faceNodes.data(), faceNodes, sizeof(FaceNode) * numberOfFaces);
+
+    size_t totalCount = 0;
+    //for (size_t slot = 0; slot < h_entries.size(); ++slot)
+    //{
+    //    const auto& entry = h_entries[slot];
+    //    if (entry.key == EMPTY_KEY)
+    //        continue;
+
+    //    printf("[Slot %zu] key=0x%llx head=%u length=%u tail=%u\n",
+    //        slot, entry.key, entry.value.headIndex, entry.value.length, entry.value.tailIndex);
+
+    //    unsigned int idx = entry.value.headIndex;
+    //    size_t chainCount = 0;
+    //    std::set<unsigned int> visited;
+
+    //    while (idx != UINT32_MAX && idx < numberOfFaces && chainCount < entry.value.length)
+    //    {
+    //        if (visited.count(idx))
+    //        {
+    //            printf("  [Loop Detected] at idx=%u\n", idx);
+    //            break;
+    //        }
+    //        visited.insert(idx);
+
+    //        unsigned int faceIdx = h_faceNodes[idx].faceIndex;
+    //        printf("    [Node %zu] idx=%u faceIdx=%u next=%u\n", chainCount, idx, faceIdx, h_faceNodes[idx].nextNodeIndex);
+
+    //        idx = h_faceNodes[idx].nextNodeIndex;
+    //        ++chainCount;
+    //    }
+
+    //    if (chainCount != entry.value.length)
+    //    {
+    //        printf("  [Warning] chain count(%zu) != length(%u)\n", chainCount, entry.value.length);
+    //    }
+    //    totalCount += chainCount;
+    //}
+
+    for (size_t slot = 0; slot < h_entries.size(); ++slot)
+    {
+        const auto& entry = h_entries[slot];
+        if (entry.key == EMPTY_KEY)
+            continue;
+
+        unsigned int idx = entry.value.headIndex;
+        size_t chainCount = 0;
+        std::set<unsigned int> visited;
+
+        while (idx != UINT32_MAX && idx < numberOfFaces && chainCount < entry.value.length)
+        {
+            if (visited.count(idx)) break;
+            visited.insert(idx);
+            idx = h_faceNodes[idx].nextNodeIndex;
+            ++chainCount;
+        }
+
+        printf("[Slot %zu] key=0x%llx length=%u chain=%zu %s\n",
+            slot, entry.key, entry.value.length, chainCount,
+            (chainCount != entry.value.length) ? "[불일치]" : "");
+
+        totalCount += chainCount;
+    }
+
+    printf("==== 전체 연결된 face node 개수: %zu\n", totalCount);
+}
+
+std::vector<unsigned int> DeviceHalfEdgeMesh::FindUnlinkedFaceNodes()
+{
+    // 1. device에서 host로 faceNodes, 해시맵 엔트리 복사
+    std::vector<FaceNode> h_faceNodes(numberOfFaces);
+    CUDA_COPY_D2H(h_faceNodes.data(), faceNodes, sizeof(FaceNode) * numberOfFaces);
+
+    std::vector<HashMapEntry<uint64_t, FaceNodeHashMapEntry>> h_entries(faceNodeHashMap.info.capacity);
+    CUDA_COPY_D2H(h_entries.data(), faceNodeHashMap.info.entries,
+        sizeof(HashMapEntry<uint64_t, FaceNodeHashMapEntry>) * faceNodeHashMap.info.capacity);
+
+    // 2. 연결리스트를 따라가며 방문한 faceNode 인덱스 체크
+    std::vector<bool> visited(numberOfFaces, false);
+
+    for (size_t slot = 0; slot < h_entries.size(); ++slot)
+    {
+        const auto& entry = h_entries[slot];
+        if (entry.key == EMPTY_KEY)
+            continue;
+
+        unsigned int idx = entry.value.headIndex;
+        size_t count = 0;
+        while (idx != UINT32_MAX && idx < numberOfFaces && count < entry.value.length)
+        {
+            if (visited[idx])
+                break; // loop 보호
+            visited[idx] = true;
+            idx = h_faceNodes[idx].nextNodeIndex;
+            ++count;
+        }
+    }
+
+    // 3. 연결되지 않은 faceNode 인덱스 추출
+    std::vector<unsigned int> unlinked;
+    for (unsigned int i = 0; i < numberOfFaces; ++i)
+    {
+        if (!visited[i])
+            unlinked.push_back(i);
+    }
+
+    return unlinked;
+}
+
+__global__ void Kernel_FindNearestTriangles_HashMap(
+    const float3* points,                  // [numPoints]
+    unsigned int numPoints,
+    const float3* positions,               // [numberOfMeshPoints]
+    const uint3* faces,                    // [numberOfFaces]
+    HashMapInfo<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap,
+    const FaceNode* faceNodes,
+    float voxelSize,                       // grid size (ex: 0.1f)
+    unsigned int* outIndices               // [numPoints]
+)
+{
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numPoints) return;
+
+    float3 p = points[idx];
+
+    int3 voxelIndex = PositionToIndex(p, voxelSize);
+    uint64_t voxelKey = IndexToVoxelKey(voxelIndex);
+    size_t hashIdx = VoxelKeyHash(voxelKey, faceNodeHashMap.capacity);
+
+    unsigned int minFace = UINT32_MAX;
+    float minDist2 = 1e30f;
+
+    // 해시에서 해당 voxel의 face 리스트 찾아서 후보만 검사
+    for (unsigned int probe = 0; probe < faceNodeHashMap.maxProbe; ++probe)
+    {
+        size_t slot = (hashIdx + probe) % faceNodeHashMap.capacity;
+        const auto& entry = faceNodeHashMap.entries[slot];
+        if (entry.key == voxelKey)
+        {
+            unsigned int nodeIdx = entry.value.headIndex;
+            while (nodeIdx != UINT32_MAX)
+            {
+                const FaceNode& fn = faceNodes[nodeIdx];
+                unsigned int faceIdx = fn.faceIndex;
+                uint3 tri = faces[faceIdx];
+                float3 c = (positions[tri.x] + positions[tri.y] + positions[tri.z]) / 3.0f;
+                float dist2 = length2(p - c);
+                if (dist2 < minDist2)
+                {
+                    minDist2 = dist2;
+                    minFace = faceIdx;
+                }
+                nodeIdx = fn.nextNodeIndex;
+            }
+            break;
+        }
+        if (entry.key == EMPTY_KEY)
+            break;
+    }
+
+    // 못 찾았으면 (주변 voxel fallback 등 구현 가능)
+    outIndices[idx] = minFace;
+}
+
+std::vector<unsigned int> DeviceHalfEdgeMesh::FindNearestTriangleIndices(float3* d_positions, unsigned int numberOfInputPoints)
+{
+    unsigned int* d_indices = nullptr;
+    CUDA_MALLOC(&d_indices, sizeof(unsigned int) * numberOfInputPoints);
+
+    // 네트워크 매크로 또는 직접 block/threads 설정 가능
+    LaunchKernel(Kernel_FindNearestTriangles_HashMap, numberOfInputPoints,
+        d_positions, numberOfInputPoints,
+        positions, faces,
+        faceNodeHashMap.info,
+        faceNodes,
+        /*voxelSize=*/0.1f,
+        d_indices);
+
+    CUDA_SYNC();
+
+    std::vector<unsigned int> h_indices(numberOfInputPoints);
+    CUDA_COPY_D2H(h_indices.data(), d_indices, sizeof(unsigned int) * numberOfInputPoints);
+    CUDA_FREE(d_indices);
+
+    return h_indices;
 }
 
 bool DeviceHalfEdgeMesh::PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const
