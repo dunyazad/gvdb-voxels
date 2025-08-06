@@ -255,6 +255,11 @@ void HostHalfEdgeMesh::BuildVertexToHalfEdgeMapping()
     }
 }
 
+void HostHalfEdgeMesh::BuildFaceNodeHashMap()
+{
+
+}
+
 bool HostHalfEdgeMesh::SerializePLY(const std::string& filename, bool useAlpha)
 {
     PLYFormat ply;
@@ -341,7 +346,7 @@ bool HostHalfEdgeMesh::DeserializePLY(const std::string& filename)
 
     auto [mx, my, mz] = ply.GetAABBMin();
     min.x = mx; min.y = my; min.z = mz;
-    auto [Mx, My, Mz] = ply.GetAABBMin();
+    auto [Mx, My, Mz] = ply.GetAABBMax();
     max.x = Mx; max.y = My; max.z = Mz;
 
     return true;
@@ -947,7 +952,7 @@ void DeviceHalfEdgeMesh::RadiusLaplacianSmoothing(float radius, unsigned int ite
 }
 
 __global__ void Kernel_DeviceHalfEdgeMesh_GetAABB(
-    float3* positions, uint3* faces, cuAABB* aabbs, unsigned int numberOfPoints, unsigned int numberOfFaces)
+    float3* positions, uint3* faces, cuAABB* aabbs, cuAABB* mMaabbs, unsigned int numberOfPoints, unsigned int numberOfFaces)
 {
     unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
     if (threadid >= numberOfFaces) return;
@@ -974,24 +979,38 @@ __global__ void Kernel_DeviceHalfEdgeMesh_GetAABB(
         fmaxf(p0.z, fmaxf(p1.z, p2.z))
     );
     aabbs[threadid] = aabb;
+
+    auto delta = aabb.max - aabb.min;
+    mMaabbs->min = make_float3(
+        fminf(mMaabbs->min.x, delta.x),
+        fminf(mMaabbs->min.y, delta.y),
+        fminf(mMaabbs->min.z, delta.z));
+    mMaabbs->max = make_float3(
+        fmaxf(mMaabbs->max.x, delta.x),
+        fmaxf(mMaabbs->max.y, delta.y),
+        fmaxf(mMaabbs->max.z, delta.z));
 }
 
-vector<cuAABB> DeviceHalfEdgeMesh::GetAABBs()
+void DeviceHalfEdgeMesh::GetAABBs(vector<cuAABB>& result, cuAABB& mMaabbs)
 {
-    vector<cuAABB> result(numberOfFaces);
+    result.resize(numberOfFaces);
 
     cuAABB* aabbs = nullptr;
     CUDA_MALLOC(&aabbs, sizeof(cuAABB) * numberOfFaces);
 
+    cuAABB* d_mMaabbs = nullptr;
+    CUDA_MALLOC(&d_mMaabbs, sizeof(cuAABB));
+    CUDA_COPY_H2D(d_mMaabbs, &mMaabbs, sizeof(cuAABB));
+
     LaunchKernel(Kernel_DeviceHalfEdgeMesh_GetAABB, numberOfFaces,
-        positions, faces, aabbs, numberOfPoints, numberOfFaces);
+        positions, faces, aabbs, d_mMaabbs, numberOfPoints, numberOfFaces);
 
     CUDA_COPY_D2H(result.data(), aabbs, sizeof(cuAABB)* numberOfFaces);
+    CUDA_COPY_D2H(&mMaabbs, d_mMaabbs, sizeof(cuAABB));
     CUDA_SYNC();
 
     CUDA_FREE(aabbs);
-
-    return result;
+    CUDA_FREE(d_mMaabbs);
 }
 
 __global__ void Kernel_DeviceHalfEdgeMesh_GetMortonCodes(

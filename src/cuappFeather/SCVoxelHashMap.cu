@@ -173,84 +173,10 @@ void SCVoxelHashMap::SurfaceProjection_SDF(SCVoxelHashMapInfo info, DeviceHalfEd
 	CUDA_SYNC();
 }
 
-
-__host__ __device__ uint64_t SCVoxelHashMap::expandBits(uint32_t v)
-{
-	uint64_t x = v & 0x1fffff; // 21 bits
-	x = (x | x << 32) & 0x1f00000000ffff;
-	x = (x | x << 16) & 0x1f0000ff0000ff;
-	x = (x | x << 8) & 0x100f00f00f00f00f;
-	x = (x | x << 4) & 0x10c30c30c30c30c3;
-	x = (x | x << 2) & 0x1249249249249249;
-	return x;
-}
-
-__host__ __device__ uint32_t SCVoxelHashMap::compactBits(uint64_t x)
-{
-	x &= 0x1249249249249249;
-	x = (x ^ (x >> 2)) & 0x10c30c30c30c30c3;
-	x = (x ^ (x >> 4)) & 0x100f00f00f00f00f;
-	x = (x ^ (x >> 8)) & 0x1f0000ff0000ff;
-	x = (x ^ (x >> 16)) & 0x1f00000000ffff;
-	x = (x ^ (x >> 32)) & 0x1fffff;
-	return static_cast<uint32_t>(x);
-}
-
-__host__ __device__ size_t SCVoxelHashMap::hash(SCVoxelKey key, size_t capacity)
-{
-	key ^= (key >> 33);
-	key *= 0xff51afd7ed558ccd;
-	key ^= (key >> 33);
-	key *= 0xc4ceb9fe1a85ec53;
-	key ^= (key >> 33);
-	return static_cast<size_t>(key) % capacity;
-}
-
-__host__ __device__ SCVoxelKey SCVoxelHashMap::IndexToVoxelKey(const int3& coord)
-{
-	// To handle negative values
-	const int OFFSET = 1 << 20; // 2^20 = 1048576
-	return (expandBits(coord.z + OFFSET) << 2) |
-		(expandBits(coord.y + OFFSET) << 1) |
-		expandBits(coord.x + OFFSET);
-}
-
-__host__ __device__ int3 SCVoxelHashMap::VoxelKeyToIndex(SCVoxelKey key)
-{
-	const int OFFSET = 1 << 20;
-	int x = static_cast<int>(compactBits(key));
-	int y = static_cast<int>(compactBits(key >> 1));
-	int z = static_cast<int>(compactBits(key >> 2));
-	return make_int3(x - OFFSET, y - OFFSET, z - OFFSET);
-}
-
-__host__ __device__ int3 SCVoxelHashMap::PositionToIndex(const float3& pos, float voxelSize)
-{
-#ifdef __CUDA_ARCH__
-	return make_int3(
-		__float2int_rd(pos.x / voxelSize),
-		__float2int_rd(pos.y / voxelSize),
-		__float2int_rd(pos.z / voxelSize));
-#else
-	return make_int3(
-		static_cast<int>(std::floor(pos.x / voxelSize)),
-		static_cast<int>(std::floor(pos.y / voxelSize)),
-		static_cast<int>(std::floor(pos.z / voxelSize)));
-#endif
-}
-
-__host__ __device__ float3 SCVoxelHashMap::IndexToPosition(const int3& index, float voxelSize)
-{
-	return make_float3(
-		(float)index.x * voxelSize,
-		(float)index.y * voxelSize,
-		(float)index.z * voxelSize);
-}
-
 __device__ SCVoxel* SCVoxelHashMap::GetVoxel(SCVoxelHashMapInfo& info, const int3& index)
 {
-	SCVoxelKey key = IndexToVoxelKey(index);
-	size_t hashIdx = hash(key, info.capacity);
+	VoxelKey key = IndexToVoxelKey(index);
+	size_t hashIdx = VoxelKeyHash(key, info.capacity);
 
 	for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 	{
@@ -273,15 +199,15 @@ __device__ SCVoxel* SCVoxelHashMap::GetVoxel(SCVoxelHashMapInfo& info, const int
 __device__ SCVoxel* SCVoxelHashMap::InsertVoxel(
 	SCVoxelHashMapInfo& info, const int3& index, float sdf, float3 normal, float3 color)
 {
-	SCVoxelKey key = SCVoxelHashMap::IndexToVoxelKey(index);
-	size_t hashIdx = SCVoxelHashMap::hash(key, info.capacity);
+	VoxelKey key = IndexToVoxelKey(index);
+	size_t hashIdx = VoxelKeyHash(key, info.capacity);
 
 	for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 	{
 		size_t slot = (hashIdx + probe) % info.capacity;
 		SCVoxelHashMapEntry* entry = &info.entries[slot];
 
-		SCVoxelKey old = atomicCAS(reinterpret_cast<unsigned long long*>(&entry->key), EMPTY_KEY, key);
+		VoxelKey old = atomicCAS(reinterpret_cast<unsigned long long*>(&entry->key), EMPTY_KEY, key);
 
 		if (old == EMPTY_KEY || old == key)
 		{
@@ -351,7 +277,7 @@ __global__ void Kernel_SCVoxelHashMap_Occupy(
 	float3 n = normals[tid];
 	float3 c = colors ? colors[tid] : make_float3(0, 0, 0);
 
-	int3 baseIndex = SCVoxelHashMap::PositionToIndex(p, info.voxelSize);
+	int3 baseIndex = PositionToIndex(p, info.voxelSize);
 
 	for (int dz = -offset; dz <= offset; ++dz)
 	{
@@ -360,7 +286,7 @@ __global__ void Kernel_SCVoxelHashMap_Occupy(
 			for (int dx = -offset; dx <= offset; ++dx)
 			{
 				int3 index = make_int3(baseIndex.x + dx, baseIndex.y + dy, baseIndex.z + dz);
-				float3 center = SCVoxelHashMap::IndexToPosition(index, info.voxelSize);
+				float3 center = IndexToPosition(index, info.voxelSize);
 
 				float3 dir = center - p;
 				float dist = length(dir);
@@ -388,7 +314,7 @@ __device__ bool SCVoxelHashMap::CheckZeroCrossing(SCVoxelHashMapInfo& info,
 
 	if (0 > ratio || 1.f < ratio) return false;
 
-	float3 np = SCVoxelHashMap::IndexToPosition(index, info.voxelSize);
+	float3 np = IndexToPosition(index, info.voxelSize);
 	float3 nn = voxel->normalSum / (float)max(1u, voxel->count);
 	float3 nc = voxel->colorSum / (float)max(1u, voxel->count);
 
@@ -415,7 +341,7 @@ __global__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 
 	float sdf = voxel->sdfSum / (float)max(1u, voxel->count);
 
-	float3 voxelPosition = SCVoxelHashMap::IndexToPosition(voxelIndex, info.voxelSize);
+	float3 voxelPosition = IndexToPosition(voxelIndex, info.voxelSize);
 	float3 voxelNormal = voxel->normalSum / (float)max(1u, voxel->count);
 	float3 voxelColor = voxel->colorSum / (float)max(1u, voxel->count);
 
@@ -579,7 +505,7 @@ __device__ unsigned int SCVoxelHashMap::GetZeroCrossingIndex(
 
 __device__ float SCVoxelHashMap::SampleSDF(const SCVoxelHashMapInfo& info, const float3& p)
 {
-	int3 idx = SCVoxelHashMap::PositionToIndex(p, info.voxelSize);
+	int3 idx = PositionToIndex(p, info.voxelSize);
 	auto v = SCVoxelHashMap::GetVoxel((SCVoxelHashMapInfo&)info, idx);
 	if (!v || v->count == 0) return FLT_MAX;
 	return v->sdfSum / (float)max(1u, v->count);

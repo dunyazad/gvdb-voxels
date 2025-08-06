@@ -5,8 +5,8 @@
 
 struct cuAABB
 {
-    float3 min;
-    float3 max;
+    float3 min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+    float3 max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
 };
 
 struct HalfEdge
@@ -20,6 +20,19 @@ struct HalfEdge
 struct HalfEdgeFace
 {
     unsigned int halfEdgeIndex = UINT32_MAX;
+};
+
+struct FaceNode
+{
+    unsigned int faceIndex = UINT32_MAX;
+    unsigned int faceNodeIndex = UINT32_MAX;
+};
+
+struct FaceNodeHashMapEntry
+{
+    unsigned int length = 0;
+    unsigned int headIndex = UINT32_MAX;
+    unsigned int tailIndex = UINT32_MAX;
 };
 
 struct HostHalfEdgeMesh;
@@ -42,6 +55,8 @@ struct HostHalfEdgeMesh
     HalfEdgeFace* halfEdgeFaces = nullptr;
     unsigned int* vertexToHalfEdge = nullptr;
 
+    HashMap<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap;
+
     HostHalfEdgeMesh();
     HostHalfEdgeMesh(const HostHalfEdgeMesh& other);
     HostHalfEdgeMesh& operator=(const HostHalfEdgeMesh& other);
@@ -62,6 +77,8 @@ struct HostHalfEdgeMesh
     
     void BuildHalfEdges();
     void BuildVertexToHalfEdgeMapping();
+
+    void BuildFaceNodeHashMap();
 
     bool SerializePLY(const string& filename, bool useAlpha = false);
     bool DeserializePLY(const string& filename);
@@ -113,7 +130,7 @@ struct DeviceHalfEdgeMesh
     void LaplacianSmoothing(unsigned int iterations = 1, float lambda = 0.5f, bool fixBorderVertices = false);
     void RadiusLaplacianSmoothing(float radius = 0.3f, unsigned int iterations = 1, float lambda = 0.5f);
 
-    vector<cuAABB> GetAABBs();
+    void GetAABBs(vector<cuAABB>& result, cuAABB& mMaabbs);
     vector<uint64_t> GetMortonCodes();
 
     __host__ __device__ static uint64_t PackEdge(unsigned int v0, unsigned int v1);

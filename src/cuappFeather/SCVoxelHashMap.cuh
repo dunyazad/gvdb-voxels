@@ -1,14 +1,9 @@
 #include <cuda_common.cuh>
 
+#include <VoxelKey.hpp>
 #include <PointCloud.cuh>
 #include <HalfEdgeMesh.cuh>
 #include <VEFM.cuh>
-
-using SCVoxelKey = uint64_t;
-#ifndef EMPTY_KEY
-#define EMPTY_KEY UINT64_MAX
-#define VALID_KEY(k) ((k) != EMPTY_KEY)
-#endif
 
 struct SCVoxel
 {
@@ -23,7 +18,7 @@ struct SCVoxel
 
 struct SCVoxelHashMapEntry
 {
-	SCVoxelKey key;
+	VoxelKey key;
 	SCVoxel voxel;
 };
 
@@ -56,15 +51,6 @@ struct SCVoxelHashMap
 	void MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue = 0.0f);
 
 	void SurfaceProjection_SDF(SCVoxelHashMapInfo info, DeviceHalfEdgeMesh& mesh, int maxIters = 5, float stepScale = 0.5f);
-
-	__host__ __device__ static uint64_t expandBits(uint32_t v);
-	__host__ __device__ static uint32_t compactBits(uint64_t x);
-	__host__ __device__ static size_t hash(SCVoxelKey key, size_t capacity);
-
-	__host__ __device__ static SCVoxelKey IndexToVoxelKey(const int3& coord);
-	__host__ __device__ static int3 VoxelKeyToIndex(SCVoxelKey key);
-	__host__ __device__ static int3 PositionToIndex(const float3& pos, float voxelSize);
-	__host__ __device__ static float3 IndexToPosition(const int3& index, float voxelSize);
 
 	__device__ static SCVoxel* GetVoxel(SCVoxelHashMapInfo& info, const int3& index);
 

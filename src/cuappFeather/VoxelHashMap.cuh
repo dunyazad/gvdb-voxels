@@ -1,14 +1,8 @@
 #pragma once
 
 #include <cuda_common.cuh>
-
+#include <VoxelKey.hpp>
 #include <PointCloud.cuh>
-
-using VoxelKey = uint64_t;
-#ifndef EMPTY_KEY
-#define EMPTY_KEY UINT64_MAX
-#define VALID_KEY(k) ((k) != EMPTY_KEY)
-#endif
 
 struct Voxel
 {
@@ -74,24 +68,6 @@ struct VoxelHashMap
 	void FilterBySDFGradient(float sdfThreshold, bool remove);
 
 	void FilterBySDFGradientWithOffset(int offset, float sdfThreshold, bool remove);
-
-	__host__ __device__ static uint64_t expandBits(uint32_t v);
-
-	__host__ __device__ static uint32_t compactBits(uint64_t x);
-
-	__host__ __device__ static VoxelKey IndexToVoxelKey(const int3& coord);
-
-	__host__ __device__ static int3 VoxelKeyToIndex(VoxelKey key);
-
-	__host__ static int3 PositionToIndex_host(float3 pos, float voxelSize);
-
-	__device__ static int3 PositionToIndex_device(float3 pos, float voxelSize);
-
-	__host__ __device__ static int3 PositionToIndex(float3 pos, float voxelSize);
-
-	__host__ __device__ static float3 IndexToPosition(int3 index, float voxelSize);
-
-	__host__ __device__ static size_t hash(VoxelKey key, size_t capacity);
 
 	__device__ static Voxel* GetVoxel(VoxelHashMapInfo& info, const int3& index);
 

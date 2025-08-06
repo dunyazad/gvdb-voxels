@@ -322,93 +322,10 @@ void VoxelHashMap::FilterBySDFGradientWithOffset(int offset, float sdfThreshold,
 	CUDA_SYNC();
 }
 
-__host__ __device__ uint64_t VoxelHashMap::expandBits(uint32_t v)
-{
-	uint64_t x = v & 0x1fffff; // 21 bits
-	x = (x | x << 32) & 0x1f00000000ffff;
-	x = (x | x << 16) & 0x1f0000ff0000ff;
-	x = (x | x << 8) & 0x100f00f00f00f00f;
-	x = (x | x << 4) & 0x10c30c30c30c30c3;
-	x = (x | x << 2) & 0x1249249249249249;
-	return x;
-}
-
-__host__ __device__ uint32_t VoxelHashMap::compactBits(uint64_t x)
-{
-	x &= 0x1249249249249249;
-	x = (x ^ (x >> 2)) & 0x10c30c30c30c30c3;
-	x = (x ^ (x >> 4)) & 0x100f00f00f00f00f;
-	x = (x ^ (x >> 8)) & 0x1f0000ff0000ff;
-	x = (x ^ (x >> 16)) & 0x1f00000000ffff;
-	x = (x ^ (x >> 32)) & 0x1fffff;
-	return static_cast<uint32_t>(x);
-}
-
-__host__ __device__ VoxelKey VoxelHashMap::IndexToVoxelKey(const int3& coord)
-{
-	// To handle negative values
-	const int OFFSET = 1 << 20; // 2^20 = 1048576
-	return (expandBits(coord.z + OFFSET) << 2) |
-		(expandBits(coord.y + OFFSET) << 1) |
-		expandBits(coord.x + OFFSET);
-}
-
-__host__ __device__ int3 VoxelHashMap::VoxelKeyToIndex(VoxelKey key)
-{
-	const int OFFSET = 1 << 20;
-	int x = static_cast<int>(compactBits(key));
-	int y = static_cast<int>(compactBits(key >> 1));
-	int z = static_cast<int>(compactBits(key >> 2));
-	return make_int3(x - OFFSET, y - OFFSET, z - OFFSET);
-}
-
-__host__ int3 VoxelHashMap::PositionToIndex_host(float3 pos, float voxelSize)
-{
-	return make_int3(
-		static_cast<int>(std::floor(pos.x / voxelSize)),
-		static_cast<int>(std::floor(pos.y / voxelSize)),
-		static_cast<int>(std::floor(pos.z / voxelSize)));
-}
-
-__device__ int3 VoxelHashMap::PositionToIndex_device(float3 pos, float voxelSize)
-{
-	return make_int3(
-		__float2int_rd(pos.x / voxelSize),
-		__float2int_rd(pos.y / voxelSize),
-		__float2int_rd(pos.z / voxelSize));
-}
-
-__host__ __device__ int3 VoxelHashMap::PositionToIndex(float3 pos, float voxelSize)
-{
-#ifdef __CUDA_ARCH__
-	return PositionToIndex_device(pos, voxelSize);
-#else
-	return PositionToIndex_host(pos, voxelSize);
-#endif
-}
-
-__host__ __device__ float3 VoxelHashMap::IndexToPosition(int3 index, float voxelSize)
-{
-	return make_float3(
-		(index.x + 0.5f) * voxelSize,
-		(index.y + 0.5f) * voxelSize,
-		(index.z + 0.5f) * voxelSize);
-}
-
-__host__ __device__ size_t VoxelHashMap::hash(VoxelKey key, size_t capacity)
-{
-	key ^= (key >> 33);
-	key *= 0xff51afd7ed558ccd;
-	key ^= (key >> 33);
-	key *= 0xc4ceb9fe1a85ec53;
-	key ^= (key >> 33);
-	return static_cast<size_t>(key) % capacity;
-}
-
 __device__ Voxel* VoxelHashMap::GetVoxel(VoxelHashMapInfo& info, const int3& index)
 {
 	VoxelKey key = IndexToVoxelKey(index);
-	size_t hashIdx = hash(key, info.capacity);
+	size_t hashIdx = VoxelKeyHash(key, info.capacity);
 
 	for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 	{
@@ -433,8 +350,8 @@ __device__ Voxel* VoxelHashMap::GetVoxel(VoxelHashMapInfo& info, const int3& ind
 __device__ Voxel* VoxelHashMap::InsertVoxel(
 	VoxelHashMapInfo& info, const int3& index, float sdf, float3 normal, float3 color)
 {
-	VoxelKey key = VoxelHashMap::IndexToVoxelKey(index);
-	size_t hashIdx = VoxelHashMap::hash(key, info.capacity);
+	VoxelKey key = IndexToVoxelKey(index);
+	size_t hashIdx = VoxelKeyHash(key, info.capacity);
 
 	for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 	{
@@ -769,12 +686,12 @@ __global__ void Kernel_VoxelHashMap_Occupy(
 	if (tid >= numberOfPoints) return;
 
 	float3 pos = positions[tid];
-	int3 index = VoxelHashMap::PositionToIndex(pos, info.voxelSize);
-	VoxelKey key = VoxelHashMap::IndexToVoxelKey(index);
+	int3 index = PositionToIndex(pos, info.voxelSize);
+	VoxelKey key = IndexToVoxelKey(index);
 	float3 n = normals ? normals[tid] : make_float3(0, 0, 0);
 	float3 c = colors ? colors[tid] : make_float3(0, 0, 0);
 
-	float3 center = VoxelHashMap::IndexToPosition(index, info.voxelSize);
+	float3 center = IndexToPosition(index, info.voxelSize);
 
 	float3 dir = center - pos;
 	float dist = length(dir);
@@ -782,7 +699,7 @@ __global__ void Kernel_VoxelHashMap_Occupy(
 	float sign = (dot(n, dir) >= 0.0f) ? 1.0f : -1.0f;
 	float sdf = dist * sign;
 
-	size_t h = VoxelHashMap::hash(key, info.capacity);
+	size_t h = VoxelKeyHash(key, info.capacity);
 
 	for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 	{
@@ -831,7 +748,7 @@ __global__ void Kernel_VoxelHashMap_Occupy_SDF(
 	float3 n = normals[tid];
 	float3 c = colors ? colors[tid] : make_float3(0, 0, 0);
 
-	int3 baseIndex = VoxelHashMap::PositionToIndex(p, info.voxelSize);
+	int3 baseIndex = PositionToIndex(p, info.voxelSize);
 
 	for (int dz = -offset; dz <= offset; ++dz)
 	{
@@ -840,7 +757,7 @@ __global__ void Kernel_VoxelHashMap_Occupy_SDF(
 			for (int dx = -offset; dx <= offset; ++dx)
 			{
 				int3 index = make_int3(baseIndex.x + dx, baseIndex.y + dy, baseIndex.z + dz);
-				float3 center = VoxelHashMap::IndexToPosition(index, info.voxelSize);
+				float3 center = IndexToPosition(index, info.voxelSize);
 
 				float3 dir = center - p;
 				float dist = length(dir);
@@ -996,7 +913,7 @@ __global__ void Kernel_VoxelHashMap_Serialize_SDF_Tidy(
 	if (zeroCrossing)
 	{
 		d_colors[tid] = voxel->colorSum / (float)max(1u, voxel->count);
-		d_positions[tid] = VoxelHashMap::IndexToPosition(voxelIndex, info.voxelSize);
+		d_positions[tid] = IndexToPosition(voxelIndex, info.voxelSize);
 		d_normals[tid] = voxel->normalSum / (float)max(1u, voxel->count);
 	}
 	else
@@ -1018,14 +935,14 @@ __global__ void Kernel_VoxelHashMap_FindOverlap(VoxelHashMapInfo info, int step,
 	if (tid >= *info.d_numberOfOccupiedVoxels) return;
 
 	int3 voxelIndex = info.d_occupiedVoxelIndices[tid];
-	float3 voxelPosition = VoxelHashMap::IndexToPosition(voxelIndex, info.voxelSize);
+	float3 voxelPosition = IndexToPosition(voxelIndex, info.voxelSize);
 	Voxel* voxel = VoxelHashMap::GetVoxel(info, voxelIndex);
 	if (!voxel || voxel->count == 0) return;
 
 	for (int i = 0; i < step; i++)
 	{
 		float3 upperPosition = voxelPosition + normalize(voxel->normalSum / (float)max(1u, voxel->count)) * info.voxelSize * (float)(i + 1);
-		auto upperIndex = VoxelHashMap::PositionToIndex(upperPosition, info.voxelSize);
+		auto upperIndex = PositionToIndex(upperPosition, info.voxelSize);
 		if (voxelIndex == upperIndex) continue;
 
 		auto upperVoxel = VoxelHashMap::GetVoxel(info, upperIndex);
@@ -1406,8 +1323,8 @@ __global__ void Kernel_VoxelHashMap_MarchingCubes(
 		float3 c0 = color[edge0];
 		float3 c1 = color[edge1];
 
-		float3 p0 = VoxelHashMap::IndexToPosition(i0, info.voxelSize);
-		float3 p1 = VoxelHashMap::IndexToPosition(i1, info.voxelSize);
+		float3 p0 = IndexToPosition(i0, info.voxelSize);
+		float3 p1 = IndexToPosition(i1, info.voxelSize);
 
 		float alpha = sdf0 / (sdf0 - sdf1 + 1e-6f);
 		alpha = fminf(fmaxf(alpha, 0.0f), 1.0f);
@@ -1484,8 +1401,8 @@ __global__ void Kernel_VoxelHashMap_Dilation(
 				Voxel* neighborVoxel = VoxelHashMap::GetVoxel(info, neighbor);
 				if (!neighborVoxel || neighborVoxel->count == 0)
 				{
-					VoxelKey key = VoxelHashMap::IndexToVoxelKey(neighbor);
-					size_t hashIdx = VoxelHashMap::hash(key, info.capacity);
+					VoxelKey key = IndexToVoxelKey(neighbor);
+					size_t hashIdx = VoxelKeyHash(key, info.capacity);
 
 					for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
 					{
@@ -1508,7 +1425,6 @@ __global__ void Kernel_VoxelHashMap_Dilation(
 							}
 							else
 							{
-								// 그냥 복사
 								entry->voxel.sdfSum = baseVoxel->sdfSum;
 								entry->voxel.normalSum = baseVoxel->normalSum;
 								entry->voxel.colorSum = baseVoxel->colorSum;

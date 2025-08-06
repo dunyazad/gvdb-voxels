@@ -33,6 +33,7 @@
     <ClInclude Include="HalfEdgeMeshInterop.h" />
     <ClInclude Include="ThrustHalfEdgeMesh.cuh" />
     <ClInclude Include="KdTree.hpp" />
+    <ClInclude Include="VoxelKey.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HashMap.hpp" />

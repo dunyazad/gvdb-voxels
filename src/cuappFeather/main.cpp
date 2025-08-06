@@ -406,6 +406,7 @@ int main(int argc, char** argv)
 					if (mortonCodes.empty())
 					{
 						mortonCodes = cudaInstance.d_mesh.GetMortonCodes();
+						std::sort(mortonCodes.begin(), mortonCodes.end());
 					}
 					Feather.CreateEventCallback<FrameEvent>(appMain, [&](Entity entity, const FrameEvent& event) {
 						float3 aabb_extent = cudaInstance.d_mesh.max - cudaInstance.d_mesh.min;
@@ -428,6 +429,20 @@ int main(int argc, char** argv)
 							}
 						}
 						});
+				}
+			}
+			else if (GLFW_KEY_HOME == event.keyCode)
+			{
+				if (event.action == 1)
+				{
+					vector<cuAABB> result;
+					cuAABB mMaabbs;
+
+					cudaInstance.d_mesh.GetAABBs(result, mMaabbs);
+
+					printf("min : %f, %f, %f\n", XYZ(mMaabbs.min));
+					printf("max : %f, %f, %f\n", XYZ(mMaabbs.max));
+					printf("len : %f, %f, %f\n", XYZ(mMaabbs.max - mMaabbs.min));
 				}
 			}
 			});

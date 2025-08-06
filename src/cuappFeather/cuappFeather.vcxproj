@@ -43,6 +43,7 @@
     <ClInclude Include="ThrustHalfEdgeMesh.cuh" />
     <ClInclude Include="VEFM.cuh" />
     <ClInclude Include="VoxelHashMap.cuh" />
+    <ClInclude Include="VoxelKey.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\res\Shaders\Default.fs" />

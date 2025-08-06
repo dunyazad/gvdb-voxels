@@ -82,14 +82,14 @@ struct HashMap
         }
     }
 
-    __host__ __device__ inline size_t hash(Key key, size_t capacity) const
+    __host__ __device__ inline size_t HashMap_hash(Key key, size_t capacity) const
     {
         return static_cast<size_t>(key) % capacity;
     }
 
     __device__ bool insert(const HashMapInfo<Key, Value>& info, Key key, const Value& value)
     {
-        size_t idx = hash(key, info.capacity);
+        size_t idx = HashMap_hash(key, info.capacity);
 
         for (int i = 0; i < info.maxProbe; ++i)
         {
@@ -108,7 +108,7 @@ struct HashMap
 
     __device__ bool find(const HashMapInfo<Key, Value>& info, Key key, Value* outValue)
     {
-        size_t idx = hash(key, info.capacity);
+        size_t idx = HashMap_hash(key, info.capacity);
 
         for (int i = 0; i < info.maxProbe; ++i)
         {
