@@ -473,7 +473,10 @@ int main(int argc, char** argv)
 					CUDA_COPY_D2H(positions.data(), cuInstance.d_mesh.positions, sizeof(float3)* cuInstance.d_mesh.numberOfPoints);
 					CUDA_COPY_D2H(faces.data(), cuInstance.d_mesh.faces, sizeof(uint3) * cuInstance.d_mesh.numberOfFaces);
 					CUDA_SYNC();
-					auto indices = cuInstance.d_mesh.FindNearestTriangleIndices(cuInstance.d_input.positions, cuInstance.d_input.numberOfPoints);
+					std::vector<float3> closestPoints;
+					//auto indices = cuInstance.d_mesh.FindNearestTriangleIndices(cuInstance.d_input.positions, cuInstance.d_input.numberOfPoints);
+					auto indices = cuInstance.d_mesh.FindNearestTriangleIndicesAndClosestPoints(
+						cuInstance.d_input.positions, cuInstance.d_input.numberOfPoints, 2, closestPoints);
 					printf("indices : %d\n", indices.size());
 					for (size_t i = 0; i < cuInstance.d_input.numberOfPoints; i++)
 					{
@@ -486,10 +489,14 @@ int main(int argc, char** argv)
 						auto& p1 = positions[f.y];
 						auto& p2 = positions[f.z];
 						auto centroid = (p0 + p1 + p2) / 3.0f;
+
+						auto& closestPoint = closestPoints[i];
+
 						auto& p = pcpositions[i];
 
 						VD::AddBox("pc", { XYZ(p) }, { 0.0f, 0.1f, 0.0f }, glm::vec3(0.005f), Color::white());
-						VD::AddLine("Nearest Triangles", { XYZ(p) }, { XYZ(centroid) }, Color::red());
+						//VD::AddLine("Nearest", { XYZ(p) }, { XYZ(centroid) }, Color::red());
+						VD::AddLine("Nearest", { XYZ(p) }, { XYZ(closestPoint) }, Color::red());
 					}
 				}
 			}
@@ -623,13 +630,13 @@ int main(int argc, char** argv)
 					auto normal = glm::trianglenormal(v0, v1, v2);
 
 					//VD::AddTriangle("Picked", v0, v1, v2, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
-					VD::AddSphere("PickedS", v0, normal, 0.025f, { 1.0f, 0.0f, 0.0f, 1.0f });
-					VD::AddSphere("PickedS", v1, normal, 0.025f, { 0.0f, 1.0f, 0.0f, 1.0f });
-					VD::AddSphere("PickedS", v2, normal, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
+					//VD::AddSphere("PickedS", v0, normal, 0.025f, { 1.0f, 0.0f, 0.0f, 1.0f });
+					//VD::AddSphere("PickedS", v1, normal, 0.025f, { 0.0f, 1.0f, 0.0f, 1.0f });
+					//VD::AddSphere("PickedS", v2, normal, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
 					auto hitPosition = ray.origin + glm::normalize(ray.direction) * outHit;
-					VD::AddSphere("PickedPosition", hitPosition, normal, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
+					//VD::AddSphere("PickedPosition", hitPosition, normal, 0.025f, { 0.0f, 0.0f, 1.0f, 1.0f });
 
-					VD::AddLine("PickingRay", ray.origin, hitPosition, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+					//VD::AddLine("PickingRay", ray.origin, hitPosition, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
 
 					if (GLFW_MOD_CONTROL == event.mods)
 					{

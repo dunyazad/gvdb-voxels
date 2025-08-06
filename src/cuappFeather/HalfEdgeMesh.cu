@@ -1038,6 +1038,61 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::FindUnlinkedFaceNodes()
     return unlinked;
 }
 
+// 점-삼각형 거리 계산 (최단 거리, 제곱거리 리턴)
+__device__ float PointTriangleDistance2(const float3& p, const float3& a, const float3& b, const float3& c)
+{
+    // From "Real-Time Collision Detection" by Christer Ericson
+    float3 ab = b - a;
+    float3 ac = c - a;
+    float3 ap = p - a;
+
+    float d1 = dot(ab, ap);
+    float d2 = dot(ac, ap);
+
+    if (d1 <= 0.0f && d2 <= 0.0f) return dot(ap, ap); // barycentric (1,0,0)
+
+    float3 bp = p - b;
+    float d3 = dot(ab, bp);
+    float d4 = dot(ac, bp);
+    if (d3 >= 0.0f && d4 <= d3) return dot(bp, bp); // barycentric (0,1,0)
+
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
+    {
+        float v = d1 / (d1 - d3);
+        float3 proj = a + v * ab;
+        return dot(p - proj, p - proj);
+    }
+
+    float3 cp = p - c;
+    float d5 = dot(ab, cp);
+    float d6 = dot(ac, cp);
+    if (d6 >= 0.0f && d5 <= d6) return dot(cp, cp); // barycentric (0,0,1)
+
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
+    {
+        float w = d2 / (d2 - d6);
+        float3 proj = a + w * ac;
+        return dot(p - proj, p - proj);
+    }
+
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f)
+    {
+        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        float3 proj = b + w * (c - b);
+        return dot(p - proj, p - proj);
+    }
+
+    // Inside face region
+    float denom = 1.0f / (va + vb + vc);
+    float v = vb * denom;
+    float w = vc * denom;
+    float3 proj = a + ab * v + ac * w;
+    return dot(p - proj, p - proj);
+}
+
 __global__ void Kernel_FindNearestTriangles_HashMap(
     const float3* points,                  // [numPoints]
     unsigned int numPoints,
@@ -1054,42 +1109,50 @@ __global__ void Kernel_FindNearestTriangles_HashMap(
 
     float3 p = points[idx];
 
-    int3 voxelIndex = PositionToIndex(p, voxelSize);
-    uint64_t voxelKey = IndexToVoxelKey(voxelIndex);
-    size_t hashIdx = VoxelKeyHash(voxelKey, faceNodeHashMap.capacity);
-
+    int3 centerVoxel = PositionToIndex(p, voxelSize);
     unsigned int minFace = UINT32_MAX;
     float minDist2 = 1e30f;
 
-    // 해시에서 해당 voxel의 face 리스트 찾아서 후보만 검사
-    for (unsigned int probe = 0; probe < faceNodeHashMap.maxProbe; ++probe)
-    {
-        size_t slot = (hashIdx + probe) % faceNodeHashMap.capacity;
-        const auto& entry = faceNodeHashMap.entries[slot];
-        if (entry.key == voxelKey)
-        {
-            unsigned int nodeIdx = entry.value.headIndex;
-            while (nodeIdx != UINT32_MAX)
+    // 3x3x3 voxel neighborhood
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx)
             {
-                const FaceNode& fn = faceNodes[nodeIdx];
-                unsigned int faceIdx = fn.faceIndex;
-                uint3 tri = faces[faceIdx];
-                float3 c = (positions[tri.x] + positions[tri.y] + positions[tri.z]) / 3.0f;
-                float dist2 = length2(p - c);
-                if (dist2 < minDist2)
-                {
-                    minDist2 = dist2;
-                    minFace = faceIdx;
-                }
-                nodeIdx = fn.nextNodeIndex;
-            }
-            break;
-        }
-        if (entry.key == EMPTY_KEY)
-            break;
-    }
+                int3 voxelIndex = make_int3(centerVoxel.x + dx, centerVoxel.y + dy, centerVoxel.z + dz);
+                uint64_t voxelKey = IndexToVoxelKey(voxelIndex);
+                size_t hashIdx = VoxelKeyHash(voxelKey, faceNodeHashMap.capacity);
 
-    // 못 찾았으면 (주변 voxel fallback 등 구현 가능)
+                // 해당 voxel 내 연결된 face 모두 거리 체크
+                for (unsigned int probe = 0; probe < faceNodeHashMap.maxProbe; ++probe)
+                {
+                    size_t slot = (hashIdx + probe) % faceNodeHashMap.capacity;
+                    const auto& entry = faceNodeHashMap.entries[slot];
+                    if (entry.key == voxelKey)
+                    {
+                        unsigned int nodeIdx = entry.value.headIndex;
+                        while (nodeIdx != UINT32_MAX)
+                        {
+                            const FaceNode& fn = faceNodes[nodeIdx];
+                            unsigned int faceIdx = fn.faceIndex;
+                            uint3 tri = faces[faceIdx];
+                            float3 a = positions[tri.x];
+                            float3 b = positions[tri.y];
+                            float3 c = positions[tri.z];
+                            float dist2 = PointTriangleDistance2(p, a, b, c);
+                            if (dist2 < minDist2)
+                            {
+                                minDist2 = dist2;
+                                minFace = faceIdx;
+                            }
+                            nodeIdx = fn.nextNodeIndex;
+                        }
+                        break;
+                    }
+                    if (entry.key == EMPTY_KEY)
+                        break;
+                }
+            }
+
     outIndices[idx] = minFace;
 }
 
@@ -1098,7 +1161,6 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::FindNearestTriangleIndices(float3*
     unsigned int* d_indices = nullptr;
     CUDA_MALLOC(&d_indices, sizeof(unsigned int) * numberOfInputPoints);
 
-    // 네트워크 매크로 또는 직접 block/threads 설정 가능
     LaunchKernel(Kernel_FindNearestTriangles_HashMap, numberOfInputPoints,
         d_positions, numberOfInputPoints,
         positions, faces,
@@ -1112,6 +1174,151 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::FindNearestTriangleIndices(float3*
     std::vector<unsigned int> h_indices(numberOfInputPoints);
     CUDA_COPY_D2H(h_indices.data(), d_indices, sizeof(unsigned int) * numberOfInputPoints);
     CUDA_FREE(d_indices);
+
+    return h_indices;
+}
+
+__device__ float3 ClosestPointOnTriangle(const float3& p, const float3& a, const float3& b, const float3& c)
+{
+    // From "Real-Time Collision Detection" by Christer Ericson
+    float3 ab = b - a;
+    float3 ac = c - a;
+    float3 ap = p - a;
+    float d1 = dot(ab, ap);
+    float d2 = dot(ac, ap);
+
+    if (d1 <= 0.0f && d2 <= 0.0f) return a; // barycentric (1,0,0)
+
+    float3 bp = p - b;
+    float d3 = dot(ab, bp);
+    float d4 = dot(ac, bp);
+    if (d3 >= 0.0f && d4 <= d3) return b; // barycentric (0,1,0)
+
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
+    {
+        float v = d1 / (d1 - d3);
+        return a + v * ab; // barycentric (1-v, v, 0)
+    }
+
+    float3 cp = p - c;
+    float d5 = dot(ab, cp);
+    float d6 = dot(ac, cp);
+    if (d6 >= 0.0f && d5 <= d6) return c; // barycentric (0,0,1)
+
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
+    {
+        float w = d2 / (d2 - d6);
+        return a + w * ac; // barycentric (1-w, 0, w)
+    }
+
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f)
+    {
+        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return b + w * (c - b); // barycentric (0, 1-w, w)
+    }
+
+    // Inside face region
+    float denom = 1.0f / (va + vb + vc);
+    float v = vb * denom;
+    float w = vc * denom;
+    return a + ab * v + ac * w;
+}
+
+__global__ void Kernel_FindNearestTriangles_HashMap_ClosestPoint(
+    const float3* points,        // [numPoints]
+    unsigned int numPoints,
+    const float3* positions,     // [numberOfMeshPoints]
+    const uint3* faces,          // [numberOfFaces]
+    HashMapInfo<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap,
+    const FaceNode* faceNodes,
+    float voxelSize,
+    int offset,
+    unsigned int* outIndices,    // [numPoints]
+    float3* outClosestPoints     // [numPoints]
+)
+{
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numPoints) return;
+
+    float3 p = points[idx];
+    int3 centerVoxel = PositionToIndex(p, voxelSize);
+
+    unsigned int minFace = UINT32_MAX;
+    float minDist2 = 1e30f;
+    float3 closest = make_float3(0, 0, 0);
+
+    for (int dz = -offset; dz <= offset; ++dz)
+        for (int dy = -offset; dy <= offset; ++dy)
+            for (int dx = -offset; dx <= offset; ++dx)
+            {
+                int3 voxelIndex = make_int3(centerVoxel.x + dx, centerVoxel.y + dy, centerVoxel.z + dz);
+                uint64_t voxelKey = IndexToVoxelKey(voxelIndex);
+                size_t hashIdx = VoxelKeyHash(voxelKey, faceNodeHashMap.capacity);
+
+                for (unsigned int probe = 0; probe < faceNodeHashMap.maxProbe; ++probe)
+                {
+                    size_t slot = (hashIdx + probe) % faceNodeHashMap.capacity;
+                    const auto& entry = faceNodeHashMap.entries[slot];
+                    if (entry.key == voxelKey)
+                    {
+                        unsigned int nodeIdx = entry.value.headIndex;
+                        while (nodeIdx != UINT32_MAX)
+                        {
+                            const FaceNode& fn = faceNodes[nodeIdx];
+                            unsigned int faceIdx = fn.faceIndex;
+                            uint3 tri = faces[faceIdx];
+                            float3 a = positions[tri.x];
+                            float3 b = positions[tri.y];
+                            float3 c = positions[tri.z];
+                            float3 proj = ClosestPointOnTriangle(p, a, b, c);
+                            float dist2 = length2(p - proj);
+
+                            if (dist2 < minDist2)
+                            {
+                                minDist2 = dist2;
+                                minFace = faceIdx;
+                                closest = proj;
+                            }
+                            nodeIdx = fn.nextNodeIndex;
+                        }
+                        break;
+                    }
+                    if (entry.key == EMPTY_KEY)
+                        break;
+                }
+            }
+    outIndices[idx] = minFace;
+    outClosestPoints[idx] = closest;
+}
+
+std::vector<unsigned int> DeviceHalfEdgeMesh::FindNearestTriangleIndicesAndClosestPoints(
+    float3* d_positions, unsigned int numberOfInputPoints, int offset, std::vector<float3>& outClosestPoints)
+{
+    unsigned int* d_indices = nullptr;
+    float3* d_closest = nullptr;
+    CUDA_MALLOC(&d_indices, sizeof(unsigned int) * numberOfInputPoints);
+    CUDA_MALLOC(&d_closest, sizeof(float3) * numberOfInputPoints);
+
+    LaunchKernel(Kernel_FindNearestTriangles_HashMap_ClosestPoint, numberOfInputPoints,
+        d_positions, numberOfInputPoints,
+        positions, faces,
+        faceNodeHashMap.info,
+        faceNodes,
+        /*voxelSize=*/0.1f,
+        offset,
+        d_indices, d_closest);
+
+    CUDA_SYNC();
+
+    std::vector<unsigned int> h_indices(numberOfInputPoints);
+    outClosestPoints.resize(numberOfInputPoints);
+    CUDA_COPY_D2H(h_indices.data(), d_indices, sizeof(unsigned int) * numberOfInputPoints);
+    CUDA_COPY_D2H(outClosestPoints.data(), d_closest, sizeof(float3) * numberOfInputPoints);
+    CUDA_FREE(d_indices);
+    CUDA_FREE(d_closest);
 
     return h_indices;
 }

@@ -129,6 +129,8 @@ struct DeviceHalfEdgeMesh
     void DebugPrintFaceNodeHashMap();
     std::vector<unsigned int> FindUnlinkedFaceNodes();
     std::vector<unsigned int> FindNearestTriangleIndices(float3* d_positions, unsigned int numberOfInputPoints);
+    std::vector<unsigned int> FindNearestTriangleIndicesAndClosestPoints(
+        float3* d_positions, unsigned int numberOfInputPoints, int offset, std::vector<float3>& outClosestPoints);
 
     bool PickFace(const float3& rayOrigin, const float3& rayDir,int& outHitIndex, float& outHitT) const;
 
