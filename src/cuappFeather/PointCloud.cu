@@ -96,18 +96,18 @@ void DevicePointCloud::Intialize(unsigned int numberOfPoints)
 	if (numberOfPoints == 0) return;
 
 	this->numberOfPoints = numberOfPoints;
-	cudaMalloc(&positions, sizeof(float3) * numberOfPoints);
-	cudaMalloc(&normals, sizeof(float3) * numberOfPoints);
-	cudaMalloc(&colors, sizeof(float3) * numberOfPoints);
+	CUDA_MALLOC(&positions, sizeof(float3) * numberOfPoints);
+	CUDA_MALLOC(&normals, sizeof(float3) * numberOfPoints);
+	CUDA_MALLOC(&colors, sizeof(float3) * numberOfPoints);
 }
 
 void DevicePointCloud::Terminate()
 {
 	if (numberOfPoints > 0)
 	{
-		cudaFree(positions);
-		cudaFree(normals);
-		cudaFree(colors);
+		CUDA_FREE(positions);
+		CUDA_FREE(normals);
+		CUDA_FREE(colors);
 
 		positions = nullptr;
 		normals = nullptr;
@@ -145,13 +145,13 @@ void DevicePointCloud::CompactValidPoints()
 	float3* new_positions;
 	float3* new_normals;
 	float3* new_colors;
-	cudaMalloc(&new_positions, sizeof(float3) * numberOfPoints);
-	cudaMalloc(&new_normals, sizeof(float3) * numberOfPoints);
-	cudaMalloc(&new_colors, sizeof(float3) * numberOfPoints);
+	CUDA_MALLOC(&new_positions, sizeof(float3) * numberOfPoints);
+	CUDA_MALLOC(&new_normals, sizeof(float3) * numberOfPoints);
+	CUDA_MALLOC(&new_colors, sizeof(float3) * numberOfPoints);
 
 	unsigned int* d_valid_count = nullptr;
-	cudaMalloc(&d_valid_count, sizeof(unsigned int));
-	cudaMemset(d_valid_count, 0, sizeof(unsigned int));
+	CUDA_MALLOC(&d_valid_count, sizeof(unsigned int));
+	CUDA_MEMSET(d_valid_count, 0, sizeof(unsigned int));
 
 	LaunchKernel(Kernel_DevicePointCloudCompactValidPoints, numberOfPoints,
 		positions, normals, colors,
@@ -161,15 +161,15 @@ void DevicePointCloud::CompactValidPoints()
 	unsigned int valid_count = 0;
 	CUDA_COPY_D2H(&valid_count, d_valid_count, sizeof(unsigned int));
 
-	cudaFree(positions);
-	cudaFree(normals);
-	cudaFree(colors);
+	CUDA_FREE(positions);
+	CUDA_FREE(normals);
+	CUDA_FREE(colors);
 
 	positions = new_positions;
 	normals = new_normals;
 	colors = new_colors;
 	numberOfPoints = valid_count;
 
-	cudaFree(d_valid_count);
+	CUDA_FREE(d_valid_count);
 	CUDA_SYNC();
 }

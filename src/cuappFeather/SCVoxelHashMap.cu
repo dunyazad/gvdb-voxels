@@ -5,7 +5,7 @@ void SCVoxelHashMap::Initialize(float voxelSize, size_t capacity, unsigned int m
 	info.voxelSize = voxelSize;
 	info.capacity = capacity;
 	info.maxProbe = maxProbe;
-	cudaMalloc(&info.entries, sizeof(SCVoxelHashMapEntry) * info.capacity);
+	CUDA_MALLOC(&info.entries, sizeof(SCVoxelHashMapEntry) * info.capacity);
 
 	LaunchKernel(Kernel_SCVoxelHashMap_Clear, (unsigned int)info.capacity, info);
 
@@ -16,12 +16,12 @@ void SCVoxelHashMap::Terminate()
 {
 	if (nullptr != info.entries)
 	{
-		cudaFree(info.entries);
+		CUDA_FREE(info.entries);
 	}
 	info.entries = nullptr;
 
-	if (info.d_numberOfOccupiedVoxels) cudaFree(info.d_numberOfOccupiedVoxels);
-	if (info.d_occupiedVoxelIndices) cudaFree(info.d_occupiedVoxelIndices);
+	if (info.d_numberOfOccupiedVoxels) CUDA_FREE(info.d_numberOfOccupiedVoxels);
+	if (info.d_occupiedVoxelIndices) CUDA_FREE(info.d_occupiedVoxelIndices);
 
 	info.d_numberOfOccupiedVoxels = nullptr;
 	info.d_occupiedVoxelIndices = nullptr;
@@ -36,8 +36,8 @@ void SCVoxelHashMap::CheckOccupiedIndicesLength(unsigned int numberOfVoxelsToOcc
 
 	if (!info.d_occupiedVoxelIndices)
 	{
-		cudaMalloc(&info.d_occupiedVoxelIndices, sizeof(uint3) * numberOfVoxelsToOccupy);
-		cudaMalloc(&info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
+		CUDA_MALLOC(&info.d_occupiedVoxelIndices, sizeof(uint3) * numberOfVoxelsToOccupy);
+		CUDA_MALLOC(&info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
 		unsigned int zero = 0;
 		CUDA_COPY_H2D(info.d_numberOfOccupiedVoxels, &zero, sizeof(unsigned int));
 		CUDA_SYNC();
@@ -51,10 +51,10 @@ void SCVoxelHashMap::CheckOccupiedIndicesLength(unsigned int numberOfVoxelsToOcc
 		if (required > info.h_occupiedCapacity)
 		{
 			int3* d_new = nullptr;
-			cudaMalloc(&d_new, sizeof(int3) * required);
+			CUDA_MALLOC(&d_new, sizeof(int3) * required);
 			CUDA_COPY_D2D(d_new, info.d_occupiedVoxelIndices, sizeof(uint3) * info.h_numberOfOccupiedVoxels);
 			CUDA_SYNC();
-			cudaFree(info.d_occupiedVoxelIndices);
+			CUDA_FREE(info.d_occupiedVoxelIndices);
 			info.d_occupiedVoxelIndices = d_new;
 			info.h_occupiedCapacity = required;
 		}
@@ -89,10 +89,10 @@ HostPointCloud SCVoxelHashMap::Serialize()
 	float3* d_colors = nullptr;
 	unsigned int* d_numberOfPoints = nullptr;
 
-	cudaMalloc(&d_positions, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
-	cudaMalloc(&d_normals, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
-	cudaMalloc(&d_colors, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
-	cudaMalloc(&d_numberOfPoints, sizeof(unsigned int));
+	CUDA_MALLOC(&d_positions, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
+	CUDA_MALLOC(&d_normals, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
+	CUDA_MALLOC(&d_colors, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
+	CUDA_MALLOC(&d_numberOfPoints, sizeof(unsigned int));
 
 	LaunchKernel(Kernel_SCVoxelHashMap_CreateZeroCrossingPoints, info.h_numberOfOccupiedVoxels,
 		info, d_positions, d_normals, d_colors, d_numberOfPoints);
@@ -107,10 +107,10 @@ HostPointCloud SCVoxelHashMap::Serialize()
 	CUDA_COPY_D2H(h_result.normals, d_normals, sizeof(float3) * h_numberOfPoints);
 	CUDA_COPY_D2H(h_result.colors, d_colors, sizeof(float3) * h_numberOfPoints);
 
-	cudaFree(d_positions);
-	cudaFree(d_normals);
-	cudaFree(d_colors);
-	cudaFree(d_numberOfPoints);
+	CUDA_FREE(d_positions);
+	CUDA_FREE(d_normals);
+	CUDA_FREE(d_colors);
+	CUDA_FREE(d_numberOfPoints);
 
 	return h_result;
 }
@@ -126,10 +126,10 @@ void SCVoxelHashMap::MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue)
 
 	unsigned int* d_numberOfPoints = nullptr;
 	unsigned int* d_numberOfFaces = nullptr;
-	cudaMalloc(&d_numberOfPoints, sizeof(unsigned int));
-	cudaMalloc(&d_numberOfFaces, sizeof(unsigned int));
-	cudaMemset(d_numberOfPoints, 0, sizeof(unsigned int));
-	cudaMemset(d_numberOfFaces, 0, sizeof(unsigned int));
+	CUDA_MALLOC(&d_numberOfPoints, sizeof(unsigned int));
+	CUDA_MALLOC(&d_numberOfFaces, sizeof(unsigned int));
+	CUDA_MEMSET(d_numberOfPoints, 0, sizeof(unsigned int));
+	CUDA_MEMSET(d_numberOfFaces, 0, sizeof(unsigned int));
 	CUDA_SYNC();
 
 	LaunchKernel(Kernel_SCVoxelHashMap_CreateZeroCrossingPoints, info.h_numberOfOccupiedVoxels,
@@ -154,8 +154,8 @@ void SCVoxelHashMap::MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue)
 
 	//mesh.LaplacianSmoothing(5, 1.0f, true);
 
-	cudaFree(d_numberOfPoints);
-	cudaFree(d_numberOfFaces);
+	CUDA_FREE(d_numberOfPoints);
+	CUDA_FREE(d_numberOfFaces);
 
 	CUDA_SYNC();
 

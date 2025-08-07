@@ -13,22 +13,22 @@ void BitVolume::Initialize(dim3 dimensions, float voxelSize)
 	info.allocated_dimensions = dim3(x, y, z);
 	info.numberOfAllocatedWords = x * y * z;
 
-	cudaMalloc(&info.d_volume, sizeof(uint32_t) * info.numberOfAllocatedWords);
-	cudaMemset(info.d_volume, 0, sizeof(uint32_t) * info.numberOfAllocatedWords);
+	CUDA_MALLOC(&info.d_volume, sizeof(uint32_t) * info.numberOfAllocatedWords);
+	CUDA_MEMSET(info.d_volume, 0, sizeof(uint32_t) * info.numberOfAllocatedWords);
 }
 
 void BitVolume::Terminate()
 {
-	if (info.d_volume) cudaFree(info.d_volume);
+	if (info.d_volume) CUDA_FREE(info.d_volume);
 	info.d_volume = nullptr;
 
-	if (info.d_simplePointLUT) cudaFree(info.d_simplePointLUT);
+	if (info.d_simplePointLUT) CUDA_FREE(info.d_simplePointLUT);
 	info.d_simplePointLUT = nullptr;
 }
 
 void BitVolume::Clear()
 {
-	cudaMemset(info.d_volume, 0, sizeof(uint32_t) * info.numberOfAllocatedWords);
+	CUDA_MEMSET(info.d_volume, 0, sizeof(uint32_t) * info.numberOfAllocatedWords);
 }
 
 __device__ bool BitVolume::isOccupied(const BitVolumeInfo& info, dim3 voxelIndex)
@@ -92,8 +92,9 @@ void BitVolume::OccupyFromPoints(float3 volumeMin, const float3* d_points, int n
 	const int threads = 256;
 	const int blocks = (numPoints + threads - 1) / threads;
 
-	Kernel_BitVolumeInfo_OccupyFromPoints << <blocks, threads >> > (info, d_points, numPoints);
-	CUDA_SYNC();  // ÇÊ¿ä½Ã
+	LaunchKernel(Kernel_BitVolumeInfo_OccupyFromPoints, numPoints,
+		info, d_points, numPoints);
+	CUDA_SYNC();
 }
 
 void BitVolume::OccupyFromEigenPoints(float3 volumeMin, const Eigen::Vector3f* d_points, int numPoints)
@@ -102,7 +103,8 @@ void BitVolume::OccupyFromEigenPoints(float3 volumeMin, const Eigen::Vector3f* d
 
 	const int threads = 256;
 	const int blocks = (numPoints + threads - 1) / threads;
-	Kernel_BitVolumeInfo_OccupyFromEigenPoints << <blocks, threads >> > (info, d_points, numPoints);
+	LaunchKernel(Kernel_BitVolumeInfo_OccupyFromEigenPoints, numPoints,
+		info, d_points, numPoints);
 	CUDA_SYNC();
 }
 
@@ -111,10 +113,11 @@ void BitVolume::SerializeToFloat3(float3* d_output, unsigned int* d_outputCount)
 	const int threads = 256;
 	const int blocks = (info.numberOfAllocatedWords + threads - 1) / threads;
 
-	cudaMemset(d_outputCount, 0, sizeof(unsigned int));
+	CUDA_MEMSET(d_outputCount, 0, sizeof(unsigned int));
 
-	Kernel_BitVolumeInfo_SerializeToFloat3 << <blocks, threads >> > (info, d_output, d_outputCount);
-	CUDA_SYNC();  // optional
+	LaunchKernel(Kernel_BitVolumeInfo_SerializeToFloat3, info.numberOfAllocatedWords,
+		info, d_output, d_outputCount);
+	CUDA_SYNC();
 }
 
 __device__ float BitVolume::getVoxelCornerValue(const BitVolumeInfo& info, dim3 base, int dx, int dy, int dz)
@@ -171,12 +174,12 @@ void BitVolume::MarchingCubes(std::vector<float3>& vertices, std::vector<int3>& 
 	unsigned int* d_vCount;
 	unsigned int* d_fCount;
 
-	cudaMalloc(&d_vertices, sizeof(float3) * MAX_VERTICES);
-	cudaMalloc(&d_faces, sizeof(int3) * MAX_TRIANGLES);
-	cudaMalloc(&d_vCount, sizeof(unsigned int));
-	cudaMalloc(&d_fCount, sizeof(unsigned int));
-	cudaMemset(d_vCount, 0, sizeof(unsigned int));
-	cudaMemset(d_fCount, 0, sizeof(unsigned int));
+	CUDA_MALLOC(&d_vertices, sizeof(float3) * MAX_VERTICES);
+	CUDA_MALLOC(&d_faces, sizeof(int3) * MAX_TRIANGLES);
+	CUDA_MALLOC(&d_vCount, sizeof(unsigned int));
+	CUDA_MALLOC(&d_fCount, sizeof(unsigned int));
+	CUDA_MEMSET(d_vCount, 0, sizeof(unsigned int));
+	CUDA_MEMSET(d_fCount, 0, sizeof(unsigned int));
 
 	dim3 threads(8, 8, 8);
 	dim3 blocks(
@@ -201,10 +204,10 @@ void BitVolume::MarchingCubes(std::vector<float3>& vertices, std::vector<int3>& 
 	CUDA_COPY_D2H(vertices.data(), d_vertices, vertexCount * sizeof(float3));
 	CUDA_COPY_D2H(faces.data(), d_faces, faceCount * sizeof(int3));
 
-	cudaFree(d_vertices);
-	cudaFree(d_faces);
-	cudaFree(d_vCount);
-	cudaFree(d_fCount);
+	CUDA_FREE(d_vertices);
+	CUDA_FREE(d_faces);
+	CUDA_FREE(d_vCount);
+	CUDA_FREE(d_fCount);
 }
 
 __global__ void Kernel_BitVolumeInfo_OccupyFromPoints(BitVolumeInfo info, const float3* points, int numPoints)

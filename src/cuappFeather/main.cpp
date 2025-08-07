@@ -480,9 +480,14 @@ int main(int argc, char** argv)
 					printf("indices : %d\n", indices.size());
 					for (size_t i = 0; i < cuInstance.d_input.numberOfPoints; i++)
 					{
+						auto& p = pcpositions[i];
+
 						unsigned int triIdx = indices[i];
 						if (triIdx == UINT32_MAX)
-							continue; // 혹은 Color::gray() 등으로 표기
+						{
+							VD::AddBox("pc", { XYZ(p) }, { 0.0f, 0.1f, 0.0f }, glm::vec3(0.05f), Color::red());
+							continue;
+						}
 
 						auto& f = faces[triIdx];
 						auto& p0 = positions[f.x];
@@ -492,11 +497,9 @@ int main(int argc, char** argv)
 
 						auto& closestPoint = closestPoints[i];
 
-						auto& p = pcpositions[i];
-
 						VD::AddBox("pc", { XYZ(p) }, { 0.0f, 0.1f, 0.0f }, glm::vec3(0.005f), Color::white());
 						//VD::AddLine("Nearest", { XYZ(p) }, { XYZ(centroid) }, Color::red());
-						VD::AddLine("Nearest", { XYZ(p) }, { XYZ(closestPoint) }, Color::red());
+						VD::AddLine("Nearest", { XYZ(p) }, { XYZ(closestPoint) }, Color::white());
 					}
 				}
 			}

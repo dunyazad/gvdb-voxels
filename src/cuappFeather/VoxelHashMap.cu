@@ -5,7 +5,7 @@ void VoxelHashMap::Initialize(float voxelSize, size_t capacity, unsigned int max
 	info.voxelSize = voxelSize;
 	info.capacity = capacity;
 	info.maxProbe = maxProbe;
-	cudaMalloc(&info.entries, sizeof(VoxelHashMapEntry) * info.capacity);
+	CUDA_MALLOC(&info.entries, sizeof(VoxelHashMapEntry) * info.capacity);
 
 	LaunchKernel(Kernel_VoxelHashMap_Clear, (unsigned int)info.capacity, info);
 
@@ -16,12 +16,12 @@ void VoxelHashMap::Terminate()
 {
 	if (nullptr != info.entries)
 	{
-		cudaFree(info.entries);
+		CUDA_FREE(info.entries);
 	}
 	info.entries = nullptr;
 
-	if (info.d_numberOfOccupiedVoxels) cudaFree(info.d_numberOfOccupiedVoxels);
-	if (info.d_occupiedVoxelIndices) cudaFree(info.d_occupiedVoxelIndices);
+	if (info.d_numberOfOccupiedVoxels) CUDA_FREE(info.d_numberOfOccupiedVoxels);
+	if (info.d_occupiedVoxelIndices) CUDA_FREE(info.d_occupiedVoxelIndices);
 
 	info.d_numberOfOccupiedVoxels = nullptr;
 	info.d_occupiedVoxelIndices = nullptr;
@@ -36,8 +36,8 @@ void VoxelHashMap::CheckOccupiedIndicesLength(unsigned int numberOfVoxelsToOccup
 
 	if (!info.d_occupiedVoxelIndices)
 	{
-		cudaMalloc(&info.d_occupiedVoxelIndices, sizeof(uint3) * numberOfVoxelsToOccupy);
-		cudaMalloc(&info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
+		CUDA_MALLOC(&info.d_occupiedVoxelIndices, sizeof(uint3) * numberOfVoxelsToOccupy);
+		CUDA_MALLOC(&info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
 		unsigned int zero = 0;
 		CUDA_COPY_H2D(info.d_numberOfOccupiedVoxels, &zero, sizeof(unsigned int));
 		CUDA_SYNC();
@@ -51,10 +51,10 @@ void VoxelHashMap::CheckOccupiedIndicesLength(unsigned int numberOfVoxelsToOccup
 		if (required > info.h_occupiedCapacity)
 		{
 			int3* d_new = nullptr;
-			cudaMalloc(&d_new, sizeof(int3) * required);
+			CUDA_MALLOC(&d_new, sizeof(int3) * required);
 			CUDA_COPY_D2D(d_new, info.d_occupiedVoxelIndices, sizeof(uint3) * info.h_numberOfOccupiedVoxels);
 			CUDA_SYNC();
-			cudaFree(info.d_occupiedVoxelIndices);
+			CUDA_FREE(info.d_occupiedVoxelIndices);
 			info.d_occupiedVoxelIndices = d_new;
 			info.h_occupiedCapacity = required;
 		}
@@ -169,9 +169,9 @@ void VoxelHashMap::Dilation(int iterations, int step)
 		int maxNew = prevNumOccupied * ((2 * step + 1) * (2 * step + 1) * (2 * step + 1) - 1);
 		int3* d_newOccupiedIndices = nullptr;
 		unsigned int* d_newOccupiedCount = nullptr;
-		cudaMalloc(&d_newOccupiedIndices, sizeof(int3) * maxNew);
-		cudaMalloc(&d_newOccupiedCount, sizeof(unsigned int));
-		cudaMemset(d_newOccupiedCount, 0, sizeof(unsigned int));
+		CUDA_MALLOC(&d_newOccupiedIndices, sizeof(int3) * maxNew);
+		CUDA_MALLOC(&d_newOccupiedCount, sizeof(unsigned int));
+		CUDA_MEMSET(d_newOccupiedCount, 0, sizeof(unsigned int));
 
 		LaunchKernel(Kernel_VoxelHashMap_Dilation, prevNumOccupied, info,
 			d_newOccupiedIndices, d_newOccupiedCount, step);
@@ -191,8 +191,8 @@ void VoxelHashMap::Dilation(int iterations, int step)
 			CUDA_COPY_H2D(info.d_numberOfOccupiedVoxels, &info.h_numberOfOccupiedVoxels, sizeof(unsigned int));
 		}
 
-		cudaFree(d_newOccupiedIndices);
-		cudaFree(d_newOccupiedCount);
+		CUDA_FREE(d_newOccupiedIndices);
+		CUDA_FREE(d_newOccupiedCount);
 
 		printf("Dilation iteration %d: prevNumOccupied: %u, new: %u, total: %u\n",
 			iter, prevNumOccupied, h_newOccupied, info.h_numberOfOccupiedVoxels);
@@ -218,20 +218,20 @@ bool VoxelHashMap::MarchingCubes(std::vector<float3>& outVertices, std::vector<f
 
 	int edgeSlotCapacity = maxVertices * 3;
 
-	cudaMalloc(&d_vertices, sizeof(float3) * maxVertices);
-	cudaMalloc(&d_normals, sizeof(float3) * maxVertices);
-	cudaMalloc(&d_colors, sizeof(float3) * maxVertices);
-	cudaMalloc(&d_indices, sizeof(uint3) * maxTriangles);
-	cudaMalloc(&d_edgeSlotKeys, sizeof(uint64_t) * edgeSlotCapacity);
-	cudaMalloc(&d_edgeSlotValues, sizeof(int) * edgeSlotCapacity);
-	cudaMalloc(&d_numVertices, sizeof(unsigned int));
-	cudaMalloc(&d_numTriangles, sizeof(unsigned int));
+	CUDA_MALLOC(&d_vertices, sizeof(float3) * maxVertices);
+	CUDA_MALLOC(&d_normals, sizeof(float3) * maxVertices);
+	CUDA_MALLOC(&d_colors, sizeof(float3) * maxVertices);
+	CUDA_MALLOC(&d_indices, sizeof(uint3) * maxTriangles);
+	CUDA_MALLOC(&d_edgeSlotKeys, sizeof(uint64_t) * edgeSlotCapacity);
+	CUDA_MALLOC(&d_edgeSlotValues, sizeof(int) * edgeSlotCapacity);
+	CUDA_MALLOC(&d_numVertices, sizeof(unsigned int));
+	CUDA_MALLOC(&d_numTriangles, sizeof(unsigned int));
 
-	cudaMemset(d_numVertices, 0, sizeof(unsigned int));
-	cudaMemset(d_numTriangles, 0, sizeof(unsigned int));
+	CUDA_MEMSET(d_numVertices, 0, sizeof(unsigned int));
+	CUDA_MEMSET(d_numTriangles, 0, sizeof(unsigned int));
 #define INVALID_EDGE_KEY 0xffffffffffffffffull
-	cudaMemset(d_edgeSlotKeys, 0xff, sizeof(uint64_t) * edgeSlotCapacity);
-	cudaMemset(d_edgeSlotValues, -1, sizeof(int) * edgeSlotCapacity);
+	CUDA_MEMSET(d_edgeSlotKeys, 0xff, sizeof(uint64_t) * edgeSlotCapacity);
+	CUDA_MEMSET(d_edgeSlotValues, -1, sizeof(int) * edgeSlotCapacity);
 
 	LaunchKernel(Kernel_VoxelHashMap_MarchingCubes, info.h_numberOfOccupiedVoxels,
 		info,
@@ -263,14 +263,14 @@ bool VoxelHashMap::MarchingCubes(std::vector<float3>& outVertices, std::vector<f
 	CUDA_COPY_D2H(outColors.data(), d_colors, sizeof(float3) * h_numVertices);
 	CUDA_COPY_D2H(outTriangles.data(), d_indices, sizeof(uint3) * h_numTriangles);
 
-	cudaFree(d_vertices);
-	cudaFree(d_normals);
-	cudaFree(d_colors);
-	cudaFree(d_indices);
-	cudaFree(d_edgeSlotKeys);
-	cudaFree(d_edgeSlotValues);
-	cudaFree(d_numVertices);
-	cudaFree(d_numTriangles);
+	CUDA_FREE(d_vertices);
+	CUDA_FREE(d_normals);
+	CUDA_FREE(d_colors);
+	CUDA_FREE(d_indices);
+	CUDA_FREE(d_edgeSlotKeys);
+	CUDA_FREE(d_edgeSlotValues);
+	CUDA_FREE(d_numVertices);
+	CUDA_FREE(d_numTriangles);
 
 	return true;
 }

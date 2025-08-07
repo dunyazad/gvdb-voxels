@@ -163,8 +163,8 @@ struct DeviceHalfEdgeMesh
         unsigned int numberOfPoints,
         const HalfEdge* halfEdges,
         const unsigned int* vertexToHalfEdge,
-        unsigned int* neighbors,        // [MAX_NEIGHBORS] output
-        unsigned int& outCount,         // output count
+        unsigned int* neighbors,
+        unsigned int& outCount,
         unsigned int maxNeighbors,
         float radius);
 };
@@ -212,6 +212,37 @@ __global__ void Kernel_DeviceHalfEdgeMesh_RemapVertexToHalfEdge(
 __global__ void Kernel_DeviceHalfEdgeMesh_RemapVertexIndexOfFacesAndHalfEdges(
     uint3* faces, HalfEdge* halfEdges, unsigned int numberOfFaces, unsigned int* vertexIndexMapping);
 
+__global__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap(
+    HashMapInfo<uint64_t, FaceNodeHashMapEntry> info,
+    float3* positions,
+    uint3* faces,
+    FaceNode* faceNodes,
+    float voxelSize,
+    unsigned int numberOfFaces,
+    unsigned int* d_numDropped);
+
+__global__ void Kernel_FindNearestTriangles_HashMap(
+    const float3* points,
+    unsigned int numPoints,
+    const float3* positions,
+    const uint3* faces,
+    HashMapInfo<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap,
+    const FaceNode* faceNodes,
+    float voxelSize,
+    unsigned int* outIndices);
+
+__global__ void Kernel_FindNearestTriangles_HashMap_ClosestPoint(
+    const float3* points,
+    unsigned int numPoints,
+    const float3* positions,
+    const uint3* faces,
+    HashMapInfo<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap,
+    const FaceNode* faceNodes,
+    float voxelSize,
+    int offset,
+    unsigned int* outIndices,
+    float3* outClosestPoints);
+
 __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     float3* positions_in,
     float3* positions_out,
@@ -235,9 +266,9 @@ __global__ void Kernel_DeviceHalfEdgeMesh_OneRing(
     const HalfEdge* halfEdges,
     const unsigned int* vertexToHalfEdge,
     unsigned int numberOfPoints,
-    unsigned int v, // 조사할 vertex index
+    unsigned int v,
     bool fixBorderVertices,
-    unsigned int* outBuffer, // outBuffer[0:count-1]에 결과 저장
+    unsigned int* outBuffer,
     unsigned int* outCount);
 
 __global__ void Kernel_DeviceHalfEdgeMesh_GetVerticesInRadius(
@@ -260,8 +291,8 @@ __global__ void Kernel_GetAllVerticesInRadius(
     unsigned int numberOfPoints,
     const HalfEdge* halfEdges,
     const unsigned int* vertexToHalfEdge,
-    unsigned int* allNeighbors,   // [numberOfPoints * MAX_NEIGHBORS]
-    unsigned int* allNeighborSizes, // [numberOfPoints]
+    unsigned int* allNeighbors,
+    unsigned int* allNeighborSizes,
     unsigned int maxNeighbors,
     float radius
 );
@@ -275,3 +306,26 @@ __global__ void Kernel_RadiusLaplacianSmooth(
     unsigned int maxNeighbors,
     float radius,
     float lambda);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_GetAABB(
+    float3* positions,
+    uint3* faces,
+    cuAABB* aabbs,
+    cuAABB* mMaabbs,
+    unsigned int numberOfPoints,
+    unsigned int numberOfFaces);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_GetMortonCodes(
+    const float3* positions,
+    const uint3* faces,
+    uint64_t* mortonCodes,
+    unsigned int numberOfPoints,
+    unsigned int numberOfFaces,
+    float3 min_corner,
+    float voxel_size);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_RecalcAABB(
+    float3* positions,
+    float3* min,
+    float3* max,
+    unsigned int numberOfPoints);

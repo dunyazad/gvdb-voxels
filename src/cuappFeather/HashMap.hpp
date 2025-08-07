@@ -61,15 +61,15 @@ struct HashMap
         info.capacity = capacity;
         info.maxProbe = maxProbe;
 
-        CUDA_CHECK(cudaMalloc(&info.entries, sizeof(HashMapEntry<Key, Value>) * info.capacity));
-        CUDA_CHECK(cudaMemset(info.entries, 0xFF, sizeof(HashMapEntry<Key, Value>) * info.capacity));
+        CUDA_CHECK(CUDA_MALLOC(&info.entries, sizeof(HashMapEntry<Key, Value>) * info.capacity));
+        CUDA_CHECK(CUDA_MEMSET(info.entries, 0xFF, sizeof(HashMapEntry<Key, Value>) * info.capacity));
     }
 
     void Terminate()
     {
         if (info.entries != nullptr)
         {
-            CUDA_CHECK(cudaFree(info.entries));
+            CUDA_CHECK(CUDA_FREE(info.entries));
             info.entries = nullptr;
         }
     }
@@ -78,7 +78,7 @@ struct HashMap
     {
         if (info.entries != nullptr)
         {
-            CUDA_CHECK(cudaMemset(info.entries, value, sizeof(HashMapEntry<Key, Value>) * info.capacity));
+            CUDA_CHECK(CUDA_MEMSET(info.entries, value, sizeof(HashMapEntry<Key, Value>) * info.capacity));
         }
     }
 

@@ -222,6 +222,109 @@ __device__ inline void atomicMaxF(float* addr, float val, int* idx, int myIdx)
 }
 #endif
 
+__host__ __device__ inline float PointTriangleDistance2(const float3& p, const float3& a, const float3& b, const float3& c)
+{
+    // From "Real-Time Collision Detection" by Christer Ericson
+    float3 ab = b - a;
+    float3 ac = c - a;
+    float3 ap = p - a;
+
+    float d1 = dot(ab, ap);
+    float d2 = dot(ac, ap);
+
+    if (d1 <= 0.0f && d2 <= 0.0f) return dot(ap, ap); // barycentric (1,0,0)
+
+    float3 bp = p - b;
+    float d3 = dot(ab, bp);
+    float d4 = dot(ac, bp);
+    if (d3 >= 0.0f && d4 <= d3) return dot(bp, bp); // barycentric (0,1,0)
+
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
+    {
+        float v = d1 / (d1 - d3);
+        float3 proj = a + v * ab;
+        return dot(p - proj, p - proj);
+    }
+
+    float3 cp = p - c;
+    float d5 = dot(ab, cp);
+    float d6 = dot(ac, cp);
+    if (d6 >= 0.0f && d5 <= d6) return dot(cp, cp); // barycentric (0,0,1)
+
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
+    {
+        float w = d2 / (d2 - d6);
+        float3 proj = a + w * ac;
+        return dot(p - proj, p - proj);
+    }
+
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f)
+    {
+        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        float3 proj = b + w * (c - b);
+        return dot(p - proj, p - proj);
+    }
+
+    // Inside face region
+    float denom = 1.0f / (va + vb + vc);
+    float v = vb * denom;
+    float w = vc * denom;
+    float3 proj = a + ab * v + ac * w;
+    return dot(p - proj, p - proj);
+}
+
+__host__ __device__ inline float3 ClosestPointOnTriangle(const float3& p, const float3& a, const float3& b, const float3& c)
+{
+    // From "Real-Time Collision Detection" by Christer Ericson
+    float3 ab = b - a;
+    float3 ac = c - a;
+    float3 ap = p - a;
+    float d1 = dot(ab, ap);
+    float d2 = dot(ac, ap);
+
+    if (d1 <= 0.0f && d2 <= 0.0f) return a; // barycentric (1,0,0)
+
+    float3 bp = p - b;
+    float d3 = dot(ab, bp);
+    float d4 = dot(ac, bp);
+    if (d3 >= 0.0f && d4 <= d3) return b; // barycentric (0,1,0)
+
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
+    {
+        float v = d1 / (d1 - d3);
+        return a + v * ab; // barycentric (1-v, v, 0)
+    }
+
+    float3 cp = p - c;
+    float d5 = dot(ab, cp);
+    float d6 = dot(ac, cp);
+    if (d6 >= 0.0f && d5 <= d6) return c; // barycentric (0,0,1)
+
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
+    {
+        float w = d2 / (d2 - d6);
+        return a + w * ac; // barycentric (1-w, 0, w)
+    }
+
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f)
+    {
+        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return b + w * (c - b); // barycentric (0, 1-w, w)
+    }
+
+    // Inside face region
+    float denom = 1.0f / (va + vb + vc);
+    float v = vb * denom;
+    float w = vc * denom;
+    return a + ab * v + ac * w;
+}
+
 __host__ __device__ inline bool RayTriangleIntersect(
     const float3& orig, const float3& dir,
     const float3& v0, const float3& v1, const float3& v2,

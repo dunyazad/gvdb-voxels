@@ -69,13 +69,13 @@ struct DenseGrid
 
         size_t allocated = 0;
 
-        cudaMalloc(&info.d_voxels, sizeof(Voxel) * info.numberOfVoxels);
-        cudaMemset(info.d_voxels, 0, sizeof(Voxel) * info.numberOfVoxels);
+        CUDA_MALLOC(&info.d_voxels, sizeof(Voxel) * info.numberOfVoxels);
+        CUDA_MEMSET(info.d_voxels, 0, sizeof(Voxel) * info.numberOfVoxels);
 
         allocated += sizeof(Voxel) * info.numberOfVoxels;
 
-        cudaMalloc(&info.d_visitedFlags, sizeof(unsigned int) * info.numberOfVoxels);
-        cudaMemset(info.d_visitedFlags, 0, sizeof(unsigned int) * info.numberOfVoxels);
+        CUDA_MALLOC(&info.d_visitedFlags, sizeof(unsigned int) * info.numberOfVoxels);
+        CUDA_MEMSET(info.d_visitedFlags, 0, sizeof(unsigned int) * info.numberOfVoxels);
 
         allocated += sizeof(unsigned int) * info.numberOfVoxels;
 
@@ -84,10 +84,10 @@ struct DenseGrid
 
     void Terminate()
     {
-        if (info.d_voxels) cudaFree(info.d_voxels);
-        if (info.d_numberOfOccupiedVoxels) cudaFree(info.d_numberOfOccupiedVoxels);
-        if (info.d_occupiedVoxelIndices) cudaFree(info.d_occupiedVoxelIndices);
-        if (info.d_visitedFlags) cudaFree(info.d_visitedFlags);
+        if (info.d_voxels) CUDA_FREE(info.d_voxels);
+        if (info.d_numberOfOccupiedVoxels) CUDA_FREE(info.d_numberOfOccupiedVoxels);
+        if (info.d_occupiedVoxelIndices) CUDA_FREE(info.d_occupiedVoxelIndices);
+        if (info.d_visitedFlags) CUDA_FREE(info.d_visitedFlags);
 
         info.d_voxels = nullptr;
         info.d_numberOfOccupiedVoxels = nullptr;
@@ -100,17 +100,17 @@ struct DenseGrid
 
     void Clear()
     {
-        if (info.d_voxels) cudaMemset(info.d_voxels, 0, sizeof(Voxel) * info.numberOfVoxels);
-        if (info.d_visitedFlags) cudaMemset(info.d_visitedFlags, 0, sizeof(unsigned int) * info.numberOfVoxels);
+        if (info.d_voxels) CUDA_MEMSET(info.d_voxels, 0, sizeof(Voxel) * info.numberOfVoxels);
+        if (info.d_visitedFlags) CUDA_MEMSET(info.d_visitedFlags, 0, sizeof(unsigned int) * info.numberOfVoxels);
 
         if (info.d_numberOfOccupiedVoxels)
         {
-            cudaFree(info.d_numberOfOccupiedVoxels);
+            CUDA_FREE(info.d_numberOfOccupiedVoxels);
             info.d_numberOfOccupiedVoxels = nullptr;
         }
         if (info.d_occupiedVoxelIndices)
         {
-            cudaFree(info.d_occupiedVoxelIndices);
+            CUDA_FREE(info.d_occupiedVoxelIndices);
             info.d_occupiedVoxelIndices = nullptr;
         }
 
@@ -124,8 +124,8 @@ struct DenseGrid
 
         if (!info.d_occupiedVoxelIndices)
         {
-            cudaMalloc(&info.d_occupiedVoxelIndices, sizeof(uint3) * numberOfVoxelsToOccupy);
-            cudaMalloc(&info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
+            CUDA_MALLOC(&info.d_occupiedVoxelIndices, sizeof(uint3) * numberOfVoxelsToOccupy);
+            CUDA_MALLOC(&info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
             unsigned int zero = 0;
             CUDA_COPY_H2D(info.d_numberOfOccupiedVoxels, &zero, sizeof(unsigned int));
             info.h_occupiedCapacity = numberOfVoxelsToOccupy;
@@ -138,9 +138,9 @@ struct DenseGrid
             {
                 required = min(required, info.numberOfVoxels);
                 uint3* d_new = nullptr;
-                cudaMalloc(&d_new, sizeof(uint3) * required);
+                CUDA_MALLOC(&d_new, sizeof(uint3) * required);
                 CUDA_COPY_D2D(d_new, info.d_occupiedVoxelIndices, sizeof(uint3) * info.h_numberOfOccupiedVoxels);
-                cudaFree(info.d_occupiedVoxelIndices);
+                CUDA_FREE(info.d_occupiedVoxelIndices);
                 info.d_occupiedVoxelIndices = d_new;
                 info.h_occupiedCapacity = required;
             }

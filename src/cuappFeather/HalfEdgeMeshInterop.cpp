@@ -76,10 +76,10 @@ void HalfEdgeMeshInterop::UploadFromDevice(DeviceHalfEdgeMesh& deviceMesh)
     cudaGraphicsResourceGetMappedPointer((void**)&d_ebo, &sizeEbo, cudaEbo);
 
     // DeviceHalfEdgeMesh의 device pointer에서 VBO로 직접 복사
-    cudaMemcpy(d_vboPos, deviceMesh.positions, sizeof(float3) * numVertices, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(d_vboNormal, deviceMesh.normals, sizeof(float3) * numVertices, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(d_vboColor, deviceMesh.colors, sizeof(float3) * numVertices, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(d_ebo, deviceMesh.faces, sizeof(uint32_t) * numIndices, cudaMemcpyDeviceToDevice);
+    CUDA_COPY_D2D(d_vboPos, deviceMesh.positions, sizeof(float3) * numVertices);
+    CUDA_COPY_D2D(d_vboNormal, deviceMesh.normals, sizeof(float3) * numVertices);
+    CUDA_COPY_D2D(d_vboColor, deviceMesh.colors, sizeof(float3) * numVertices);
+    CUDA_COPY_D2D(d_ebo, deviceMesh.faces, sizeof(uint32_t) * numIndices);
 
     cudaGraphicsUnmapResources(1, &cudaVboPos, 0);
     cudaGraphicsUnmapResources(1, &cudaVboNormal, 0);

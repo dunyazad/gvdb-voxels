@@ -5,10 +5,9 @@
 
 #define MAX_FRONTIER (1 << 16)
 #define MAX_RESULT   (1 << 20)
-
 #define MAX_NEIGHBORS 64
 
-
+#pragma region HostHalfEdgeMesh
 HostHalfEdgeMesh::HostHalfEdgeMesh() {}
 
 HostHalfEdgeMesh::HostHalfEdgeMesh(const HostHalfEdgeMesh& other)
@@ -214,7 +213,7 @@ void HostHalfEdgeMesh::BuildHalfEdges()
 
         e0.faceIndex = i; e1.faceIndex = i; e2.faceIndex = i;
         e0.nextIndex = i * 3 + 1; e1.nextIndex = i * 3 + 2; e2.nextIndex = i * 3 + 0;
-        
+
         e0.vertexIndex = face.x;
         e1.vertexIndex = face.y;
         e2.vertexIndex = face.z;
@@ -486,10 +485,9 @@ bool HostHalfEdgeMesh::CollapseEdge(unsigned int heIdx)
 
     return true;
 }
+#pragma endregion
 
-
-
-
+#pragma region DeviceHalfEdgeMesh
 DeviceHalfEdgeMesh::DeviceHalfEdgeMesh() {}
 
 DeviceHalfEdgeMesh::DeviceHalfEdgeMesh(const HostHalfEdgeMesh& other)
@@ -538,9 +536,9 @@ void DeviceHalfEdgeMesh::Initialize(unsigned int numberOfPoints, unsigned int nu
 
     if (numberOfPoints > 0)
     {
-        cudaMalloc(&positions, sizeof(float3) * numberOfPoints);
-        cudaMalloc(&normals, sizeof(float3) * numberOfPoints);
-        cudaMalloc(&colors, sizeof(float3) * numberOfPoints);
+        CUDA_MALLOC(&positions, sizeof(float3) * numberOfPoints);
+        CUDA_MALLOC(&normals, sizeof(float3) * numberOfPoints);
+        CUDA_MALLOC(&colors, sizeof(float3) * numberOfPoints);
     }
     else
     {
@@ -550,11 +548,11 @@ void DeviceHalfEdgeMesh::Initialize(unsigned int numberOfPoints, unsigned int nu
     }
     if (numberOfFaces > 0)
     {
-        cudaMalloc(&faces, sizeof(uint3) * numberOfFaces);
-        cudaMalloc(&halfEdges, sizeof(HalfEdge) * numberOfFaces * 3);
-        cudaMalloc(&halfEdgeFaces, sizeof(HalfEdgeFace) * numberOfFaces);
-        cudaMalloc(&vertexToHalfEdge, sizeof(unsigned int) * numberOfPoints);
-        cudaMemset(vertexToHalfEdge, 0xFF, sizeof(unsigned int) * numberOfPoints);
+        CUDA_MALLOC(&faces, sizeof(uint3) * numberOfFaces);
+        CUDA_MALLOC(&halfEdges, sizeof(HalfEdge) * numberOfFaces * 3);
+        CUDA_MALLOC(&halfEdgeFaces, sizeof(HalfEdgeFace) * numberOfFaces);
+        CUDA_MALLOC(&vertexToHalfEdge, sizeof(unsigned int) * numberOfPoints);
+        CUDA_MEMSET(vertexToHalfEdge, 0xFF, sizeof(unsigned int) * numberOfPoints);
     }
     else
     {
@@ -569,13 +567,13 @@ void DeviceHalfEdgeMesh::Initialize(unsigned int numberOfPoints, unsigned int nu
 
 void DeviceHalfEdgeMesh::Terminate()
 {
-    if (positions) cudaFree(positions);
-    if (normals) cudaFree(normals);
-    if (colors) cudaFree(colors);
-    if (faces) cudaFree(faces);
-    if (halfEdges) cudaFree(halfEdges);
-    if (halfEdgeFaces) cudaFree(halfEdgeFaces);
-    if (vertexToHalfEdge) cudaFree(vertexToHalfEdge);
+    if (positions) CUDA_FREE(positions);
+    if (normals) CUDA_FREE(normals);
+    if (colors) CUDA_FREE(colors);
+    if (faces) CUDA_FREE(faces);
+    if (halfEdges) CUDA_FREE(halfEdges);
+    if (halfEdgeFaces) CUDA_FREE(halfEdgeFaces);
+    if (vertexToHalfEdge) CUDA_FREE(vertexToHalfEdge);
 
     positions = nullptr;
     normals = nullptr;
@@ -589,6 +587,13 @@ void DeviceHalfEdgeMesh::Terminate()
 
     min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
     max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+    if (nullptr != faceNodes)
+    {
+        CUDA_FREE(faceNodes);
+
+        faceNodeHashMap.Terminate();
+    }
 }
 
 void DeviceHalfEdgeMesh::CopyFromHost(const HostHalfEdgeMesh& hostMesh)
@@ -620,8 +625,8 @@ void DeviceHalfEdgeMesh::CopyToHost(HostHalfEdgeMesh& hostMesh) const
     CUDA_COPY_D2H(hostMesh.vertexToHalfEdge, vertexToHalfEdge, sizeof(unsigned int) * numberOfPoints);
     CUDA_SYNC();
 
-   hostMesh.min = min;
-   hostMesh.max = max;
+    hostMesh.min = min;
+    hostMesh.max = max;
 }
 
 void DeviceHalfEdgeMesh::RecalcAABB()
@@ -733,109 +738,10 @@ void DeviceHalfEdgeMesh::RemoveIsolatedVertices()
     RecalcAABB();
 }
 
-__global__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap(
-    HashMapInfo<uint64_t, FaceNodeHashMapEntry> info,
-    float3* positions,
-    uint3* faces,
-    FaceNode* faceNodes,
-    float voxelSize,
-    unsigned int numberOfFaces,
-    unsigned int* d_numDropped)
-{
-    unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (threadid >= numberOfFaces) return;
-
-    auto f = faces[threadid];
-    auto p0 = positions[f.x];
-    auto p1 = positions[f.y];
-    auto p2 = positions[f.z];
-    auto centroid = (p0 + p1 + p2) / 3.0f;
-
-    auto voxelIndex = PositionToIndex(centroid, voxelSize);
-    auto voxelKey = IndexToVoxelKey(voxelIndex);
-    auto hashIdx = VoxelKeyHash(voxelKey, info.capacity);
-
-    bool inserted = false;
-    for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
-    {
-        size_t slot = (hashIdx + probe) % info.capacity;
-        HashMapEntry<uint64_t, FaceNodeHashMapEntry>* entry = &info.entries[slot];
-
-        uint64_t old = atomicCAS(
-            reinterpret_cast<unsigned long long*>(&entry->key),
-            EMPTY_KEY, voxelKey);
-
-        if (old == EMPTY_KEY || old == voxelKey)
-        {
-            unsigned int prevHead;
-            do {
-                prevHead = entry->value.headIndex;
-            } while (atomicCAS(&(entry->value.headIndex), prevHead, threadid) != prevHead);
-
-            faceNodes[threadid].faceIndex = threadid;
-            faceNodes[threadid].nextNodeIndex = prevHead;
-
-            // length: atomicAdd로 안전하게 누적
-            unsigned int prevLen = atomicAdd(&(entry->value.length), 1);
-
-            // tailIndex: atomicCAS로 "최초 tail"만 등록
-            // prevHead == UINT32_MAX이면 내가 최초 등록자
-            if (prevHead == UINT32_MAX)
-            {
-                // 최초 등록자는 tailIndex도 자신으로 세팅
-                atomicExch(&(entry->value.tailIndex), threadid);
-            }
-            // (tailIndex는 최초 등록자만 자신의 index로 set됨)
-
-            return;
-        }
-    }
-
-    if (!inserted)
-        atomicAdd(d_numDropped, 1);
-}
-
-// 명시적 FaceNodeHashMapEntry value 필드 전체를 안전하게 초기화하는 커널
-__global__ void Kernel_ExplicitFaceNodeValueInit(
-    HashMapEntry<uint64_t, FaceNodeHashMapEntry>* entries,
-    size_t capacity)
-{
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= capacity) return;
-
-    // Key는 EMPTY_KEY로 memset으로 처리되었다고 가정 (이미 되어 있으면 굳이 반복 X)
-    entries[tid].value.headIndex = 0xFFFFFFFF;   // UINT32_MAX
-    entries[tid].value.length = 0;
-    entries[tid].value.tailIndex = 0xFFFFFFFF;   // UINT32_MAX
-    // 필요하면 lock 등 다른 필드도 0 혹은 UINT32_MAX로 명시적 초기화
-}
-
-__global__ void Kernel_CheckFaceNodeHashMapInit(HashMapEntry<uint64_t, FaceNodeHashMapEntry>* entries, size_t capacity)
-{
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= capacity) return;
-
-    if (entries[tid].value.headIndex != 0xFFFFFFFF ||
-        entries[tid].value.length != 0xFFFFFFFF ||
-        entries[tid].value.tailIndex != 0xFFFFFFFF)
-    {
-        printf("[!] Bad value at slot %d: headIndex=%u, length=%u, tailIndex=%u\n",
-            tid, entries[tid].value.headIndex, entries[tid].value.length, entries[tid].value.tailIndex);
-    }
-}
-
-
 void DeviceHalfEdgeMesh::BuildFaceNodeHashMap()
 {
     faceNodeHashMap.Initialize(numberOfFaces * 64);
     faceNodeHashMap.Clear(0xFFFFFFFF);
-
-    {
-        int threads = 256;
-        int blocks = (faceNodeHashMap.info.capacity + threads - 1) / threads;
-        Kernel_CheckFaceNodeHashMapInit << <blocks, threads >> > (faceNodeHashMap.info.entries, faceNodeHashMap.info.capacity);
-        cudaDeviceSynchronize();
-    }
 
     if (nullptr == faceNodes)
     {
@@ -843,22 +749,13 @@ void DeviceHalfEdgeMesh::BuildFaceNodeHashMap()
     }
     CUDA_MEMSET(faceNodes, 0xFF, sizeof(FaceNode) * numberOfFaces);
 
-    // [명시적 value 필드 초기화 추가]
-    int threads = 256;
-    int blocks = (faceNodeHashMap.info.capacity + threads - 1) / threads;
-    Kernel_ExplicitFaceNodeValueInit << <blocks, threads >> > (
-        faceNodeHashMap.info.entries,
-        faceNodeHashMap.info.capacity
-        );
-    CUDA_SYNC();
-
     float voxelSize = 0.1f;
 
     //printf("Face count: %u, HashMap capacity: %zu, maxProbe: %u\n", numberOfFaces, faceNodeHashMap.info.capacity, faceNodeHashMap.info.maxProbe);
 
     unsigned int* d_numDropped;
-    cudaMalloc(&d_numDropped, sizeof(unsigned int));
-    cudaMemset(d_numDropped, 0, sizeof(unsigned int));
+    CUDA_MALLOC(&d_numDropped, sizeof(unsigned int));
+    CUDA_MEMSET(d_numDropped, 0, sizeof(unsigned int));
 
     LaunchKernel(Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap, numberOfFaces,
         faceNodeHashMap.info,
@@ -871,7 +768,7 @@ void DeviceHalfEdgeMesh::BuildFaceNodeHashMap()
     CUDA_SYNC();
 
     unsigned int h_numDropped = 0;
-    cudaMemcpy(&h_numDropped, d_numDropped, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+    CUDA_COPY_D2H(&h_numDropped, d_numDropped, sizeof(unsigned int));
     printf("probe 실패 face 개수: %u\n", h_numDropped);
 
     //CUDA_FREE(faceNodes);
@@ -1038,124 +935,6 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::FindUnlinkedFaceNodes()
     return unlinked;
 }
 
-// 점-삼각형 거리 계산 (최단 거리, 제곱거리 리턴)
-__device__ float PointTriangleDistance2(const float3& p, const float3& a, const float3& b, const float3& c)
-{
-    // From "Real-Time Collision Detection" by Christer Ericson
-    float3 ab = b - a;
-    float3 ac = c - a;
-    float3 ap = p - a;
-
-    float d1 = dot(ab, ap);
-    float d2 = dot(ac, ap);
-
-    if (d1 <= 0.0f && d2 <= 0.0f) return dot(ap, ap); // barycentric (1,0,0)
-
-    float3 bp = p - b;
-    float d3 = dot(ab, bp);
-    float d4 = dot(ac, bp);
-    if (d3 >= 0.0f && d4 <= d3) return dot(bp, bp); // barycentric (0,1,0)
-
-    float vc = d1 * d4 - d3 * d2;
-    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
-    {
-        float v = d1 / (d1 - d3);
-        float3 proj = a + v * ab;
-        return dot(p - proj, p - proj);
-    }
-
-    float3 cp = p - c;
-    float d5 = dot(ab, cp);
-    float d6 = dot(ac, cp);
-    if (d6 >= 0.0f && d5 <= d6) return dot(cp, cp); // barycentric (0,0,1)
-
-    float vb = d5 * d2 - d1 * d6;
-    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
-    {
-        float w = d2 / (d2 - d6);
-        float3 proj = a + w * ac;
-        return dot(p - proj, p - proj);
-    }
-
-    float va = d3 * d6 - d5 * d4;
-    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f)
-    {
-        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-        float3 proj = b + w * (c - b);
-        return dot(p - proj, p - proj);
-    }
-
-    // Inside face region
-    float denom = 1.0f / (va + vb + vc);
-    float v = vb * denom;
-    float w = vc * denom;
-    float3 proj = a + ab * v + ac * w;
-    return dot(p - proj, p - proj);
-}
-
-__global__ void Kernel_FindNearestTriangles_HashMap(
-    const float3* points,                  // [numPoints]
-    unsigned int numPoints,
-    const float3* positions,               // [numberOfMeshPoints]
-    const uint3* faces,                    // [numberOfFaces]
-    HashMapInfo<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap,
-    const FaceNode* faceNodes,
-    float voxelSize,                       // grid size (ex: 0.1f)
-    unsigned int* outIndices               // [numPoints]
-)
-{
-    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= numPoints) return;
-
-    float3 p = points[idx];
-
-    int3 centerVoxel = PositionToIndex(p, voxelSize);
-    unsigned int minFace = UINT32_MAX;
-    float minDist2 = 1e30f;
-
-    // 3x3x3 voxel neighborhood
-    for (int dz = -1; dz <= 1; ++dz)
-        for (int dy = -1; dy <= 1; ++dy)
-            for (int dx = -1; dx <= 1; ++dx)
-            {
-                int3 voxelIndex = make_int3(centerVoxel.x + dx, centerVoxel.y + dy, centerVoxel.z + dz);
-                uint64_t voxelKey = IndexToVoxelKey(voxelIndex);
-                size_t hashIdx = VoxelKeyHash(voxelKey, faceNodeHashMap.capacity);
-
-                // 해당 voxel 내 연결된 face 모두 거리 체크
-                for (unsigned int probe = 0; probe < faceNodeHashMap.maxProbe; ++probe)
-                {
-                    size_t slot = (hashIdx + probe) % faceNodeHashMap.capacity;
-                    const auto& entry = faceNodeHashMap.entries[slot];
-                    if (entry.key == voxelKey)
-                    {
-                        unsigned int nodeIdx = entry.value.headIndex;
-                        while (nodeIdx != UINT32_MAX)
-                        {
-                            const FaceNode& fn = faceNodes[nodeIdx];
-                            unsigned int faceIdx = fn.faceIndex;
-                            uint3 tri = faces[faceIdx];
-                            float3 a = positions[tri.x];
-                            float3 b = positions[tri.y];
-                            float3 c = positions[tri.z];
-                            float dist2 = PointTriangleDistance2(p, a, b, c);
-                            if (dist2 < minDist2)
-                            {
-                                minDist2 = dist2;
-                                minFace = faceIdx;
-                            }
-                            nodeIdx = fn.nextNodeIndex;
-                        }
-                        break;
-                    }
-                    if (entry.key == EMPTY_KEY)
-                        break;
-                }
-            }
-
-    outIndices[idx] = minFace;
-}
-
 std::vector<unsigned int> DeviceHalfEdgeMesh::FindNearestTriangleIndices(float3* d_positions, unsigned int numberOfInputPoints)
 {
     unsigned int* d_indices = nullptr;
@@ -1176,122 +955,6 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::FindNearestTriangleIndices(float3*
     CUDA_FREE(d_indices);
 
     return h_indices;
-}
-
-__device__ float3 ClosestPointOnTriangle(const float3& p, const float3& a, const float3& b, const float3& c)
-{
-    // From "Real-Time Collision Detection" by Christer Ericson
-    float3 ab = b - a;
-    float3 ac = c - a;
-    float3 ap = p - a;
-    float d1 = dot(ab, ap);
-    float d2 = dot(ac, ap);
-
-    if (d1 <= 0.0f && d2 <= 0.0f) return a; // barycentric (1,0,0)
-
-    float3 bp = p - b;
-    float d3 = dot(ab, bp);
-    float d4 = dot(ac, bp);
-    if (d3 >= 0.0f && d4 <= d3) return b; // barycentric (0,1,0)
-
-    float vc = d1 * d4 - d3 * d2;
-    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
-    {
-        float v = d1 / (d1 - d3);
-        return a + v * ab; // barycentric (1-v, v, 0)
-    }
-
-    float3 cp = p - c;
-    float d5 = dot(ab, cp);
-    float d6 = dot(ac, cp);
-    if (d6 >= 0.0f && d5 <= d6) return c; // barycentric (0,0,1)
-
-    float vb = d5 * d2 - d1 * d6;
-    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
-    {
-        float w = d2 / (d2 - d6);
-        return a + w * ac; // barycentric (1-w, 0, w)
-    }
-
-    float va = d3 * d6 - d5 * d4;
-    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f)
-    {
-        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-        return b + w * (c - b); // barycentric (0, 1-w, w)
-    }
-
-    // Inside face region
-    float denom = 1.0f / (va + vb + vc);
-    float v = vb * denom;
-    float w = vc * denom;
-    return a + ab * v + ac * w;
-}
-
-__global__ void Kernel_FindNearestTriangles_HashMap_ClosestPoint(
-    const float3* points,        // [numPoints]
-    unsigned int numPoints,
-    const float3* positions,     // [numberOfMeshPoints]
-    const uint3* faces,          // [numberOfFaces]
-    HashMapInfo<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap,
-    const FaceNode* faceNodes,
-    float voxelSize,
-    int offset,
-    unsigned int* outIndices,    // [numPoints]
-    float3* outClosestPoints     // [numPoints]
-)
-{
-    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= numPoints) return;
-
-    float3 p = points[idx];
-    int3 centerVoxel = PositionToIndex(p, voxelSize);
-
-    unsigned int minFace = UINT32_MAX;
-    float minDist2 = 1e30f;
-    float3 closest = make_float3(0, 0, 0);
-
-    for (int dz = -offset; dz <= offset; ++dz)
-        for (int dy = -offset; dy <= offset; ++dy)
-            for (int dx = -offset; dx <= offset; ++dx)
-            {
-                int3 voxelIndex = make_int3(centerVoxel.x + dx, centerVoxel.y + dy, centerVoxel.z + dz);
-                uint64_t voxelKey = IndexToVoxelKey(voxelIndex);
-                size_t hashIdx = VoxelKeyHash(voxelKey, faceNodeHashMap.capacity);
-
-                for (unsigned int probe = 0; probe < faceNodeHashMap.maxProbe; ++probe)
-                {
-                    size_t slot = (hashIdx + probe) % faceNodeHashMap.capacity;
-                    const auto& entry = faceNodeHashMap.entries[slot];
-                    if (entry.key == voxelKey)
-                    {
-                        unsigned int nodeIdx = entry.value.headIndex;
-                        while (nodeIdx != UINT32_MAX)
-                        {
-                            const FaceNode& fn = faceNodes[nodeIdx];
-                            unsigned int faceIdx = fn.faceIndex;
-                            uint3 tri = faces[faceIdx];
-                            float3 a = positions[tri.x];
-                            float3 b = positions[tri.y];
-                            float3 c = positions[tri.z];
-                            float3 proj = ClosestPointOnTriangle(p, a, b, c);
-                            float dist2 = length2(p - proj);
-
-                            if (dist2 < minDist2)
-                            {
-                                minDist2 = dist2;
-                                minFace = faceIdx;
-                                closest = proj;
-                            }
-                            nodeIdx = fn.nextNodeIndex;
-                        }
-                        break;
-                    }
-                    if (entry.key == EMPTY_KEY)
-                        break;
-                }
-            }
-    outIndices[idx] = minFace;
-    outClosestPoints[idx] = closest;
 }
 
 std::vector<unsigned int> DeviceHalfEdgeMesh::FindNearestTriangleIndicesAndClosestPoints(
@@ -1327,22 +990,22 @@ bool DeviceHalfEdgeMesh::PickFace(const float3& rayOrigin, const float3& rayDir,
 {
     int* d_hitIdx;
     float* d_hitT;
-    cudaMalloc(&d_hitIdx, sizeof(int));
-    cudaMalloc(&d_hitT, sizeof(float));
+    CUDA_MALLOC(&d_hitIdx, sizeof(int));
+    CUDA_MALLOC(&d_hitT, sizeof(float));
     int initIdx = -1;
     float initT = 1e30f;
-    cudaMemcpy(d_hitIdx, &initIdx, sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_hitT, &initT, sizeof(float), cudaMemcpyHostToDevice);
+    CUDA_COPY_H2D(d_hitIdx, &initIdx, sizeof(int));
+    CUDA_COPY_H2D(d_hitT, &initT, sizeof(float));
 
     LaunchKernel(Kernel_DeviceHalfEdgeMesh_PickFace, numberOfFaces,
         rayOrigin, rayDir, positions, faces, numberOfFaces, d_hitIdx, d_hitT);
     CUDA_SYNC();
 
-    cudaMemcpy(&outHitIndex, d_hitIdx, sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(&outHitT, d_hitT, sizeof(float), cudaMemcpyDeviceToHost);
+    CUDA_COPY_D2H(&outHitIndex, d_hitIdx, sizeof(int));
+    CUDA_COPY_D2H(&outHitT, d_hitT, sizeof(float));
 
-    cudaFree(d_hitIdx);
-    cudaFree(d_hitT);
+    CUDA_FREE(d_hitIdx);
+    CUDA_FREE(d_hitT);
 
     return (outHitIndex >= 0);
 }
@@ -1353,10 +1016,10 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::GetOneRingVertices(unsigned int v,
 
     unsigned int* d_neighbors = nullptr;
     unsigned int* d_count = nullptr;
-    cudaMalloc(&d_neighbors, sizeof(unsigned int) * MAX_NEIGHBORS);
-    cudaMalloc(&d_count, sizeof(unsigned int));
-    cudaMemset(d_neighbors, 0xFF, sizeof(unsigned int) * MAX_NEIGHBORS);
-    cudaMemset(d_count, 0, sizeof(unsigned int));
+    CUDA_MALLOC(&d_neighbors, sizeof(unsigned int) * MAX_NEIGHBORS);
+    CUDA_MALLOC(&d_count, sizeof(unsigned int));
+    CUDA_MEMSET(d_neighbors, 0xFF, sizeof(unsigned int) * MAX_NEIGHBORS);
+    CUDA_MEMSET(d_count, 0, sizeof(unsigned int));
 
     Kernel_DeviceHalfEdgeMesh_OneRing << <1, 1 >> > (
         halfEdges,
@@ -1367,15 +1030,15 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::GetOneRingVertices(unsigned int v,
         d_neighbors,
         d_count
         );
-    cudaDeviceSynchronize();
+    CUDA_SYNC();
 
     unsigned int h_count = 0;
     unsigned int h_neighbors[MAX_NEIGHBORS];
-    cudaMemcpy(&h_count, d_count, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_neighbors, d_neighbors, sizeof(unsigned int) * MAX_NEIGHBORS, cudaMemcpyDeviceToHost);
+    CUDA_COPY_D2H(&h_count, d_count, sizeof(unsigned int));
+    CUDA_COPY_D2H(h_neighbors, d_neighbors, sizeof(unsigned int) * MAX_NEIGHBORS);
 
-    cudaFree(d_neighbors);
-    cudaFree(d_count);
+    CUDA_FREE(d_neighbors);
+    CUDA_FREE(d_count);
 
     std::vector<unsigned int> result;
     for (unsigned int i = 0; i < h_count; ++i)
@@ -1483,7 +1146,7 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
 
     float3* positionsA = positions;
     float3* positionsB = nullptr;
-    cudaMalloc(&positionsB, sizeof(float3) * numberOfPoints);
+    CUDA_MALLOC(&positionsB, sizeof(float3) * numberOfPoints);
 
     float3* toFree = positionsB;
 
@@ -1502,7 +1165,7 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
         CUDA_SYNC();
     }
 
-    cudaFree(toFree);
+    CUDA_FREE(toFree);
 
     RecalcAABB();
 }
@@ -1536,46 +1199,6 @@ void DeviceHalfEdgeMesh::RadiusLaplacianSmoothing(float radius, unsigned int ite
     RecalcAABB();
 }
 
-__global__ void Kernel_DeviceHalfEdgeMesh_GetAABB(
-    float3* positions, uint3* faces, cuAABB* aabbs, cuAABB* mMaabbs, unsigned int numberOfPoints, unsigned int numberOfFaces)
-{
-    unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (threadid >= numberOfFaces) return;
-
-    auto& f = faces[threadid];
-
-    if (f.x >= numberOfPoints) { printf("f.x >= nop"); return; }
-    if (f.y >= numberOfPoints) { printf("f.y >= nop"); return; }
-    if (f.z >= numberOfPoints) { printf("f.z >= nop"); return; }
-
-    auto& p0 = positions[f.x];
-    auto& p1 = positions[f.y];
-    auto& p2 = positions[f.z];
-
-    cuAABB aabb;
-    aabb.min = make_float3(
-        fminf(p0.x, fminf(p1.x, p2.x)),
-        fminf(p0.y, fminf(p1.y, p2.y)),
-        fminf(p0.z, fminf(p1.z, p2.z))
-    );
-    aabb.max = make_float3(
-        fmaxf(p0.x, fmaxf(p1.x, p2.x)),
-        fmaxf(p0.y, fmaxf(p1.y, p2.y)),
-        fmaxf(p0.z, fmaxf(p1.z, p2.z))
-    );
-    aabbs[threadid] = aabb;
-
-    auto delta = aabb.max - aabb.min;
-    mMaabbs->min = make_float3(
-        fminf(mMaabbs->min.x, delta.x),
-        fminf(mMaabbs->min.y, delta.y),
-        fminf(mMaabbs->min.z, delta.z));
-    mMaabbs->max = make_float3(
-        fmaxf(mMaabbs->max.x, delta.x),
-        fmaxf(mMaabbs->max.y, delta.y),
-        fmaxf(mMaabbs->max.z, delta.z));
-}
-
 void DeviceHalfEdgeMesh::GetAABBs(vector<cuAABB>& result, cuAABB& mMaabbs)
 {
     result.resize(numberOfFaces);
@@ -1590,36 +1213,12 @@ void DeviceHalfEdgeMesh::GetAABBs(vector<cuAABB>& result, cuAABB& mMaabbs)
     LaunchKernel(Kernel_DeviceHalfEdgeMesh_GetAABB, numberOfFaces,
         positions, faces, aabbs, d_mMaabbs, numberOfPoints, numberOfFaces);
 
-    CUDA_COPY_D2H(result.data(), aabbs, sizeof(cuAABB)* numberOfFaces);
+    CUDA_COPY_D2H(result.data(), aabbs, sizeof(cuAABB) * numberOfFaces);
     CUDA_COPY_D2H(&mMaabbs, d_mMaabbs, sizeof(cuAABB));
     CUDA_SYNC();
 
     CUDA_FREE(aabbs);
     CUDA_FREE(d_mMaabbs);
-}
-
-__global__ void Kernel_DeviceHalfEdgeMesh_GetMortonCodes(
-    const float3* positions,
-    const uint3* faces,
-    uint64_t* mortonCodes,
-    unsigned int numberOfPoints,
-    unsigned int numberOfFaces,
-    float3 min_corner,
-    float voxel_size)
-{
-    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= numberOfFaces) return;
-
-    uint3 f = faces[tid];
-    if (f.x >= numberOfPoints || f.y >= numberOfPoints || f.z >= numberOfPoints)
-        return;
-
-    float3 p0 = positions[f.x];
-    float3 p1 = positions[f.y];
-    float3 p2 = positions[f.z];
-    float3 centroid = (p0 + p1 + p2) / 3.0f;
-
-    mortonCodes[tid] = Float3ToMorton64(centroid, min_corner, voxel_size);
 }
 
 vector<uint64_t> DeviceHalfEdgeMesh::GetMortonCodes()
@@ -1645,7 +1244,9 @@ vector<uint64_t> DeviceHalfEdgeMesh::GetMortonCodes()
     CUDA_SYNC();
     return result;
 }
+#pragma endregion
 
+#pragma region DeviceHalfEdgeMesh Device Functions
 __host__ __device__ uint64_t DeviceHalfEdgeMesh::PackEdge(unsigned int v0, unsigned int v1)
 {
     return (static_cast<uint64_t>(v0) << 32) | static_cast<uint64_t>(v1);
@@ -1843,21 +1444,9 @@ __device__ void DeviceHalfEdgeMesh::GetAllVerticesInRadius_Device(
             frontier[i] = nextFrontier[i];
     }
 }
+#pragma endregion
 
-__global__ void Kernel_DeviceHalfEdgeMesh_RecalcAABB(float3* positions, float3* min, float3* max, unsigned int numberOfPoints)
-{
-    unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (threadid >= numberOfPoints) return;
-
-    auto& p = positions[threadid];
-    atomicMinF(&min->x, p.x);
-    atomicMinF(&min->y, p.y);
-    atomicMinF(&min->z, p.z);
-    atomicMaxF(&max->x, p.x);
-    atomicMaxF(&max->y, p.y);
-    atomicMaxF(&max->z, p.z);
-}
-
+#pragma region Kernel_DeviceHalfEdgeMesh
 __global__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
     const uint3* faces,
     unsigned int numberOfFaces,
@@ -2049,6 +1638,194 @@ __global__ void Kernel_DeviceHalfEdgeMesh_RemapVertexIndexOfFacesAndHalfEdges(ui
     halfEdges[threadid * 3 + 2].vertexIndex = vertexIndexMapping[halfEdges[threadid * 3 + 2].vertexIndex];
 }
 
+__global__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap(
+    HashMapInfo<uint64_t, FaceNodeHashMapEntry> info,
+    float3* positions,
+    uint3* faces,
+    FaceNode* faceNodes,
+    float voxelSize,
+    unsigned int numberOfFaces,
+    unsigned int* d_numDropped)
+{
+    unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadid >= numberOfFaces) return;
+
+    auto f = faces[threadid];
+    auto p0 = positions[f.x];
+    auto p1 = positions[f.y];
+    auto p2 = positions[f.z];
+    auto centroid = (p0 + p1 + p2) / 3.0f;
+
+    auto voxelIndex = PositionToIndex(centroid, voxelSize);
+    auto voxelKey = IndexToVoxelKey(voxelIndex);
+    auto hashIdx = VoxelKeyHash(voxelKey, info.capacity);
+
+    bool inserted = false;
+    for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
+    {
+        size_t slot = (hashIdx + probe) % info.capacity;
+        HashMapEntry<uint64_t, FaceNodeHashMapEntry>* entry = &info.entries[slot];
+
+        uint64_t old = atomicCAS(
+            reinterpret_cast<unsigned long long*>(&entry->key),
+            EMPTY_KEY, voxelKey);
+
+        if (old == EMPTY_KEY || old == voxelKey)
+        {
+            unsigned int prevHead;
+            do {
+                prevHead = entry->value.headIndex;
+            } while (atomicCAS(&(entry->value.headIndex), prevHead, threadid) != prevHead);
+
+            faceNodes[threadid].faceIndex = threadid;
+            faceNodes[threadid].nextNodeIndex = prevHead;
+
+            // length: atomicAdd로 안전하게 누적
+            unsigned int prevLen = atomicAdd(&(entry->value.length), 1);
+
+            // tailIndex: atomicCAS로 "최초 tail"만 등록
+            // prevHead == UINT32_MAX이면 내가 최초 등록자
+            if (prevHead == UINT32_MAX)
+            {
+                // 최초 등록자는 tailIndex도 자신으로 세팅
+                atomicExch(&(entry->value.tailIndex), threadid);
+            }
+            // (tailIndex는 최초 등록자만 자신의 index로 set됨)
+
+            return;
+        }
+    }
+
+    if (!inserted)
+        atomicAdd(d_numDropped, 1);
+}
+
+__global__ void Kernel_FindNearestTriangles_HashMap(
+    const float3* points,
+    unsigned int numPoints,
+    const float3* positions,
+    const uint3* faces,
+    HashMapInfo<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap,
+    const FaceNode* faceNodes,
+    float voxelSize,
+    unsigned int* outIndices)
+{
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numPoints) return;
+
+    float3 p = points[idx];
+
+    int3 centerVoxel = PositionToIndex(p, voxelSize);
+    unsigned int minFace = UINT32_MAX;
+    float minDist2 = 1e30f;
+
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx)
+            {
+                int3 voxelIndex = make_int3(centerVoxel.x + dx, centerVoxel.y + dy, centerVoxel.z + dz);
+                uint64_t voxelKey = IndexToVoxelKey(voxelIndex);
+                size_t hashIdx = VoxelKeyHash(voxelKey, faceNodeHashMap.capacity);
+
+                for (unsigned int probe = 0; probe < faceNodeHashMap.maxProbe; ++probe)
+                {
+                    size_t slot = (hashIdx + probe) % faceNodeHashMap.capacity;
+                    const auto& entry = faceNodeHashMap.entries[slot];
+                    if (entry.key == voxelKey)
+                    {
+                        unsigned int nodeIdx = entry.value.headIndex;
+                        while (nodeIdx != UINT32_MAX)
+                        {
+                            const FaceNode& fn = faceNodes[nodeIdx];
+                            unsigned int faceIdx = fn.faceIndex;
+                            uint3 tri = faces[faceIdx];
+                            float3 a = positions[tri.x];
+                            float3 b = positions[tri.y];
+                            float3 c = positions[tri.z];
+                            float dist2 = PointTriangleDistance2(p, a, b, c);
+                            if (dist2 < minDist2)
+                            {
+                                minDist2 = dist2;
+                                minFace = faceIdx;
+                            }
+                            nodeIdx = fn.nextNodeIndex;
+                        }
+                        break;
+                    }
+                    if (entry.key == EMPTY_KEY)
+                        break;
+                }
+            }
+
+    outIndices[idx] = minFace;
+}
+
+__global__ void Kernel_FindNearestTriangles_HashMap_ClosestPoint(
+    const float3* points,
+    unsigned int numPoints,
+    const float3* positions,
+    const uint3* faces,
+    HashMapInfo<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap,
+    const FaceNode* faceNodes,
+    float voxelSize,
+    int offset,
+    unsigned int* outIndices,
+    float3* outClosestPoints)
+{
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numPoints) return;
+
+    float3 p = points[idx];
+    int3 centerVoxel = PositionToIndex(p, voxelSize);
+
+    unsigned int minFace = UINT32_MAX;
+    float minDist2 = 1e30f;
+    float3 closest = make_float3(0, 0, 0);
+
+    for (int dz = -offset; dz <= offset; ++dz)
+        for (int dy = -offset; dy <= offset; ++dy)
+            for (int dx = -offset; dx <= offset; ++dx)
+            {
+                int3 voxelIndex = make_int3(centerVoxel.x + dx, centerVoxel.y + dy, centerVoxel.z + dz);
+                uint64_t voxelKey = IndexToVoxelKey(voxelIndex);
+                size_t hashIdx = VoxelKeyHash(voxelKey, faceNodeHashMap.capacity);
+
+                for (unsigned int probe = 0; probe < faceNodeHashMap.maxProbe; ++probe)
+                {
+                    size_t slot = (hashIdx + probe) % faceNodeHashMap.capacity;
+                    const auto& entry = faceNodeHashMap.entries[slot];
+                    if (entry.key == voxelKey)
+                    {
+                        unsigned int nodeIdx = entry.value.headIndex;
+                        while (nodeIdx != UINT32_MAX)
+                        {
+                            const FaceNode& fn = faceNodes[nodeIdx];
+                            unsigned int faceIdx = fn.faceIndex;
+                            uint3 tri = faces[faceIdx];
+                            float3 a = positions[tri.x];
+                            float3 b = positions[tri.y];
+                            float3 c = positions[tri.z];
+                            float3 proj = ClosestPointOnTriangle(p, a, b, c);
+                            float dist2 = length2(p - proj);
+
+                            if (dist2 < minDist2)
+                            {
+                                minDist2 = dist2;
+                                minFace = faceIdx;
+                                closest = proj;
+                            }
+                            nodeIdx = fn.nextNodeIndex;
+                        }
+                        break;
+                    }
+                    if (entry.key == EMPTY_KEY)
+                        break;
+                }
+            }
+    outIndices[idx] = minFace;
+    outClosestPoints[idx] = closest;
+}
+
 __global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     float3* positions_in,
     float3* positions_out,
@@ -2122,7 +1899,7 @@ __global__ void Kernel_DeviceHalfEdgeMesh_OneRing(
     const unsigned int* vertexToHalfEdge,
     unsigned int numberOfPoints,
     unsigned int v,
-    bool fixBorderVertices, 
+    bool fixBorderVertices,
     unsigned int* outBuffer,
     unsigned int* outCount)
 {
@@ -2254,3 +2031,87 @@ __global__ void Kernel_RadiusLaplacianSmooth(
         positions_out[vid] = center;
     }
 }
+
+__global__ void Kernel_DeviceHalfEdgeMesh_GetAABB(
+    float3* positions,
+    uint3* faces,
+    cuAABB* aabbs,
+    cuAABB* mMaabbs,
+    unsigned int numberOfPoints,
+    unsigned int numberOfFaces)
+{
+    unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadid >= numberOfFaces) return;
+
+    auto& f = faces[threadid];
+
+    if (f.x >= numberOfPoints) { printf("f.x >= nop"); return; }
+    if (f.y >= numberOfPoints) { printf("f.y >= nop"); return; }
+    if (f.z >= numberOfPoints) { printf("f.z >= nop"); return; }
+
+    auto& p0 = positions[f.x];
+    auto& p1 = positions[f.y];
+    auto& p2 = positions[f.z];
+
+    cuAABB aabb;
+    aabb.min = make_float3(
+        fminf(p0.x, fminf(p1.x, p2.x)),
+        fminf(p0.y, fminf(p1.y, p2.y)),
+        fminf(p0.z, fminf(p1.z, p2.z))
+    );
+    aabb.max = make_float3(
+        fmaxf(p0.x, fmaxf(p1.x, p2.x)),
+        fmaxf(p0.y, fmaxf(p1.y, p2.y)),
+        fmaxf(p0.z, fmaxf(p1.z, p2.z))
+    );
+    aabbs[threadid] = aabb;
+
+    auto delta = aabb.max - aabb.min;
+    mMaabbs->min = make_float3(
+        fminf(mMaabbs->min.x, delta.x),
+        fminf(mMaabbs->min.y, delta.y),
+        fminf(mMaabbs->min.z, delta.z));
+    mMaabbs->max = make_float3(
+        fmaxf(mMaabbs->max.x, delta.x),
+        fmaxf(mMaabbs->max.y, delta.y),
+        fmaxf(mMaabbs->max.z, delta.z));
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_GetMortonCodes(
+    const float3* positions,
+    const uint3* faces,
+    uint64_t* mortonCodes,
+    unsigned int numberOfPoints,
+    unsigned int numberOfFaces,
+    float3 min_corner,
+    float voxel_size)
+{
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= numberOfFaces) return;
+
+    uint3 f = faces[tid];
+    if (f.x >= numberOfPoints || f.y >= numberOfPoints || f.z >= numberOfPoints)
+        return;
+
+    float3 p0 = positions[f.x];
+    float3 p1 = positions[f.y];
+    float3 p2 = positions[f.z];
+    float3 centroid = (p0 + p1 + p2) / 3.0f;
+
+    mortonCodes[tid] = Float3ToMorton64(centroid, min_corner, voxel_size);
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_RecalcAABB(float3* positions, float3* min, float3* max, unsigned int numberOfPoints)
+{
+    unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadid >= numberOfPoints) return;
+
+    auto& p = positions[threadid];
+    atomicMinF(&min->x, p.x);
+    atomicMinF(&min->y, p.y);
+    atomicMinF(&min->z, p.z);
+    atomicMaxF(&max->x, p.x);
+    atomicMaxF(&max->y, p.y);
+    atomicMaxF(&max->z, p.z);
+}
+#pragma endregion
