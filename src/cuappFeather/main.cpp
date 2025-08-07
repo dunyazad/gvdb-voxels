@@ -333,12 +333,15 @@ int main(int argc, char** argv)
 			}
 			else if (GLFW_KEY_SPACE == event.keyCode)
 			{
-				//cudaInstance.d_mesh.RadiusLaplacianSmoothing(0.5f, 10, 0.05f);
-				cuInstance.d_mesh.LaplacianSmoothing(5, 1.0f, true);
-				cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
+				if (event.action == 1)
+				{
+					//cudaInstance.d_mesh.RadiusLaplacianSmoothing(0.5f, 10, 0.05f);
+					cuInstance.d_mesh.LaplacianSmoothing(5, 1.0f, false);
+					cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
 
-				VD::Clear("AABB");
-				VD::AddWiredBox("AABB", { {XYZ(cuInstance.d_mesh.min)}, {XYZ(cuInstance.d_mesh.max)} }, Color::blue());
+					VD::Clear("AABB");
+					VD::AddWiredBox("AABB", { {XYZ(cuInstance.d_mesh.min)}, {XYZ(cuInstance.d_mesh.max)} }, Color::blue());
+				}
 			}
 			else if (GLFW_KEY_PAGE_DOWN == event.keyCode)
 			{
@@ -499,8 +502,61 @@ int main(int argc, char** argv)
 
 						VD::AddBox("pc", { XYZ(p) }, { 0.0f, 0.1f, 0.0f }, glm::vec3(0.005f), Color::white());
 						//VD::AddLine("Nearest", { XYZ(p) }, { XYZ(centroid) }, Color::red());
-						VD::AddLine("Nearest", { XYZ(p) }, { XYZ(closestPoint) }, Color::white());
+						VD::AddLine("Nearest", { XYZ(p) }, { XYZ(closestPoint) }, Color::yellow());
 					}
+				}
+			}
+			else if (GLFW_KEY_PAGE_UP == event.keyCode)
+			{
+				if (event.action == 1)
+				{
+					cuInstance.d_mesh.BuildFaceNodeHashMap();
+
+					//auto curvatures = cuInstance.d_mesh.GetFaceCurvatures();
+					//auto curvatures = cuInstance.d_mesh.GetFaceCurvaturesInRadius(1.0f);
+
+					//printf("curvatures.size() : %d\n", curvatures.size());
+
+					//printf("cuInstance.d_mesh.numberOfFaces : %d\n", cuInstance.d_mesh.numberOfFaces);
+
+					//float minc = 1e10, maxc = -1e10;
+					//for (float c : curvatures) {
+					//	minc = std::min(minc, c);
+					//	maxc = std::max(maxc, c);
+					//}
+					//printf("Curvature: min=%f, max=%f\n", minc, maxc);
+
+					//float sum = 0.0f, sq_sum = 0.0f;
+					//for (float c : curvatures)
+					//{
+					//	sum += c;
+					//	sq_sum += c * c;
+					//}
+					//float mean = sum / curvatures.size();
+					//float variance = (sq_sum / curvatures.size()) - (mean * mean);
+					//float stddev = sqrtf(variance);
+
+					//vector<float3> positions(cuInstance.d_mesh.numberOfPoints);
+					//vector<uint3> faces(cuInstance.d_mesh.numberOfFaces);
+					//CUDA_COPY_D2H(positions.data(), cuInstance.d_mesh.positions, sizeof(float3) * cuInstance.d_mesh.numberOfPoints);
+					//CUDA_COPY_D2H(faces.data(), cuInstance.d_mesh.faces, sizeof(uint3) * cuInstance.d_mesh.numberOfFaces);
+					//CUDA_SYNC();
+
+					//for (size_t i = 0; i < curvatures.size(); i++)
+					//{
+					//	float c = curvatures[i];
+					//	float z = (c - mean) / (stddev + 1e-8f); // Z-score
+					//	float ratio = (z + 2.0f) * 0.25f; // z=-2 -> 0, z=+2 -> 1
+					//	ratio = std::clamp(ratio, 0.0f, 1.0f);
+					//	auto color = Color::Lerp(Color::blue(), Color::red(), ratio);
+
+					//	auto& f = faces[i];
+					//	auto& p0 = positions[f.x];
+					//	auto& p1 = positions[f.y];
+					//	auto& p2 = positions[f.z];
+
+					//	VD::AddTriangle("Curvatures", { XYZ(p0) }, { XYZ(p1) }, { XYZ(p2) }, color);
+					//}
 				}
 			}
 			});
@@ -621,10 +677,16 @@ int main(int argc, char** argv)
 					make_float3(ray.direction.x, ray.direction.y, ray.direction.z),
 					hitIndex, outHit))
 				{
-					auto& f = cuInstance.h_mesh.faces[hitIndex];
-					auto& p0 = cuInstance.h_mesh.positions[f.x];
-					auto& p1 = cuInstance.h_mesh.positions[f.y];
-					auto& p2 = cuInstance.h_mesh.positions[f.z];
+					vector<float3> positions(cuInstance.d_mesh.numberOfPoints);
+					vector<uint3> faces(cuInstance.d_mesh.numberOfFaces);
+					CUDA_COPY_D2H(positions.data(), cuInstance.d_mesh.positions, sizeof(float3) * cuInstance.d_mesh.numberOfPoints);
+					CUDA_COPY_D2H(faces.data(), cuInstance.d_mesh.faces, sizeof(uint3) * cuInstance.d_mesh.numberOfFaces);
+					CUDA_SYNC();
+
+					auto& f = faces[hitIndex];
+					auto& p0 = positions[f.x];
+					auto& p1 = positions[f.y];
+					auto& p2 = positions[f.z];
 
 					auto v0 = glm::vec3(XYZ(p0));
 					auto v1 = glm::vec3(XYZ(p1));
@@ -647,6 +709,7 @@ int main(int argc, char** argv)
 						camera->SetEye(hitPosition + (-ray.direction) * manipulator->GetRadius());
 					}
 
+#pragma region Triangle Points
 					//auto d0 = glm::distance2(hitPosition, v0);
 					//auto d1 = glm::distance2(hitPosition, v1);
 					//auto d2 = glm::distance2(hitPosition, v2);
@@ -673,7 +736,7 @@ int main(int argc, char** argv)
 					//}
 
 					//VD::AddWiredBox("Nearest", nearest, nearestNormal, { 0.05f, 0.05, 0.05 }, { 1.0f, 1.0f, 1.0f, 1.0f });
-
+#pragma endregion
 
 					//printf("[d_mesh] hitIndex : %d, outHit : %f\n", hitIndex, outHit);
 
@@ -698,6 +761,24 @@ int main(int argc, char** argv)
 
 					////cudaInstance.d_mesh.RadiusLaplacianSmoothing(radius, 1);
 					//cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
+
+					cuInstance.d_mesh.BuildFaceNodeHashMap();
+					auto oneRingFaces = cuInstance.d_mesh.GetOneRingFaces(hitIndex);
+
+					for (auto& faceIndex : oneRingFaces)
+					{
+						auto& face = faces[faceIndex];
+						auto& p0 = positions[face.x];
+						auto& p1 = positions[face.y];
+						auto& p2 = positions[face.z];
+
+						auto v0 = glm::vec3(XYZ(p0));
+						auto v1 = glm::vec3(XYZ(p1));
+						auto v2 = glm::vec3(XYZ(p2));
+
+						VD::AddTriangle("One Ring Faces", v0, v1, v2, Color::red());
+					}
+
 				}
 			}
 			});

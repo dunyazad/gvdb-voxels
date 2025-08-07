@@ -137,11 +137,16 @@ struct DeviceHalfEdgeMesh
     std::vector<unsigned int> GetOneRingVertices(unsigned int v, bool fixBorderVertices = false) const;
     std::vector<unsigned int> GetVerticesInRadius(unsigned int startVertex, float radius);
 
+    std::vector<unsigned int> GetOneRingFaces(unsigned int f) const;
+    std::vector<unsigned int> GetFacesInRadius(unsigned int f, float radius);
+
     void LaplacianSmoothing(unsigned int iterations = 1, float lambda = 0.5f, bool fixBorderVertices = false);
     void RadiusLaplacianSmoothing(float radius = 0.3f, unsigned int iterations = 1, float lambda = 0.5f);
 
     void GetAABBs(vector<cuAABB>& result, cuAABB& mMaabbs);
     vector<uint64_t> GetMortonCodes();
+
+    vector<float> GetFaceCurvatures();
 
     __host__ __device__ static uint64_t PackEdge(unsigned int v0, unsigned int v1);
     __device__ static bool HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value);
@@ -167,6 +172,21 @@ struct DeviceHalfEdgeMesh
         unsigned int& outCount,
         unsigned int maxNeighbors,
         float radius);
+
+    __device__ static void GetOneRingFaces_Device(
+        unsigned int f,
+        const HalfEdge* halfEdges,
+        unsigned int numberOfFaces,
+        unsigned int* outFaces,
+        unsigned int& outCount);
+
+    __device__ static float3 calcFaceNormal(const float3* positions, uint3 face)
+    {
+        float3 v0 = positions[face.x];
+        float3 v1 = positions[face.y];
+        float3 v2 = positions[face.z];
+        return normalize(cross(v1 - v0, v2 - v0));
+    }
 };
 
 __global__ void Kernel_DeviceHalfEdgeMesh_RecalcAABB(float3* positions, float3* min, float3* max, unsigned int numberOfPoints);
@@ -221,7 +241,7 @@ __global__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap(
     unsigned int numberOfFaces,
     unsigned int* d_numDropped);
 
-__global__ void Kernel_FindNearestTriangles_HashMap(
+__global__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_HashMap(
     const float3* points,
     unsigned int numPoints,
     const float3* positions,
@@ -231,7 +251,7 @@ __global__ void Kernel_FindNearestTriangles_HashMap(
     float voxelSize,
     unsigned int* outIndices);
 
-__global__ void Kernel_FindNearestTriangles_HashMap_ClosestPoint(
+__global__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_HashMap_ClosestPoint(
     const float3* points,
     unsigned int numPoints,
     const float3* positions,
@@ -286,18 +306,29 @@ __global__ void Kernel_DeviceHalfEdgeMesh_GetVerticesInRadius(
     unsigned int startVertex,
     float radius);
 
-__global__ void Kernel_GetAllVerticesInRadius(
-    const float3* positions,
-    unsigned int numberOfPoints,
+__global__ void Kernel_DeviceHalfEdgeMesh_OneRingFaces(
+    unsigned int f,
     const HalfEdge* halfEdges,
-    const unsigned int* vertexToHalfEdge,
-    unsigned int* allNeighbors,
-    unsigned int* allNeighborSizes,
-    unsigned int maxNeighbors,
-    float radius
-);
+    unsigned int numberOfFaces,
+    unsigned int* outFaces,
+    unsigned int* outCount);
 
-__global__ void Kernel_RadiusLaplacianSmooth(
+__global__ void Kernel_DeviceHalfEdgeMesh_GetFacesInRadius(
+    const float3* positions,
+    const uint3* faces,
+    const HalfEdge* halfEdges,
+    unsigned int numberOfFaces,
+    const unsigned int* frontier,
+    unsigned int frontierSize,
+    unsigned int* visited,
+    unsigned int* nextFrontier,
+    unsigned int* nextFrontierSize,
+    unsigned int* result,
+    unsigned int* resultSize,
+    unsigned int startFace,
+    float radius);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_RadiusLaplacianSmooth(
     const float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
@@ -329,3 +360,10 @@ __global__ void Kernel_DeviceHalfEdgeMesh_RecalcAABB(
     float3* min,
     float3* max,
     unsigned int numberOfPoints);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_GetFaceCurvatures(
+    const float3* positions,
+    const uint3* faces,
+    const HalfEdge* halfEdges,
+    unsigned int numberOfFaces,
+    float* outCurvatures);

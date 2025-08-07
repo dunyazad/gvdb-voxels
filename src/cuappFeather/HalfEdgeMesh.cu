@@ -740,13 +740,11 @@ void DeviceHalfEdgeMesh::RemoveIsolatedVertices()
 
 void DeviceHalfEdgeMesh::BuildFaceNodeHashMap()
 {
+    faceNodeHashMap.Terminate();
     faceNodeHashMap.Initialize(numberOfFaces * 64);
     faceNodeHashMap.Clear(0xFFFFFFFF);
 
-    if (nullptr == faceNodes)
-    {
-        CUDA_MALLOC(&faceNodes, sizeof(FaceNode) * numberOfFaces);
-    }
+    CUDA_MALLOC(&faceNodes, sizeof(FaceNode) * numberOfFaces);
     CUDA_MEMSET(faceNodes, 0xFF, sizeof(FaceNode) * numberOfFaces);
 
     float voxelSize = 0.1f;
@@ -940,7 +938,7 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::FindNearestTriangleIndices(float3*
     unsigned int* d_indices = nullptr;
     CUDA_MALLOC(&d_indices, sizeof(unsigned int) * numberOfInputPoints);
 
-    LaunchKernel(Kernel_FindNearestTriangles_HashMap, numberOfInputPoints,
+    LaunchKernel(Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_HashMap, numberOfInputPoints,
         d_positions, numberOfInputPoints,
         positions, faces,
         faceNodeHashMap.info,
@@ -965,7 +963,7 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::FindNearestTriangleIndicesAndClose
     CUDA_MALLOC(&d_indices, sizeof(unsigned int) * numberOfInputPoints);
     CUDA_MALLOC(&d_closest, sizeof(float3) * numberOfInputPoints);
 
-    LaunchKernel(Kernel_FindNearestTriangles_HashMap_ClosestPoint, numberOfInputPoints,
+    LaunchKernel(Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_HashMap_ClosestPoint, numberOfInputPoints,
         d_positions, numberOfInputPoints,
         positions, faces,
         faceNodeHashMap.info,
@@ -1140,6 +1138,124 @@ std::vector<unsigned int> DeviceHalfEdgeMesh::GetVerticesInRadius(unsigned int s
     return h_result;
 }
 
+std::vector<unsigned int> DeviceHalfEdgeMesh::GetOneRingFaces(unsigned int f) const
+{
+    unsigned int* d_faces = nullptr;
+    unsigned int* d_count = nullptr;
+    CUDA_MALLOC(&d_faces, sizeof(unsigned int) * 3); // 한 face의 1-ring face는 최대 3개
+    CUDA_MALLOC(&d_count, sizeof(unsigned int));
+    CUDA_MEMSET(d_count, 0, sizeof(unsigned int));
+
+    Kernel_DeviceHalfEdgeMesh_OneRingFaces << <1, 1 >> > (
+        f, halfEdges, numberOfFaces, d_faces, d_count
+        );
+    CUDA_SYNC();
+
+    unsigned int h_count = 0;
+    unsigned int h_faces[3];
+    CUDA_COPY_D2H(&h_count, d_count, sizeof(unsigned int));
+    CUDA_COPY_D2H(h_faces, d_faces, sizeof(unsigned int) * 3);
+
+    CUDA_FREE(d_faces);
+    CUDA_FREE(d_count);
+
+    std::vector<unsigned int> result;
+    for (unsigned int i = 0; i < h_count; ++i)
+        result.push_back(h_faces[i]);
+    return result;
+}
+
+std::vector<unsigned int> DeviceHalfEdgeMesh::GetFacesInRadius(unsigned int startFace, float radius)
+{
+    if (startFace >= numberOfFaces)
+    {
+        printf("[ERROR] startFace(%u) >= numberOfFaces(%u)\n", startFace, numberOfFaces);
+        return {};
+    }
+    if (!positions || !halfEdges || !faces)
+    {
+        printf("[ERROR] DeviceHalfEdgeMesh not initialized.\n");
+        return {};
+    }
+
+    unsigned int* d_visited = nullptr;
+    unsigned int* d_frontier[2] = { nullptr, nullptr };
+    unsigned int* d_frontierSize = nullptr;
+    unsigned int* d_nextFrontierSize = nullptr;
+    unsigned int* d_result = nullptr;
+    unsigned int* d_resultSize = nullptr;
+
+    CUDA_MALLOC(&d_visited, sizeof(unsigned int) * numberOfFaces);
+    CUDA_MEMSET(d_visited, 0, sizeof(unsigned int) * numberOfFaces);
+    CUDA_MALLOC(&d_frontier[0], sizeof(unsigned int) * MAX_FRONTIER);
+    CUDA_MALLOC(&d_frontier[1], sizeof(unsigned int) * MAX_FRONTIER);
+    CUDA_MALLOC(&d_frontierSize, sizeof(unsigned int));
+    CUDA_MALLOC(&d_nextFrontierSize, sizeof(unsigned int));
+    CUDA_MALLOC(&d_result, sizeof(unsigned int) * MAX_RESULT);
+    CUDA_MALLOC(&d_resultSize, sizeof(unsigned int));
+    CUDA_MEMSET(d_resultSize, 0, sizeof(unsigned int));
+
+    unsigned int one = 1;
+    CUDA_COPY_H2D(&d_visited[startFace], &one, sizeof(unsigned int));
+    CUDA_COPY_H2D(d_frontier[0], &startFace, sizeof(unsigned int));
+    unsigned int h_frontierSize = 1;
+    CUDA_COPY_H2D(d_frontierSize, &h_frontierSize, sizeof(unsigned int));
+    CUDA_COPY_H2D(d_result, &startFace, sizeof(unsigned int));
+    unsigned int resultInit = 1;
+    CUDA_COPY_H2D(d_resultSize, &resultInit, sizeof(unsigned int));
+
+    int iter = 0;
+    while (true)
+    {
+        unsigned int currFrontierSize = 0;
+        CUDA_COPY_D2H(&currFrontierSize, d_frontierSize, sizeof(unsigned int));
+        if (currFrontierSize == 0) break;
+
+        if (currFrontierSize >= MAX_FRONTIER)
+        {
+            printf("[BFS][ERROR] frontier buffer overflow. Increase MAX_FRONTIER or reduce radius.\n");
+            break;
+        }
+
+        CUDA_MEMSET(d_nextFrontierSize, 0, sizeof(unsigned int));
+
+        LaunchKernel(Kernel_DeviceHalfEdgeMesh_GetFacesInRadius, currFrontierSize,
+            positions, faces, halfEdges, numberOfFaces,
+            d_frontier[iter % 2], currFrontierSize,
+            d_visited,
+            d_frontier[(iter + 1) % 2], d_nextFrontierSize,
+            d_result, d_resultSize,
+            startFace, radius);
+        CUDA_SYNC();
+
+        CUDA_COPY_D2D(d_frontierSize, d_nextFrontierSize, sizeof(unsigned int));
+        iter++;
+
+        unsigned int h_resultSize = 0;
+        CUDA_COPY_D2H(&h_resultSize, d_resultSize, sizeof(unsigned int));
+        if (h_resultSize >= MAX_RESULT)
+        {
+            printf("[BFS][ERROR] result buffer overflow. Increase MAX_RESULT or reduce radius.\n");
+            break;
+        }
+    }
+
+    unsigned int h_resultSize = 0;
+    CUDA_COPY_D2H(&h_resultSize, d_resultSize, sizeof(unsigned int));
+    std::vector<unsigned int> h_result(h_resultSize);
+    CUDA_COPY_D2H(h_result.data(), d_result, sizeof(unsigned int) * h_resultSize);
+
+    CUDA_FREE(d_visited);
+    CUDA_FREE(d_frontier[0]);
+    CUDA_FREE(d_frontier[1]);
+    CUDA_FREE(d_frontierSize);
+    CUDA_FREE(d_nextFrontierSize);
+    CUDA_FREE(d_result);
+    CUDA_FREE(d_resultSize);
+
+    return h_result;
+}
+
 void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambda, bool fixBorderVertices)
 {
     if (numberOfPoints == 0 || numberOfFaces == 0) return;
@@ -1181,7 +1297,7 @@ void DeviceHalfEdgeMesh::RadiusLaplacianSmoothing(float radius, unsigned int ite
 
     for (unsigned int it = 0; it < iterations; ++it)
     {
-        LaunchKernel(Kernel_RadiusLaplacianSmooth, numberOfPoints,
+        LaunchKernel(Kernel_DeviceHalfEdgeMesh_RadiusLaplacianSmooth, numberOfPoints,
             positionsA, positionsB, numberOfPoints,
             halfEdges, vertexToHalfEdge, MAX_NEIGHBORS, radius, lambda);
         CUDA_SYNC();
@@ -1243,6 +1359,21 @@ vector<uint64_t> DeviceHalfEdgeMesh::GetMortonCodes()
     CUDA_FREE(d_mortonCodes);
     CUDA_SYNC();
     return result;
+}
+
+vector<float> DeviceHalfEdgeMesh::GetFaceCurvatures()
+{
+    float* d_curvatures = nullptr;
+    CUDA_MALLOC(&d_curvatures, sizeof(float) * numberOfFaces);
+
+    LaunchKernel(Kernel_DeviceHalfEdgeMesh_GetFaceCurvatures, numberOfFaces,
+        positions, faces, halfEdges, numberOfFaces, d_curvatures);
+
+    std::vector<float> h_curvatures(numberOfFaces);
+    CUDA_COPY_D2H(h_curvatures.data(), d_curvatures, sizeof(float) * numberOfFaces);
+    CUDA_FREE(d_curvatures);
+
+    return h_curvatures;
 }
 #pragma endregion
 
@@ -1442,6 +1573,30 @@ __device__ void DeviceHalfEdgeMesh::GetAllVerticesInRadius_Device(
         frontierSize = nextFrontierSize;
         for (unsigned int i = 0; i < nextFrontierSize; ++i)
             frontier[i] = nextFrontier[i];
+    }
+}
+
+__device__ void DeviceHalfEdgeMesh::GetOneRingFaces_Device(
+    unsigned int f,
+    const HalfEdge* halfEdges,
+    unsigned int numberOfFaces,
+    unsigned int* outFaces,
+    unsigned int& outCount)
+{
+    outCount = 0;
+    if (f >= numberOfFaces) return;
+
+    for (int e = 0; e < 3; ++e)
+    {
+        unsigned int heIdx = f * 3 + e;
+        const HalfEdge& he = halfEdges[heIdx];
+        if (he.oppositeIndex == UINT32_MAX)
+            continue;
+
+        const HalfEdge& oppHe = halfEdges[he.oppositeIndex];
+        unsigned int neighborFace = oppHe.faceIndex;
+        if (neighborFace != f)
+            outFaces[outCount++] = neighborFace;
     }
 }
 #pragma endregion
@@ -1700,7 +1855,7 @@ __global__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap(
         atomicAdd(d_numDropped, 1);
 }
 
-__global__ void Kernel_FindNearestTriangles_HashMap(
+__global__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_HashMap(
     const float3* points,
     unsigned int numPoints,
     const float3* positions,
@@ -1760,7 +1915,7 @@ __global__ void Kernel_FindNearestTriangles_HashMap(
     outIndices[idx] = minFace;
 }
 
-__global__ void Kernel_FindNearestTriangles_HashMap_ClosestPoint(
+__global__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_HashMap_ClosestPoint(
     const float3* points,
     unsigned int numPoints,
     const float3* positions,
@@ -1967,30 +2122,73 @@ __global__ void Kernel_DeviceHalfEdgeMesh_GetVerticesInRadius(
     }
 }
 
-__global__ void Kernel_GetAllVerticesInRadius(
-    const float3* positions,
-    unsigned int numberOfPoints,
+__global__ void Kernel_DeviceHalfEdgeMesh_OneRingFaces(
+    unsigned int f,
     const HalfEdge* halfEdges,
-    const unsigned int* vertexToHalfEdge,
-    unsigned int* allNeighbors,   // [numberOfPoints * MAX_NEIGHBORS]
-    unsigned int* allNeighborSizes, // [numberOfPoints]
-    unsigned int maxNeighbors,
-    float radius)
+    unsigned int numberOfFaces,
+    unsigned int* outFaces,
+    unsigned int* outCount)
 {
-    unsigned int vid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (vid >= numberOfPoints) return;
-
-    unsigned int* neighbors = allNeighbors + vid * maxNeighbors;
-    unsigned int outCount = 0;
-
-    DeviceHalfEdgeMesh::GetAllVerticesInRadius_Device(
-        vid, positions, numberOfPoints, halfEdges, vertexToHalfEdge,
-        neighbors, outCount, maxNeighbors, radius);
-
-    allNeighborSizes[vid] = outCount;
+    if (threadIdx.x == 0)
+    {
+        DeviceHalfEdgeMesh::GetOneRingFaces_Device(f, halfEdges, numberOfFaces, outFaces, *outCount);
+    }
 }
 
-__global__ void Kernel_RadiusLaplacianSmooth(
+__global__ void Kernel_DeviceHalfEdgeMesh_GetFacesInRadius(
+    const float3* positions,
+    const uint3* faces,
+    const HalfEdge* halfEdges,
+    unsigned int numberOfFaces,
+    const unsigned int* frontier,
+    unsigned int frontierSize,
+    unsigned int* visited,
+    unsigned int* nextFrontier,
+    unsigned int* nextFrontierSize,
+    unsigned int* result,
+    unsigned int* resultSize,
+    unsigned int startFace,
+    float radius)
+{
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= frontierSize) return;
+
+    unsigned int f = frontier[idx];
+
+    // centroid 계산
+    uint3 face = faces[f];
+    float3 center = (positions[face.x] + positions[face.y] + positions[face.z]) / 3.0f;
+
+    // 각 halfedge로 연결된 face 순회
+    for (int e = 0; e < 3; ++e)
+    {
+        unsigned int heIdx = f * 3 + e;
+        const HalfEdge& he = halfEdges[heIdx];
+        if (he.oppositeIndex == UINT32_MAX) continue;
+        unsigned int nbFace = halfEdges[he.oppositeIndex].faceIndex;
+        if (visited[nbFace]) continue;
+
+        uint3 nbF = faces[nbFace];
+        float3 nbCenter = (positions[nbF.x] + positions[nbF.y] + positions[nbF.z]) / 3.0f;
+        float dist2 = length2(nbCenter - center);
+        if (dist2 <= radius * radius)
+        {
+            unsigned int old = atomicExch(&visited[nbFace], 1);
+            if (old == 0)
+            {
+                unsigned int nfIdx = atomicAdd(nextFrontierSize, 1);
+                if (nfIdx < MAX_FRONTIER)
+                    nextFrontier[nfIdx] = nbFace;
+
+                unsigned int resIdx = atomicAdd(resultSize, 1);
+                if (resIdx < MAX_RESULT)
+                    result[resIdx] = nbFace;
+            }
+        }
+    }
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_RadiusLaplacianSmooth(
     const float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
@@ -2113,5 +2311,51 @@ __global__ void Kernel_DeviceHalfEdgeMesh_RecalcAABB(float3* positions, float3* 
     atomicMaxF(&max->x, p.x);
     atomicMaxF(&max->y, p.y);
     atomicMaxF(&max->z, p.z);
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_GetFaceCurvatures(
+    const float3* positions,
+    const uint3* faces,
+    const HalfEdge* halfEdges,
+    unsigned int numberOfFaces,
+    float* outCurvatures)
+{
+    unsigned int f = blockIdx.x * blockDim.x + threadIdx.x;
+    if (f >= numberOfFaces) return;
+
+    // 1. Face normal
+    const uint3 tri = faces[f];
+    float3 v0 = positions[tri.x];
+    float3 v1 = positions[tri.y];
+    float3 v2 = positions[tri.z];
+    float3 n = normalize(cross(v1 - v0, v2 - v0));
+
+    float sumAngles = 0.0f;
+    int count = 0;
+    for (int e = 0; e < 3; ++e)
+    {
+        const HalfEdge& he = halfEdges[f * 3 + e];
+        if (he.oppositeIndex == UINT32_MAX)
+            continue;
+        const HalfEdge& opp = halfEdges[he.oppositeIndex];
+        unsigned int neighborFace = opp.faceIndex;
+        if (neighborFace == f) continue;
+
+        // neighbor normal
+        const uint3 tri_nb = faces[neighborFace];
+        float3 nv0 = positions[tri_nb.x];
+        float3 nv1 = positions[tri_nb.y];
+        float3 nv2 = positions[tri_nb.z];
+        float3 n_nb = normalize(cross(nv1 - nv0, nv2 - nv0));
+
+        float dotval = dot(n, n_nb);
+        // clamp(-1,1)
+        dotval = fmaxf(-1.0f, fminf(1.0f, dotval));
+        float angle = acosf(dotval);
+
+        sumAngles += angle;
+        ++count;
+    }
+    outCurvatures[f] = (count > 0) ? (sumAngles / count) : 0.0f;
 }
 #pragma endregion
