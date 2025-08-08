@@ -31,6 +31,13 @@ struct Octree
     static const int kBitsPerLevel = 3;
     static const int kMaxDepth = kKeyBits / kBitsPerLevel;     // 19
 
+    static const uint32_t range = 1u << Octree::kMaxDepth;
+    static __host__ __device__ inline int3 GridOffset()
+    {
+        int h = int(range / 2);
+        return make_int3(h, h, h);
+    }
+
     static const uint64_t kKeyMask = (1ull << kKeyBits) - 1;   // 0x03FFFFFFFFFFFFFF
     static const uint64_t kDepthMask = ~kKeyMask;              // 0xFC00000000000000
 

@@ -43,11 +43,6 @@ void Octree::Initialize(float3* positions, unsigned numberOfPoints, float3 cente
 
     mortonCodeOctreeNodeMapping.Initialize(size_t(numberOfPoints) * 64u, 64u);
 
-    // --- 기본 depth/gridOffset 설정 (원하시면 외부 인자로 바꾸세요) ---
-    const uint8_t depth = Octree::kMaxDepth;                   // 최대 깊이
-    const uint32_t range = 1u << Octree::kMaxDepth;            // 2^kMaxDepth
-    const int3 gridOffset = make_int3(int(range / 2), int(range / 2), int(range / 2)); // 중앙 정렬
-
     // launch
     const int block = 256;
     const int grid = int((numberOfPoints + block - 1) / block);
@@ -57,8 +52,8 @@ void Octree::Initialize(float3* positions, unsigned numberOfPoints, float3 cente
         numberOfPoints,
         center,
         voxelSize,
-        depth,
-        gridOffset,
+        Octree::kMaxDepth,
+        GridOffset(),
         nodes,
         allocatedNodes,
         d_numberOfNodes);
