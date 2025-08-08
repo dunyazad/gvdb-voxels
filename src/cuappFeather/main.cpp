@@ -212,7 +212,7 @@ void ApplyPointCloudToEntity(Entity entity, const HostPointCloud& h_pointCloud)
 			if (glm::length(axis) > 0.0001f)
 				rot = glm::rotate(glm::mat4(1.0f), angle, axis);
 		}
-		tm = glm::translate(tm, position) * rot * glm::scale(glm::mat4(1.0f), glm::vec3(2.0f));
+		tm = glm::translate(tm, position) * rot * glm::scale(glm::mat4(1.0f), glm::vec3(0.125f));
 		renderable->AddInstanceTransform(tm);
 		renderable->IncreaseNumberOfInstances();
 	}
@@ -342,11 +342,6 @@ int main(int argc, char** argv)
 					VD::Clear("AABB");
 					VD::AddWiredBox("AABB", { {XYZ(cuInstance.d_mesh.min)}, {XYZ(cuInstance.d_mesh.max)} }, Color::blue());
 				}
-			}
-			else if (GLFW_KEY_PAGE_DOWN == event.keyCode)
-			{
-				cuInstance.h_mesh.CopyFromDevice(cuInstance.d_mesh);
-				cuInstance.h_mesh.SerializePLY("../../res/3D/MarchingCubes.ply");
 			}
 			else if (GLFW_KEY_ENTER == event.keyCode)
 			{
@@ -506,6 +501,29 @@ int main(int argc, char** argv)
 					}
 				}
 			}
+			else if (GLFW_KEY_END == event.keyCode)
+			{
+				Octree octree;
+				octree.Initialize(cuInstance.d_mesh.positions, cuInstance.d_mesh.numberOfPoints, make_float3(0.0f, 0.0f, 0.0f), 0.1f);
+
+				vector<OctreeNode> octreeNodes(octree.numberOfNodes);
+				CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(OctreeNode)* octree.numberOfNodes);
+
+				const uint8_t depth = Octree::kMaxDepth;                   // √÷¥Î ±Ì¿Ã
+				const uint32_t range = 1u << Octree::kMaxDepth;            // 2^kMaxDepth
+				const int3 gridOffset = make_int3(int(range / 2), int(range / 2), int(range / 2)); // ¡ﬂæ” ¡§∑ƒ
+
+				//printf("numberOfNodes : %d\n", octreeNodes.size());
+
+				for (auto& n : octreeNodes)
+				{
+					auto p = Octree::PointFromCode_Voxel(n.mortonCode, make_float3(0.0f, 0.0f, 0.0f), 0.1f, gridOffset);
+					//printf("%f, %f, %f\n", XYZ(p));
+					VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f), Color::green());
+				}
+
+				octree.Terminate();
+			}
 			else if (GLFW_KEY_PAGE_UP == event.keyCode)
 			{
 				if (event.action == 1)
@@ -558,6 +576,11 @@ int main(int argc, char** argv)
 					//	VD::AddTriangle("Curvatures", { XYZ(p0) }, { XYZ(p1) }, { XYZ(p2) }, color);
 					//}
 				}
+			}
+			else if (GLFW_KEY_PAGE_DOWN == event.keyCode)
+			{
+				cuInstance.h_mesh.CopyFromDevice(cuInstance.d_mesh);
+				cuInstance.h_mesh.SerializePLY("../../res/3D/MarchingCubes.ply");
 			}
 			});
 	}
@@ -939,6 +962,7 @@ int main(int argc, char** argv)
 
 			auto result = cuInstance.ProcessPointCloud(h_pointCloud);
 			//ApplyPointCloudToEntity(entity, result);
+			//cuInstance.d_input = result;
 
 			auto meshEntity = Feather.CreateEntity("MarchingCubesMesh");
 			//ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
@@ -991,7 +1015,7 @@ int main(int argc, char** argv)
 			ply.Serialize("../../res/3D/VoxelHashMap.ply");
 #endif // SAVE_VOXEL_HASHMAP_POINT_CLOUD
 
-			//result.Terminate();
+			result.Terminate();
 			h_pointCloud.Terminate();
 		}
 #pragma endregion

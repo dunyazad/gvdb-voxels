@@ -40,17 +40,6 @@ struct HashMapInfo
     Key* d_occupiedKeys = nullptr;
 };
 
-// CUDA error check macro (for robustness)
-#define CUDA_CHECK(call) \
-    do { \
-        cudaError_t err = call; \
-        if (err != cudaSuccess) \
-        { \
-            printf("CUDA error %s (%d): %s:%d\n", cudaGetErrorString(err), err, __FILE__, __LINE__); \
-            assert(false); \
-        } \
-    } while (0)
-
 template<typename Key, typename Value>
 struct HashMap
 {

@@ -10,6 +10,7 @@
     <CudaCompile Include="BitVolume.cu" />
     <CudaCompile Include="VEFM.cu" />
     <CudaCompile Include="ThrustHalfEdgeMesh.cu" />
+    <CudaCompile Include="Octree.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\External\glad\src\glad.c" />

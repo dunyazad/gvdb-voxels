@@ -9,346 +9,284 @@
 
 #include <Serialization.hpp>
 
-__host__ __device__ inline float3 operator+(const float3& a, const float3& b) {
-    return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
-}
+#include <HashMap.hpp>
 
-__host__ __device__ inline float3 operator-(const float3& a, const float3& b) {
-    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
-__host__ __device__ inline float3 operator*(const float3& a, float s) {
-    return make_float3(a.x * s, a.y * s, a.z * s);
-}
-
-__host__ __device__ inline float3 operator/(const float3& a, float s) {
-    float inv = 1.0f / s;
-    return make_float3(a.x * inv, a.y * inv, a.z * inv);
-}
-
-__host__ __device__ inline float3 make_float3(const uint3& u) {
-    return make_float3((float)u.x, (float)u.y, (float)u.z);
-}
-
-__host__ __device__ inline float3 make_float3_uniform(float v) {
-    return make_float3(v, v, v);
-}
+using OctreeKey = uint64_t;
 
 #ifndef OCTREE_NODE
 #define OCTREE_NODE
-struct OctreeNode {
-    uint64_t mortonCode;
-    int level;
-    int parent;
-    std::vector<int> children;
-    int pointCount;
+struct OctreeNode
+{
+    uint64_t mortonCode = UINT64_MAX;
+    unsigned int level = UINT32_MAX;
+    unsigned int parent = UINT32_MAX;
+    unsigned int children[8] = { UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX };
 };
 #endif
 
-struct AABB {
-    float3 minBound;
-    float3 maxBound;
-};
-
-// ==============================
-// CUDA Morton Utils
-// ==============================
-__device__ __forceinline__ uint64_t expandBits(uint32_t v) {
-    v = (v * 0x00010001u) & 0xFF0000FFu;
-    v = (v * 0x00000101u) & 0x0F00F00Fu;
-    v = (v * 0x00000011u) & 0xC30C30C3u;
-    v = (v * 0x00000005u) & 0x49249249u;
-    return v;
-}
-
-__device__ __forceinline__ uint64_t mortonEncode(uint32_t x, uint32_t y, uint32_t z) {
-    return (expandBits(x) << 2) | (expandBits(y) << 1) | expandBits(z);
-}
-
-__device__ __forceinline__ uint32_t compactBits(uint64_t x) {
-    x &= 0x9249249249249249;
-    x = (x ^ (x >> 2)) & 0x30C30C30C30C30C3;
-    x = (x ^ (x >> 4)) & 0xF00F00F00F00F00F;
-    x = (x ^ (x >> 8)) & 0x00FF0000FF0000FF;
-    x = (x ^ (x >> 16)) & 0xFFFF00000000FFFF;
-    return (uint32_t)(x & 0x1FFFFF);
-}
-
-__device__ __forceinline__ uint3 mortonDecode(uint64_t code) {
-    return make_uint3(compactBits(code >> 2), compactBits(code >> 1), compactBits(code));
-}
-
-__global__ void Kernel_MortonEncode(const float3* __restrict__ d_points,
-    uint64_t* __restrict__ d_codes,
-    int N, float voxelSize, float3 minBound) {
-    int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    if (idx >= N) return;
-
-    float3 p = d_points[idx];
-    uint3 gridCoord = make_uint3(
-        static_cast<unsigned int>((p.x - minBound.x) / voxelSize),
-        static_cast<unsigned int>((p.y - minBound.y) / voxelSize),
-        static_cast<unsigned int>((p.z - minBound.z) / voxelSize)
-    );
-    d_codes[idx] = mortonEncode(gridCoord.x, gridCoord.y, gridCoord.z);
-}
-
-__global__ void Kernel_DecodeVoxelCenters(const uint64_t* __restrict__ d_codes,
-    float3* __restrict__ d_centers,
-    int numLeaves, float voxelSize, float3 minBound) {
-    int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    if (idx >= numLeaves) return;
-
-    uint3 grid = mortonDecode(d_codes[idx]);
-    float3 gridf = make_float3((float)grid.x, (float)grid.y, (float)grid.z);
-
-    float half = voxelSize * 0.5f;
-    d_centers[idx] = gridf * voxelSize + make_float3(half, half, half) + minBound;
-}
-
-inline int commonPrefixLen(uint64_t a, uint64_t b) {
-    return _lzcnt_u64(a ^ b);
-}
-
-std::vector<OctreeNode> BuildOctreeFromMortonCodes(
-    const std::vector<uint64_t>& sortedMortonCodes,
-    const std::vector<int>& pointCounts,
-    int maxDepth = 63) // 63-bit Morton
+struct Octree
 {
-    int N = static_cast<int>(sortedMortonCodes.size());
-    std::vector<OctreeNode> nodes(N);
+    static const int kDepthBits = 6;
+    static const int kKeyBits = 58;
+    static const int kBitsPerLevel = 3;
+    static const int kMaxDepth = kKeyBits / kBitsPerLevel;     // 19
 
-    for (int i = 0; i < N; ++i) {
-        nodes[i].mortonCode = sortedMortonCodes[i];
-        nodes[i].pointCount = pointCounts[i];
-        nodes[i].level = 0;
-        nodes[i].parent = -1;
+    static const uint64_t kKeyMask = (1ull << kKeyBits) - 1;   // 0x03FFFFFFFFFFFFFF
+    static const uint64_t kDepthMask = ~kKeyMask;              // 0xFC00000000000000
+
+    OctreeNode* nodes = nullptr;
+    unsigned int allocatedNodes = 0;
+    unsigned int numberOfNodes = 0;
+    unsigned int* d_numberOfNodes = nullptr;
+
+    HashMap<uint64_t, unsigned int> mortonCodeOctreeNodeMapping;
+
+    void Initialize(float3* positions, unsigned numberOfPoints, float3 center, float voxelSize);
+    void Terminate();
+
+    __host__ __device__
+        inline static uint32_t clampu(uint32_t v, uint32_t lo, uint32_t hi)
+    {
+        return v < lo ? lo : (v > hi ? hi : v);
     }
 
-    for (int i = 1; i < N; ++i) {
-        int prefixLen = commonPrefixLen(sortedMortonCodes[i - 1], sortedMortonCodes[i]);
-        nodes[i].level = maxDepth - prefixLen;
+    __host__ __device__
+        inline static uint64_t Pack(uint8_t depth, uint64_t key)
+    {
+        return (uint64_t(depth) << kKeyBits) | (key & kKeyMask);
+    }
 
-        if (nodes[i - 1].level < nodes[i].level) {
-            nodes[i].parent = i - 1;
-            nodes[i - 1].children.push_back(i);
+    __host__ __device__
+        inline static uint8_t UnpackDepth(uint64_t code)
+    {
+        return uint8_t(code >> kKeyBits);
+    }
+
+    __host__ __device__
+        inline static uint64_t UnpackKey(uint64_t code)
+    {
+        return code & kKeyMask;
+    }
+
+    __host__ __device__
+        inline static uint64_t EncodeKeyFromXYZ(uint32_t ix, uint32_t iy, uint32_t iz, uint8_t depth)
+    {
+        if (depth > kMaxDepth) depth = kMaxDepth;
+        uint64_t key = 0;
+        for (int l = depth - 1; l >= 0; --l)
+        {
+            uint64_t cx = (ix >> l) & 1u;
+            uint64_t cy = (iy >> l) & 1u;
+            uint64_t cz = (iz >> l) & 1u;
+            uint64_t child = (cx << 2) | (cy << 1) | cz;
+            key = (key << 3) | child;
+        }
+        return key;
+    }
+
+    __host__ __device__
+        inline static uint64_t KeyFromPoint_AABB(float3 p, float3 bmin, float3 bmax, uint8_t depth)
+    {
+        if (depth > kMaxDepth) depth = kMaxDepth;
+        const uint32_t S = 1u << depth;
+
+        const float rx = bmax.x - bmin.x;
+        const float ry = bmax.y - bmin.y;
+        const float rz = bmax.z - bmin.z;
+
+        uint32_t ix = rx > 0 ? uint32_t(::floorf((p.x - bmin.x) / rx * S)) : 0u;
+        uint32_t iy = ry > 0 ? uint32_t(::floorf((p.y - bmin.y) / ry * S)) : 0u;
+        uint32_t iz = rz > 0 ? uint32_t(::floorf((p.z - bmin.z) / rz * S)) : 0u;
+
+        ix = clampu(ix, 0u, S - 1u);
+        iy = clampu(iy, 0u, S - 1u);
+        iz = clampu(iz, 0u, S - 1u);
+
+        const uint64_t key = EncodeKeyFromXYZ(ix, iy, iz, depth);
+        return Pack(depth, key);
+    }
+
+    //__host__ __device__
+    //    inline static uint64_t KeyFromPoint_Voxel(float3 p,
+    //        float3 center,
+    //        float  voxelSize,
+    //        uint8_t depth,
+    //        int3   gridOffset)
+    //{
+    //    if (depth > kMaxDepth) depth = kMaxDepth;
+
+    //    const float inv = voxelSize > 0 ? (1.0f / voxelSize) : 0.0f;
+    //    const int32_t gx = int32_t(::floorf((p.x - center.x) * inv)) + gridOffset.x;
+    //    const int32_t gy = int32_t(::floorf((p.y - center.y) * inv)) + gridOffset.y;
+    //    const int32_t gz = int32_t(::floorf((p.z - center.z) * inv)) + gridOffset.z;
+
+    //    const uint32_t shift = kMaxDepth - depth;
+    //    const int32_t roundFix = (shift == 0u) ? 0 : int32_t((1u << shift) - 1u);
+    //    const uint32_t ix = uint32_t((gx >= 0 ? gx : gx - roundFix) >> shift);
+    //    const uint32_t iy = uint32_t((gy >= 0 ? gy : gy - roundFix) >> shift);
+    //    const uint32_t iz = uint32_t((gz >= 0 ? gz : gz - roundFix) >> shift);
+
+    //    const uint64_t key = EncodeKeyFromXYZ(ix, iy, iz, depth);
+    //    return Pack(depth, key);
+    //}
+
+    __host__ __device__
+        inline static uint64_t KeyFromPoint_Voxel(float3 p,
+            float3 center,
+            float  voxelSize,
+            uint8_t depth,
+            int3   gridOffset)
+    {
+        if (depth > kMaxDepth) depth = kMaxDepth;
+
+        const float inv = voxelSize > 0 ? (1.0f / voxelSize) : 0.0f;
+        const int32_t gx = int32_t(::floorf((p.x - center.x) * inv)) + gridOffset.x;
+        const int32_t gy = int32_t(::floorf((p.y - center.y) * inv)) + gridOffset.y;
+        const int32_t gz = int32_t(::floorf((p.z - center.z) * inv)) + gridOffset.z;
+
+        const uint32_t shift = kMaxDepth - depth;
+        const int32_t roundFix = (shift == 0u) ? 0 : int32_t((1u << shift) - 1u);
+
+        // floor-division by 2^shift (음수 안전)
+        int32_t ix_s = (gx >= 0 ? gx : gx - roundFix) >> shift;
+        int32_t iy_s = (gy >= 0 ? gy : gy - roundFix) >> shift;
+        int32_t iz_s = (gz >= 0 ? gz : gz - roundFix) >> shift;
+
+        // [0, 2^depth - 1] 클램프 (언더/오버플로우 방지)
+        const int32_t S_max = int32_t((1u << depth) - 1u);
+        ix_s = ix_s < 0 ? 0 : (ix_s > S_max ? S_max : ix_s);
+        iy_s = iy_s < 0 ? 0 : (iy_s > S_max ? S_max : iy_s);
+        iz_s = iz_s < 0 ? 0 : (iz_s > S_max ? S_max : iz_s);
+
+        const uint64_t key = EncodeKeyFromXYZ(uint32_t(ix_s), uint32_t(iy_s), uint32_t(iz_s), depth);
+        return Pack(depth, key);
+    }
+
+    __host__ __device__
+        inline static void DecodeXYZFromKey(uint64_t key, uint8_t depth, uint32_t& ix, uint32_t& iy, uint32_t& iz)
+    {
+        if (depth > kMaxDepth) depth = kMaxDepth;
+        ix = iy = iz = 0u;
+
+        // Encode 때: depth-1 .. 0 순서로 상위비트부터 child를 밀어넣었으므로
+        // Decode는 l*3 위치의 상위 그룹부터 차례로 읽어 복원
+        for (int l = depth - 1; l >= 0; --l)
+        {
+            const uint64_t child = (key >> (l * 3)) & 0x7ull; // [x y z] 비트
+            ix = (ix << 1) | uint32_t((child >> 2) & 1u);
+            iy = (iy << 1) | uint32_t((child >> 1) & 1u);
+            iz = (iz << 1) | uint32_t((child >> 0) & 1u);
         }
     }
 
-    return nodes;
-}
-
-
-inline uint32_t compactBits_CPU(uint64_t x) {
-    x &= 0x1249249249249249;
-    x = (x ^ (x >> 2)) & 0x10c30c30c30c30c3;
-    x = (x ^ (x >> 4)) & 0x100f00f00f00f00f;
-    x = (x ^ (x >> 8)) & 0x1f0000ff0000ff;
-    x = (x ^ (x >> 16)) & 0x1f00000000ffff;
-    x = (x ^ (x >> 32)) & 0x1fffff;
-    return (uint32_t)x;
-}
-
-inline uint3 mortonDecode_CPU(uint64_t code) {
-    return make_uint3(
-        compactBits_CPU(code >> 2),
-        compactBits_CPU(code >> 1),
-        compactBits_CPU(code >> 0)
-    );
-}
-
-inline uchar3 colormap(int level) {
-    const uchar3 colors[] = {
-        {255, 0, 0}, {255, 127, 0}, {255, 255, 0},
-        {0, 255, 0}, {0, 0, 255}, {75, 0, 130}, {143, 0, 255}
-    };
-    return colors[level % 7];
-}
-
-void AddBoxLinesToPLY(PLYFormat& ply, const float3& center, float size, uint8_t r, uint8_t g, uint8_t b)
-{
-    float half = size * 0.5f;
-
-    float3 corners[8] = {
-        {center.x - half, center.y - half, center.z - half},
-        {center.x + half, center.y - half, center.z - half},
-        {center.x + half, center.y + half, center.z - half},
-        {center.x - half, center.y + half, center.z - half},
-        {center.x - half, center.y - half, center.z + half},
-        {center.x + half, center.y - half, center.z + half},
-        {center.x + half, center.y + half, center.z + half},
-        {center.x - half, center.y + half, center.z + half}
-    };
-
-    static const int edgeIndices[12][2] = {
-        {0,1},{1,2},{2,3},{3,0}, // bottom square
-        {4,5},{5,6},{6,7},{7,4}, // top square
-        {0,4},{1,5},{2,6},{3,7}  // vertical connections
-    };
-
-    int baseIndex = ply.GetPoints().size() / 3;
-
-    for (int i = 0; i < 8; ++i)
+    __host__ __device__
+        inline static int3 MaxDepthIndexFromDepthIndex(uint32_t ix, uint32_t iy, uint32_t iz, uint8_t depth, bool cellCenter)
     {
-        ply.AddPoint(corners[i].x, corners[i].y, corners[i].z);
-        ply.AddColor((float)r / 255.0f, (float)g / 255.0f, (float)b / 255.0f);
+        if (depth > kMaxDepth) depth = kMaxDepth;
+
+        const uint32_t scale = 1u << (kMaxDepth - depth); // 한 셀의 크기(최대 해상도 보xel 개수)
+        int3 g;
+        g.x = int32_t(ix) * int32_t(scale);
+        g.y = int32_t(iy) * int32_t(scale);
+        g.z = int32_t(iz) * int32_t(scale);
+
+        if (cellCenter)
+        {
+            const int32_t half = int32_t(scale >> 1); // scale==1이면 0
+            g.x += half;
+            g.y += half;
+            g.z += half;
+        }
+        return g;
     }
 
-    for (int i = 0; i < 12; ++i)
-    {
-        ply.AddLineIndex(baseIndex + edgeIndices[i][0]);
-        ply.AddLineIndex(baseIndex + edgeIndices[i][1]);
-    }
-}
-
-// ==============================
-// Main CUDA Octree Builder
-// ==============================
-std::vector<OctreeNode> BuildMortonOctree(const float3* d_inputPoints, int N, float voxelSize, float3 minBound)
-{
-    thrust::device_vector<uint64_t> mortonCodes(N);
-    Kernel_MortonEncode <<<(N + 255) / 256, 256 >>> (
-        d_inputPoints,
-        thrust::raw_pointer_cast(mortonCodes.data()),
-        N, voxelSize, minBound
-        );
-    CUDA_SYNC();
-
-    thrust::device_vector<float3> sortedPoints(d_inputPoints, d_inputPoints + N);
-    thrust::sort_by_key(mortonCodes.begin(), mortonCodes.end(), sortedPoints.begin());
-
-    thrust::device_vector<uint64_t> uniqueCodes(N);
-    thrust::device_vector<int> counts(N);
-    auto end = thrust::reduce_by_key(
-        mortonCodes.begin(), mortonCodes.end(),
-        thrust::make_constant_iterator(1),
-        uniqueCodes.begin(), counts.begin()
-    );
-    int numLeaves = end.first - uniqueCodes.begin();
-
-    thrust::device_vector<float3> voxelCenters(numLeaves);
-    Kernel_DecodeVoxelCenters << <(numLeaves + 255) / 256, 256 >> > (
-        thrust::raw_pointer_cast(uniqueCodes.data()),
-        thrust::raw_pointer_cast(voxelCenters.data()),
-        numLeaves, voxelSize, minBound
-        );
-    CUDA_SYNC();
-
-    std::vector<float3> h_centers(numLeaves);
-    std::vector<uint64_t> h_codes(numLeaves);
-    std::vector<int> h_counts(numLeaves);
-
-    CUDA_COPY_D2H(h_centers.data(), thrust::raw_pointer_cast(voxelCenters.data()), sizeof(float3) * numLeaves);
-    CUDA_COPY_D2H(h_codes.data(), thrust::raw_pointer_cast(uniqueCodes.data()), sizeof(uint64_t) * numLeaves);
-    CUDA_COPY_D2H(h_counts.data(), thrust::raw_pointer_cast(counts.data()), sizeof(int) * numLeaves);
-
-    std::vector<OctreeNode> octree = BuildOctreeFromMortonCodes(h_codes, h_counts);
-
-    //PLYFormat ply;
-    //for (size_t i = 0; i < octree.size(); i++)
+    //__host__ __device__
+    //    inline static float3 PointFromCode_Voxel(uint64_t code,
+    //        float3 center,
+    //        float  voxelSize,
+    //        int3   gridOffset,
+    //        bool   cellCenter = true)
     //{
-    //    const OctreeNode& node = octree[i];
+    //    uint8_t depth = UnpackDepth(code);
+    //    uint64_t key = UnpackKey(code);
 
-    //    uint3 fullGrid = mortonDecode_CPU(node.mortonCode);
-    //    uint3 shifted = make_uint3(
-    //        fullGrid.x >> node.level,
-    //        fullGrid.y >> node.level,
-    //        fullGrid.z >> node.level
-    //    );
+    //    uint32_t ix, iy, iz;
+    //    DecodeXYZFromKey(key, depth, ix, iy, iz);
 
-    //    float voxelScale = voxelSize * (1 << node.level);
-    //    float3 gridf = make_float3((float)shifted.x, (float)shifted.y, (float)shifted.z);
-    //    float3 center = gridf * voxelScale + make_float3_uniform(voxelScale * 0.5f) + minBound;
+    //    const int3 g = MaxDepthIndexFromDepthIndex(ix, iy, iz, depth, cellCenter);
 
-    //    uchar3 color = colormap(node.level); // 계층 깊이에 따라 색 지정
-    //    AddBoxLinesToPLY(ply, center, voxelScale, color.x, color.y, color.z);
+    //    float3 p;
+    //    // forward 매핑: gx = floor((x - center.x)/voxelSize) + gridOffset.x
+    //    // 역변환: x = center.x + (gx - gridOffset.x) * voxelSize
+    //    p.x = center.x + (float(g.x - gridOffset.x) * voxelSize);
+    //    p.y = center.y + (float(g.y - gridOffset.y) * voxelSize);
+    //    p.z = center.z + (float(g.z - gridOffset.z) * voxelSize);
+    //    return p;
     //}
-    //ply.Serialize("../../res/3D/Octree.ply");
 
-    return octree;
-}
-//
-//__global__ void Kernel_MortonEncode(const float3* __restrict__ d_points,
-//    uint64_t* __restrict__ d_codes,
-//    int N, float voxelSize, float3 minBound) {
-//    int idx = threadIdx.x + blockIdx.x * blockDim.x;
-//    if (idx >= N) return;
-//
-//    float3 p = d_points[idx];
-//    float3 diff;
-//    diff.x = p.x - minBound.x;
-//    diff.y = p.y - minBound.y;
-//    diff.z = p.z - minBound.z;
-//
-//    uint3 gridCoord = make_uint3(diff.x / voxelSize,
-//        diff.y / voxelSize,
-//        diff.z / voxelSize);
-//
-//    d_codes[idx] = mortonEncode(gridCoord.x, gridCoord.y, gridCoord.z);
-//}
-//
-//__global__ void Kernel_DecodeVoxelCenters(const uint64_t* __restrict__ d_codes,
-//    float3* __restrict__ d_centers,
-//    int numLeaves,
-//    float voxelSize,
-//    float3 minBound) {
-//    int idx = threadIdx.x + blockIdx.x * blockDim.x;
-//    if (idx >= numLeaves) return;
-//
-//    uint64_t code = d_codes[idx];
-//    uint3 grid = mortonDecode(code);
-//    float3 center = make_float3(
-//        grid.x * voxelSize + voxelSize * 0.5f + minBound.x,
-//        grid.y * voxelSize + voxelSize * 0.5f + minBound.y,
-//        grid.z * voxelSize + voxelSize * 0.5f + minBound.z);
-//    d_centers[idx] = center;
-//}
-//
-//void BuildMortonOctree(const float3* d_inputPoints, int N, float voxelSize, AABB bbox)
-//{
-//    // 1. Morton 코드 생성
-//    thrust::device_vector<uint64_t> mortonCodes(N);
-//    Kernel_MortonEncode << <(N + 255) / 256, 256 >> > (
-//        d_inputPoints,
-//        thrust::raw_pointer_cast(mortonCodes.data()),
-//        N, voxelSize, bbox.minBound
-//        );
-//    CUDA_SYNC();
-//
-//    // 2. 정렬
-//    thrust::device_vector<float3> sortedPoints(d_inputPoints, d_inputPoints + N);
-//    thrust::sort_by_key(mortonCodes.begin(), mortonCodes.end(), sortedPoints.begin());
-//
-//    // 3. unique leaf voxel 추출
-//    thrust::device_vector<uint64_t> uniqueCodes(N);
-//    thrust::device_vector<int> counts(N);
-//    auto end = thrust::reduce_by_key(
-//        mortonCodes.begin(), mortonCodes.end(),
-//        thrust::make_constant_iterator(1),
-//        uniqueCodes.begin(),
-//        counts.begin()
-//    );
-//    int numLeaves = end.first - uniqueCodes.begin();
-//
-//    // 4. voxel 중심 좌표 디코딩
-//    thrust::device_vector<float3> voxelCenters(numLeaves);
-//    Kernel_DecodeVoxelCenters << <(numLeaves + 255) / 256, 256 >> > (
-//        thrust::raw_pointer_cast(uniqueCodes.data()),
-//        thrust::raw_pointer_cast(voxelCenters.data()),
-//        numLeaves,
-//        voxelSize,
-//        bbox.minBound
-//        );
-//    CUDA_SYNC();
-//
-//    std::vector<float3> h_centers(numLeaves);
-//    CUDA_COPY_D2H(h_centers.data(), thrust::raw_pointer_cast(voxelCenters.data()),
-//        sizeof(float3) * numLeaves);
-//
-//    PLYFormat ply;
-//    for (size_t i = 0; i < h_centers.size(); i++)
-//    {
-//        ply.AddPoint(h_centers[i].x, h_centers[i].y, h_centers[i].z);
-//    }
-//    ply.Serialize("../../res/3D/Morton.ply");
-//}
+    //__host__ __device__
+    //    inline static float3 PointFromCode_Voxel(uint64_t code,
+    //        float3 center,
+    //        float  voxelSize,
+    //        int3   gridOffset,
+    //        bool   cellCenter = true)
+    //{
+    //    const uint8_t depth = UnpackDepth(code);
+    //    const uint64_t key = UnpackKey(code);
+
+    //    uint32_t ix, iy, iz;
+    //    DecodeXYZFromKey(key, depth, ix, iy, iz);
+
+    //    const float scale = float(1u << (kMaxDepth - depth)); // 이 leaf가 커버하는 max-res 보xel 수
+    //    const float cx = float(ix) * scale + (cellCenter ? 0.5f * scale : 0.0f);
+    //    const float cy = float(iy) * scale + (cellCenter ? 0.5f * scale : 0.0f);
+    //    const float cz = float(iz) * scale + (cellCenter ? 0.5f * scale : 0.0f);
+
+    //    float3 p;
+    //    p.x = center.x + (cx - float(gridOffset.x)) * voxelSize;
+    //    p.y = center.y + (cy - float(gridOffset.y)) * voxelSize;
+    //    p.z = center.z + (cz - float(gridOffset.z)) * voxelSize;
+    //    return p;
+    //}
+
+    __host__ __device__
+        inline static float3 PointFromCode_Voxel(uint64_t code,
+            float3 center,
+            float  voxelSize,
+            int3   gridOffset,
+            bool   cellCenter = true)
+    {
+        const uint8_t depth = UnpackDepth(code);
+        const uint64_t key = UnpackKey(code);
+
+        uint32_t ix, iy, iz;
+        DecodeXYZFromKey(key, depth, ix, iy, iz);
+
+        const float scale = float(1u << (kMaxDepth - depth)); // 이 노드가 커버하는 max-res 보xel 수
+        const float cx = float(ix) * scale + (cellCenter ? 0.5f * scale : 0.0f);
+        const float cy = float(iy) * scale + (cellCenter ? 0.5f * scale : 0.0f);
+        const float cz = float(iz) * scale + (cellCenter ? 0.5f * scale : 0.0f);
+
+        float3 p;
+        p.x = center.x + (cx - float(gridOffset.x)) * voxelSize;
+        p.y = center.y + (cy - float(gridOffset.y)) * voxelSize;
+        p.z = center.z + (cz - float(gridOffset.z)) * voxelSize;
+        return p;
+    }
+
+    __host__ __device__
+        inline static uint64_t ParentCode(uint64_t code)
+    {
+        uint8_t d = UnpackDepth(code);
+        if (d == 0) return Pack(0, 0ull);
+        uint64_t k = UnpackKey(code) >> 3; // 말단 3비트 제거
+        return Pack(uint8_t(d - 1), k);
+    }
+
+    __host__ __device__
+        inline static uint32_t ChildIndex(uint64_t code)
+    {
+        // 말단 3비트가 이 노드의 자식 인덱스(0..7)
+        return uint32_t(UnpackKey(code) & 0x7ull);
+    }
+};

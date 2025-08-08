@@ -62,7 +62,7 @@ typedef unsigned long ui64;
 typedef float f32;
 typedef double f64;
 
-#ifdef MIN_MAX_DEFINITIONS
+#ifndef MIN_MAX_DEFINITIONS
 #define MIN_MAX_DEFINITIONS
 #define i8_max  (INT8_MAX)
 #define i8_min  (INT8_MIN)
@@ -141,6 +141,16 @@ typedef double f64;
 #ifndef CUDA_SYNC
 #define CUDA_SYNC() cudaDeviceSynchronize();
 #endif
+
+#define CUDA_CHECK(call) \
+    do { \
+        cudaError_t err = call; \
+        if (err != cudaSuccess) \
+        { \
+            printf("CUDA error %s (%d): %s:%d\n", cudaGetErrorString(err), err, __FILE__, __LINE__); \
+            assert(false); \
+        } \
+    } while (0)
 
 #ifndef RAW_PTR
 #define RAW_PTR(x) (thrust::raw_pointer_cast((x).data()))

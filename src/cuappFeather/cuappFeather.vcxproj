@@ -20,6 +20,7 @@
     <CudaCompile Include="HalfEdgeMesh.cu" />
     <CudaCompile Include="main.cu" />
     <CudaCompile Include="Mesh.cu" />
+    <CudaCompile Include="Octree.cu" />
     <CudaCompile Include="PointCloud.cu" />
     <CudaCompile Include="SCVoxelHashMap.cu" />
     <CudaCompile Include="ThrustHalfEdgeMesh.cu" />
