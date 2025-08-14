@@ -3,6 +3,14 @@
 #pragma warning(disable : 4267)
 #pragma warning(disable : 4244)
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+
 #include <iostream>
 #include <libFeather.h>
 
@@ -145,9 +153,9 @@ bool ForceGPUPerformance()
 //}
 #pragma endregion
 
-const string resource_file_name = "0_Initial";
+//const string resource_file_name = "0_Initial";
 //const string resource_file_name = "0_Initial_Noise";
-//const string resource_file_name = "Compound_Full";
+const string resource_file_name = "Compound_Full";
 //const string resource_file_name = "Bridge";
 //const string resource_file_name = "Reintegrate";
 //const string resource_file_name = "KOL";
@@ -503,26 +511,64 @@ int main(int argc, char** argv)
 			}
 			else if (GLFW_KEY_END == event.keyCode)
 			{
-				Octree octree;
-				octree.Initialize(cuInstance.d_mesh.positions, cuInstance.d_mesh.numberOfPoints, make_float3(0.0f, 0.0f, 0.0f), 0.1f);
-
-				vector<OctreeNode> octreeNodes(octree.numberOfNodes);
-				CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(OctreeNode)* octree.numberOfNodes);
-
-				const uint8_t depth = Octree::kMaxDepth;                   // √÷¥Î ±Ì¿Ã
-				const uint32_t range = 1u << Octree::kMaxDepth;            // 2^kMaxDepth
-				const int3 gridOffset = make_int3(int(range / 2), int(range / 2), int(range / 2)); // ¡ﬂæ” ¡§∑ƒ
-
-				//printf("numberOfNodes : %d\n", octreeNodes.size());
-
-				for (auto& n : octreeNodes)
+				if (event.action == 1)
 				{
-					auto p = Octree::PointFromCode_Voxel(n.mortonCode, make_float3(0.0f, 0.0f, 0.0f), 0.1f, gridOffset);
-					//printf("%f, %f, %f\n", XYZ(p));
-					VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f), Color::green());
-				}
+					CUDA_TS(BuildOctree);
 
-				octree.Terminate();
+					CUDA_TS(BuildOctreeInitialize);
+
+					auto center = (cuInstance.d_mesh.min + cuInstance.d_mesh.max) * 0.5f;
+
+					auto lx = cuInstance.d_mesh.max.x - cuInstance.d_mesh.min.x;
+					auto ly = cuInstance.d_mesh.max.y - cuInstance.d_mesh.min.y;
+					auto lz = cuInstance.d_mesh.max.z - cuInstance.d_mesh.min.z;
+
+					auto maxLength = std::max({ lx, ly, lz });
+					float voxelSize = 0.1f;
+					unsigned int maxDepth = 0;
+					float lengthUnit = maxLength;
+					while (lengthUnit > voxelSize)
+					{
+						lengthUnit *= 0.5f;
+						maxDepth++;
+					}
+
+					printf("lengthUnit : %f\n", lengthUnit);
+					printf("maxDepth : %d\n", maxDepth);
+
+					Octree octree;
+					octree.Initialize(
+						cuInstance.d_mesh.positions,
+						cuInstance.d_mesh.numberOfPoints,
+						cuInstance.d_mesh.min,
+						cuInstance.d_mesh.max,
+						0.1f);
+
+					CUDA_TE(BuildOctreeInitialize);
+
+					vector<OctreeNode> octreeNodes(octree.numberOfNodes);
+					CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(OctreeNode) * octree.numberOfNodes);
+
+					for (auto& n : octreeNodes)
+					{
+						//printf("MortonCode: %llu, Level: %d\n", n.mortonCode, n.level);
+
+						auto p = Octree::PointFromCode_Voxel(n.mortonCode, center, 0.1f, Octree::GridOffset());
+						//printf("%f, %f, %f\n", XYZ(p));
+						VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f), Color::green());
+					}
+
+					octree.Terminate();
+
+					CUDA_TE(BuildOctree);
+				}
+			}
+			else if (GLFW_KEY_BACKSLASH == event.keyCode)
+			{
+				if (event.action == 1)
+				{
+
+				}
 			}
 			else if (GLFW_KEY_PAGE_UP == event.keyCode)
 			{

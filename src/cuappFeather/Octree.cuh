@@ -10,6 +10,7 @@
 #include <Serialization.hpp>
 
 #include <HashMap.hpp>
+#include <MortonCode.cuh>
 
 using OctreeKey = uint64_t;
 
@@ -48,7 +49,7 @@ struct Octree
 
     HashMap<uint64_t, unsigned int> mortonCodeOctreeNodeMapping;
 
-    void Initialize(float3* positions, unsigned numberOfPoints, float3 center, float voxelSize);
+    void Initialize(float3* positions, unsigned numberOfPoints, float3 aabbMin, float3 aabbMax, float voxelSize);
     void Terminate();
 
     __host__ __device__
@@ -269,7 +270,7 @@ struct Octree
         uint32_t ix, iy, iz;
         DecodeXYZFromKey(key, depth, ix, iy, iz);
 
-        const float scale = float(1u << (kMaxDepth - depth)); // 이 노드가 커버하는 max-res 보xel 수
+        const float scale = float(1u << (kMaxDepth - depth)); // 이 노드가 커버하는 max-res voxel 수
         const float cx = float(ix) * scale + (cellCenter ? 0.5f * scale : 0.0f);
         const float cy = float(iy) * scale + (cellCenter ? 0.5f * scale : 0.0f);
         const float cz = float(iz) * scale + (cellCenter ? 0.5f * scale : 0.0f);

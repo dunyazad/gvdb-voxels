@@ -31,8 +31,20 @@ __global__ void Kernel_Octree_Initialize(
     if (tid == 0) atomicMax(numberOfNodes, numberOfPoints);
 }
 
-void Octree::Initialize(float3* positions, unsigned numberOfPoints, float3 center, float voxelSize)
+void Octree::Initialize(float3* positions, unsigned numberOfPoints, float3 aabbMin, float3 aabbMax, float voxelSize)
 {
+	auto center = (aabbMin + aabbMax) * 0.5f;
+	auto dimensions = aabbMax - aabbMin;
+	auto maxDimension = fmaxf(dimensions.x, fmaxf(dimensions.y, dimensions.z));
+
+	float unitSize = maxDimension;
+	unsigned int depth = 0;
+    while (unitSize > voxelSize && depth < Octree::kMaxDepth)
+    {
+        unitSize *= 0.5f;
+        ++depth;
+	}
+
     const size_t cap = size_t(numberOfPoints) * 2u;
     CUDA_MALLOC(&nodes, sizeof(OctreeNode) * cap);
     CUDA_MEMSET(nodes, 0xFF, sizeof(OctreeNode) * cap);
@@ -43,15 +55,12 @@ void Octree::Initialize(float3* positions, unsigned numberOfPoints, float3 cente
 
     mortonCodeOctreeNodeMapping.Initialize(size_t(numberOfPoints) * 64u, 64u);
 
-    // launch
-    const int block = 256;
-    const int grid = int((numberOfPoints + block - 1) / block);
-
-    Kernel_Octree_Initialize << <grid, block >> > (
+    LaunchKernel(Kernel_Octree_Initialize, numberOfPoints,
         positions,
         numberOfPoints,
         center,
         voxelSize,
+        //depth, //Octree::kMaxDepth,
         Octree::kMaxDepth,
         GridOffset(),
         nodes,
