@@ -48,8 +48,19 @@ struct Octree
     unsigned int* d_numberOfNodes = nullptr;
 
     HashMap<uint64_t, unsigned int> mortonCodeOctreeNodeMapping;
+    HashMap<uint64_t, unsigned int> mortonCodes;
 
-    void Initialize(float3* positions, unsigned numberOfPoints, float3 aabbMin, float3 aabbMax, float voxelSize);
+    unsigned int numberOfPoints = 0;
+	float3 aabbMin = { FLT_MAX, FLT_MAX, FLT_MAX };
+	float3 aabbMax = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+	float voxelSize = 0.0f;
+
+    void Initialize(
+        float3* positions,
+        unsigned numberOfPoints,
+        float3 aabbMin,
+        float3 aabbMax,
+        float voxelSize);
     void Terminate();
 
     __host__ __device__

@@ -5,7 +5,6 @@
 #include <stddef.h>
 #include <assert.h>
 
-// Type-safe EMPTY_KEY definition
 template<typename Key>
 __host__ __device__ inline Key empty_key();
 
@@ -21,7 +20,6 @@ __host__ __device__ inline uint64_t empty_key<uint64_t>()
     return 0xFFFFFFFFFFFFFFFFULL;
 }
 
-// Hash entry structure
 template<typename Key, typename Value>
 struct HashMapEntry
 {
@@ -35,9 +33,7 @@ struct HashMapInfo
     HashMapEntry<Key, Value>* entries = nullptr;
     size_t capacity = 1024 * 1024 * 1024;
     uint8_t maxProbe = 64;
-
-    unsigned int* d_numberOccupiedKeys = nullptr;
-    Key* d_occupiedKeys = nullptr;
+	unsigned int* numberOfEntries = nullptr;
 };
 
 template<typename Key, typename Value>
@@ -52,6 +48,9 @@ struct HashMap
 
         CUDA_CHECK(CUDA_MALLOC(&info.entries, sizeof(HashMapEntry<Key, Value>) * info.capacity));
         CUDA_CHECK(CUDA_MEMSET(info.entries, 0xFF, sizeof(HashMapEntry<Key, Value>) * info.capacity));
+
+        CUDA_CHECK(CUDA_MALLOC(&info.numberOfEntries, sizeof(unsigned int)));
+        CUDA_CHECK(CUDA_MEMSET(info.numberOfEntries, 0, sizeof(unsigned int)));
     }
 
     void Terminate()
@@ -84,12 +83,29 @@ struct HashMap
         {
             size_t slot = (idx + i) % info.capacity;
             Key* slot_key = &info.entries[slot].key;
-            Key prev_key = atomicCAS(slot_key, empty_key<Key>(), key);
+            Key k = *slot_key;
 
-            if (prev_key == empty_key<Key>() || prev_key == key)
+            if (k == key)
             {
+                // ÇÊ¿ä ½Ã atomicExch(&info.entries[slot].value, value);
                 info.entries[slot].value = value;
                 return true;
+            }
+
+            if (k == empty_key<Key>())
+            {
+                Key prev = atomicCAS(slot_key, empty_key<Key>(), key);
+                if (prev == empty_key<Key>())
+                {
+					atomicAdd(info.numberOfEntries, 1);
+                    info.entries[slot].value = value;
+                    return true;
+                }
+                else if (prev == key)
+                {
+                    info.entries[slot].value = value;
+                    return true;
+                }
             }
         }
         return false;
