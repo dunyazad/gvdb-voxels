@@ -32,7 +32,14 @@ __global__ void Kernel_Octree_Initialize(
     nodes[tid] = n;
     if (tid == 0) atomicMax(numberOfNodes, numberOfPoints);
 
-    HashMap<uint64_t, unsigned int>::insert(mortonCodes.info, code, tid);
+    HashMap<uint64_t, unsigned int>::insert(mortonCodes.info, code, 1);
+    
+	auto parentCode = Octree::ParentCode(code);
+    while (0 != parentCode)
+    {
+        HashMap<uint64_t, unsigned int>::insert(mortonCodes.info, parentCode, 1);
+		parentCode = Octree::ParentCode(parentCode);
+    }
 }
 
 void Octree::Initialize(
@@ -58,6 +65,8 @@ void Octree::Initialize(
         unitSize *= 0.5f;
         ++depth;
 	}
+
+	printf("unitSize : %f, voxelSize : %f, depth : %d\n", unitSize, voxelSize, depth);
 
     const size_t cap = size_t(numberOfPoints) * 2u;
     CUDA_MALLOC(&nodes, sizeof(OctreeNode) * cap);

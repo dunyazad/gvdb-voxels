@@ -60,6 +60,12 @@ struct HashMap
             CUDA_CHECK(CUDA_FREE(info.entries));
             info.entries = nullptr;
         }
+
+        if (info.numberOfEntries != nullptr)
+        {
+            CUDA_CHECK(CUDA_FREE(info.numberOfEntries));
+            info.numberOfEntries = nullptr;
+		}
     }
 
     void Clear(int value = 0xFF)
@@ -67,6 +73,11 @@ struct HashMap
         if (info.entries != nullptr)
         {
             CUDA_CHECK(CUDA_MEMSET(info.entries, value, sizeof(HashMapEntry<Key, Value>) * info.capacity));
+        }
+
+        if (info.numberOfEntries != nullptr)
+        {
+            CUDA_CHECK(CUDA_MEMSET(info.numberOfEntries, 0, sizeof(unsigned int)));
         }
     }
 
@@ -104,6 +115,42 @@ struct HashMap
                 else if (prev == key)
                 {
                     info.entries[slot].value = value;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    __device__ static bool increase(const HashMapInfo<Key, Value>& info, Key key)
+    {
+        size_t idx = HashMap_hash(key, info.capacity);
+
+        for (int i = 0; i < info.maxProbe; ++i)
+        {
+            size_t slot = (idx + i) % info.capacity;
+            Key* slot_key = &info.entries[slot].key;
+            Key k = *slot_key;
+
+            if (k == key)
+            {
+                // ÇÊ¿ä ½Ã atomicExch(&info.entries[slot].value, value);
+                info.entries[slot].value = info.entries[slot].value + 1;
+                return true;
+            }
+
+            if (k == empty_key<Key>())
+            {
+                Key prev = atomicCAS(slot_key, empty_key<Key>(), key);
+                if (prev == empty_key<Key>())
+                {
+                    atomicAdd(info.numberOfEntries, 1);
+                    info.entries[slot].value = 1;
+                    return true;
+                }
+                else if (prev == key)
+                {
+                    info.entries[slot].value = info.entries[slot].value + 1;
                     return true;
                 }
             }

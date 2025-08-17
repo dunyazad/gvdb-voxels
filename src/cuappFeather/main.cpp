@@ -546,23 +546,54 @@ int main(int argc, char** argv)
 
 					CUDA_TE(BuildOctreeInitialize);
 
-					vector<OctreeNode> octreeNodes(octree.numberOfNodes);
-					CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(OctreeNode) * octree.numberOfNodes);
+					unsigned int numberOfEntries = 0;
+					CUDA_COPY_D2H(&numberOfEntries, octree.mortonCodes.info.numberOfEntries, sizeof(unsigned int));
 
-					map<uint64_t, int> temp;
+					vector<HashMapEntry<uint64_t, unsigned int>> entries(octree.mortonCodes.info.capacity);
+					CUDA_COPY_D2H(entries.data(), octree.mortonCodes.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>)* octree.mortonCodes.info.capacity);
 
-					for (auto& n : octreeNodes)
+					CUDA_SYNC();
+
+					//for (size_t i = 0; i < octree.mortonCodes.info.capacity; i++)
+					//{
+					//	auto& entry = entries[i];
+					//	if (UINT64_MAX == entry.key) continue;
+					//	//printf("MortonCode: %llu, Count: %d\n", entry.key, entry.value);
+
+					//	Octree::PointFromCode_Voxel(entry.key, center, voxelSize, Octree::GridOffset());
+					//	auto depth = Octree::UnpackDepth(entry.key);
+					//	auto p = Octree::PointFromCode_Voxel(entry.key, center, 0.1f, Octree::GridOffset());
+					//	//printf("%f, %f, %f\n", XYZ(p));
+					//	if (depth == 8)
+					//	{
+					//		printf("%f, %f, %f\n", XYZ(p));
+					//		VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(1.0f), Color::red());
+					//	}
+					//	else
+					//	{
+					//		VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f * (float)maxDepth / (float)depth), Color::green());
+					//	}
+					//}
+
 					{
-						//printf("MortonCode: %llu, Level: %d\n", n.mortonCode, n.level);
+						vector<OctreeNode> octreeNodes(octree.numberOfNodes);
+						CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(OctreeNode) * octree.numberOfNodes);
 
-						temp[n.mortonCode]++;
+						map<uint64_t, int> temp;
 
-						auto p = Octree::PointFromCode_Voxel(n.mortonCode, center, 0.1f, Octree::GridOffset());
-						//printf("%f, %f, %f\n", XYZ(p));
-						VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f), Color::green());
+						for (auto& n : octreeNodes)
+						{
+							//printf("MortonCode: %llu, Level: %d\n", n.mortonCode, n.level);
+
+							temp[n.mortonCode]++;
+
+							auto p = Octree::PointFromCode_Voxel(n.mortonCode, center, 0.1f, Octree::GridOffset());
+							//printf("%f, %f, %f\n", XYZ(p));
+							VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f), Color::green());
+						}
+
+						printf("temp.size() : %d\n", temp.size());
 					}
-
-					printf("temp.size() : %d\n", temp.size());
 
 					octree.Terminate();
 
