@@ -156,9 +156,20 @@ typedef double f64;
 #define RAW_PTR(x) (thrust::raw_pointer_cast((x).data()))
 #endif
 
+
 #ifndef PI
 #define PI 3.14159265358979323846
 #endif
+#define DEG2RAD (PI/180)
+#define RAD2DEG (180/PI)
+
+#ifndef XYZ
+#define XYZ(v) (v).x, (v).y, (v).z
+#endif
+#ifndef XYZW
+#define XYZW(v) (v).x, (v).y, (v).z, (v).w
+#endif
+
 
 #ifdef __CUDACC__
 __device__ inline void atomicMinF(float* addr, float val)

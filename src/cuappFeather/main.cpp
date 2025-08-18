@@ -153,9 +153,10 @@ bool ForceGPUPerformance()
 //}
 #pragma endregion
 
-//const string resource_file_name = "0_Initial";
+//const string resource_file_name = "diagonal";
+const string resource_file_name = "0_Initial";
 //const string resource_file_name = "0_Initial_Noise";
-const string resource_file_name = "Compound_Full";
+//const string resource_file_name = "Compound_Full";
 //const string resource_file_name = "Bridge";
 //const string resource_file_name = "Reintegrate";
 //const string resource_file_name = "KOL";
@@ -294,6 +295,17 @@ void ApplyHalfEdgeMeshToEntity(Entity entity, const DeviceHalfEdgeMesh& d_mesh)
 
 int main(int argc, char** argv)
 {
+	//PLYFormat ply;
+	//for (size_t i = 0; i < 1000; i++)
+	//{
+	//	ply.AddPoint(-50.0f + (float)i * 0.1f, -50.0f + (float)i * 0.1f, -50.0f + (float)i * 0.1f);
+	//	ply.AddNormal(0.0f, 1.0f, 0.0f);
+	//}
+	////ply.Serialize("../../res/3D/diagonal.ply");
+	//
+	//auto aabbMin = make_float3(get<0>(ply.GetAABBMin()), get<1>(ply.GetAABBMin()), get<2>(ply.GetAABBMin()));
+	//auto aabbMax = make_float3(get<0>(ply.GetAABBMax()), get<1>(ply.GetAABBMax()), get<2>(ply.GetAABBMax()));
+
 	ForceGPUPerformance();
 
 	cout << "AppFeather" << endl;
@@ -517,14 +529,24 @@ int main(int argc, char** argv)
 
 					CUDA_TS(BuildOctreeInitialize);
 
-					auto center = (cuInstance.d_mesh.min + cuInstance.d_mesh.max) * 0.5f;
+					auto center = (cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f;
 
-					auto lx = cuInstance.d_mesh.max.x - cuInstance.d_mesh.min.x;
-					auto ly = cuInstance.d_mesh.max.y - cuInstance.d_mesh.min.y;
-					auto lz = cuInstance.d_mesh.max.z - cuInstance.d_mesh.min.z;
+					auto lx = cuInstance.h_mesh.max.x - cuInstance.h_mesh.min.x;
+					auto ly = cuInstance.h_mesh.max.y - cuInstance.h_mesh.min.y;
+					auto lz = cuInstance.h_mesh.max.z - cuInstance.h_mesh.min.z;
+
+					//auto center = (aabbMin + aabbMax) * 0.5f;
+
+					//auto lx = aabbMax.x - aabbMin.x;
+					//auto ly = aabbMax.y - aabbMin.y;
+					//auto lz = aabbMax.z - aabbMin.z;
 
 					auto maxLength = std::max({ lx, ly, lz });
-					float voxelSize = 0.1f;
+					float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+					float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+
+					//float voxelSize = 0.1f;
+					float voxelSize = 0.0125f;
 					unsigned int maxDepth = 0;
 					float unitLength = maxLength;
 					while (unitLength > voxelSize)
@@ -538,21 +560,64 @@ int main(int argc, char** argv)
 
 					Octree octree;
 					octree.Initialize(
-						cuInstance.d_mesh.positions,
-						cuInstance.d_mesh.numberOfPoints,
-						cuInstance.d_mesh.min,
-						cuInstance.d_mesh.max,
-						voxelSize);
+						cuInstance.h_mesh.positions,
+						cuInstance.h_mesh.numberOfPoints,
+						cuInstance.h_mesh.min,
+						cuInstance.h_mesh.max,
+						maxDepth);
+
+					//octree.Initialize(
+					//	(float3*)ply.GetPoints().data(),
+					//	ply.GetPoints().size() / 3,
+					//	make_float3(get<0>(ply.GetAABBMin()), get<1>(ply.GetAABBMin()), get<2>(ply.GetAABBMin())),
+					//	make_float3(get<0>(ply.GetAABBMax()), get<1>(ply.GetAABBMax()), get<2>(ply.GetAABBMax())),
+					//	maxDepth
+					//);
 
 					CUDA_TE(BuildOctreeInitialize);
 
-					unsigned int numberOfEntries = 0;
-					CUDA_COPY_D2H(&numberOfEntries, octree.mortonCodes.info.numberOfEntries, sizeof(unsigned int));
+					{
+						for (const auto& node : octree.nodes)
+						{
+							// node.level(=이 노드의 깊이) 기준으로 중심 계산
+							const auto p = octree.ToPosition(node.key, bbMin, bbMax);
 
-					vector<HashMapEntry<uint64_t, unsigned int>> entries(octree.mortonCodes.info.capacity);
-					CUDA_COPY_D2H(entries.data(), octree.mortonCodes.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>)* octree.mortonCodes.info.capacity);
+							// leaf 셀 한 변 길이(예: 전체 길이 / 2^maxDepth)가 unitLength라고 가정
+							const unsigned k = (maxDepth >= node.level) ? (maxDepth - node.level) : 0u;
+							const float scale = std::ldexp(unitLength, static_cast<int>(k)); // unitLength * 2^k
 
-					CUDA_SYNC();
+							stringstream ss;
+							ss << "octree_" << node.level;
+
+							//if (k == 1)
+							{
+								VD::AddWiredBox(
+									ss.str(),
+									{ XYZ(p) },
+									{ 0.0f, 1.0f, 0.0f },
+									glm::vec3(scale),            // AddWiredBox가 "전체 길이"를 받는다고 가정
+									Color::green()
+								);
+							}
+						}
+					}
+
+					for (size_t i = 0; i <= maxDepth; i++)
+					{
+						stringstream ss;
+						ss << "octree_" << i;
+
+						VD::AddToSelectionList(ss.str());
+					}
+
+					//{
+					//unsigned int numberOfEntries = 0;
+					//CUDA_COPY_D2H(&numberOfEntries, octree.mortonCodes.info.numberOfEntries, sizeof(unsigned int));
+
+					//vector<HashMapEntry<uint64_t, unsigned int>> entries(octree.mortonCodes.info.capacity);
+					//CUDA_COPY_D2H(entries.data(), octree.mortonCodes.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>)* octree.mortonCodes.info.capacity);
+
+					//CUDA_SYNC();
 
 					//for (size_t i = 0; i < octree.mortonCodes.info.capacity; i++)
 					//{
@@ -574,31 +639,86 @@ int main(int argc, char** argv)
 					//		VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f * (float)maxDepth / (float)depth), Color::green());
 					//	}
 					//}
+					//}
 
-					{
-						vector<OctreeNode> octreeNodes(octree.numberOfNodes);
-						CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(OctreeNode) * octree.numberOfNodes);
+					//{
+					//	vector<OctreeNode> octreeNodes(octree.numberOfNodes);
+					//	CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(OctreeNode) * octree.numberOfNodes);
 
-						map<uint64_t, int> temp;
+					//	map<uint64_t, int> temp;
 
-						for (auto& n : octreeNodes)
-						{
-							//printf("MortonCode: %llu, Level: %d\n", n.mortonCode, n.level);
+					//	for (auto& n : octreeNodes)
+					//	{
+					//		//printf("MortonCode: %llu, Level: %d\n", n.mortonCode, n.level);
 
-							temp[n.mortonCode]++;
+					//		temp[n.mortonCode]++;
 
-							auto p = Octree::PointFromCode_Voxel(n.mortonCode, center, 0.1f, Octree::GridOffset());
-							//printf("%f, %f, %f\n", XYZ(p));
-							VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f), Color::green());
-						}
+					//		auto p = Octree::PointFromCode_Voxel(n.mortonCode, center, 0.1f, Octree::GridOffset());
+					//		//printf("%f, %f, %f\n", XYZ(p));
+					//		VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f), Color::green());
+					//	}
 
-						printf("temp.size() : %d\n", temp.size());
-					}
+					//	printf("temp.size() : %d\n", temp.size());
+					//}
 
 					octree.Terminate();
 
 					CUDA_TE(BuildOctree);
 				}
+			}
+			else if (GLFW_KEY_UP == event.keyCode)
+			{
+				if (event.action == 1)
+				{
+					VD::ShowNextSelection();
+				}
+			}
+			else if (GLFW_KEY_DOWN == event.keyCode)
+			{
+				if (event.action == 1)
+				{
+					VD::ShowPreviousSelection();
+				}
+			}
+			else if (GLFW_KEY_0 == event.keyCode)
+			{
+			if (event.action == 1) VD::ToggleVisibility("octree_10");
+			}
+			else if (GLFW_KEY_1 == event.keyCode)
+			{
+			if (event.action == 1) VD::ToggleVisibility("octree_1");
+			}
+			else if (GLFW_KEY_2 == event.keyCode)
+			{
+			if (event.action == 1) VD::ToggleVisibility("octree_2");
+			}
+			else if (GLFW_KEY_3 == event.keyCode)
+			{
+			if (event.action == 1) VD::ToggleVisibility("octree_3");
+			}
+			else if (GLFW_KEY_4 == event.keyCode)
+			{
+			if (event.action == 1) VD::ToggleVisibility("octree_4");
+			}
+			else if (GLFW_KEY_5 == event.keyCode)
+			{
+			if (event.action == 1) VD::ToggleVisibility("octree_5");
+			}
+			else if (GLFW_KEY_6 == event.keyCode)
+			{
+			if (event.action == 1) VD::ToggleVisibility("octree_6");
+			}
+			else if (GLFW_KEY_7 == event.keyCode)
+			{
+			if (event.action == 1) VD::ToggleVisibility("octree_7");
+			}
+			else if (GLFW_KEY_8 == event.keyCode)
+			{
+			if (event.action == 1) VD::ToggleVisibility("octree_8");
+			}
+			else if (GLFW_KEY_9 == event.keyCode)
+			{
+			if (event.action == 1) VD::ToggleVisibility("octree_9");
 			}
 			else if (GLFW_KEY_BACKSLASH == event.keyCode)
 			{
@@ -882,7 +1002,7 @@ int main(int argc, char** argv)
 						auto v1 = glm::vec3(XYZ(p1));
 						auto v2 = glm::vec3(XYZ(p2));
 
-						VD::AddTriangle("One Ring Faces", v0, v1, v2, Color::red());
+						//VD::AddTriangle("One Ring Faces", v0, v1, v2, Color::red());
 					}
 
 				}
