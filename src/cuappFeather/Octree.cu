@@ -7,7 +7,6 @@ __global__ void Kernel_DeviceOctree_Initialize(
     float3 aabbMax,
     float voxelSize,
     uint8_t depth,
-    int3 gridOffset,
     DeviceOctreeNode* __restrict__ nodes,
     unsigned int numberOfAllocatedNodes,
     unsigned int* __restrict__ numberOfNodes,
@@ -17,12 +16,14 @@ __global__ void Kernel_DeviceOctree_Initialize(
     if (tid >= numberOfPoints) return;
 
     const float3 p = positions[tid];
-    const uint64_t code = DeviceOctree::KeyFromPoint_Voxel(p, (aabbMin + aabbMax) * 0.5f, voxelSize, depth, gridOffset);
+    const uint64_t code = DeviceOctree::ToKey(p, aabbMin, aabbMax, depth);
+
+    //printf("%.4f, %.4f, %.4f - %.4f, %.4f, %.4f, %d, %llu\n", XYZ(aabbMin), XYZ(aabbMax), depth, code);
 
     DeviceOctreeNode n;
     n.mortonCode = code;
-    n.level = DeviceOctree::UnpackDepth(code);
-    n.parent = UINT32_MAX;
+    n.level = DeviceOctree::GetDepth(code);
+    n.parent = DeviceOctree::GetParentKey(code);
 #pragma unroll
     for (int i = 0; i < 8; ++i)
     {
@@ -34,11 +35,11 @@ __global__ void Kernel_DeviceOctree_Initialize(
 
     HashMap<uint64_t, unsigned int>::insert(mortonCodes.info, code, 1);
     
-	auto parentCode = DeviceOctree::ParentCode(code);
+	auto parentCode = DeviceOctree::GetParentKey(code);
     while (0 != parentCode)
     {
         HashMap<uint64_t, unsigned int>::insert(mortonCodes.info, parentCode, 1);
-		parentCode = DeviceOctree::ParentCode(parentCode);
+		parentCode = DeviceOctree::GetParentKey(parentCode);
     }
 }
 
@@ -47,26 +48,14 @@ void DeviceOctree::Initialize(
     unsigned numberOfPoints,
     float3 aabbMin,
     float3 aabbMax,
-    float voxelSize)
+    uint64_t leafDepth)
 {
-	this->numberOfPoints = numberOfPoints;
-	this->aabbMin = aabbMin;
-    this->aabbMax = aabbMax;
-	this->voxelSize = voxelSize;
+    auto dimension = aabbMax - aabbMin;
+    auto maxLength = fmaxf(dimension.x, fmaxf(dimension.y, dimension.z));
+    auto center = (aabbMin + aabbMax) * 0.5f;
 
-	auto center = (aabbMin + aabbMax) * 0.5f;
-	auto dimensions = aabbMax - aabbMin;
-	auto maxDimension = fmaxf(dimensions.x, fmaxf(dimensions.y, dimensions.z));
-
-	float unitSize = maxDimension;
-	unsigned int depth = 0;
-    while (unitSize > voxelSize && depth < DeviceOctree::kMaxDepth)
-    {
-        unitSize *= 0.5f;
-        ++depth;
-	}
-
-	printf("unitSize : %f, voxelSize : %f, depth : %d\n", unitSize, voxelSize, depth);
+    auto bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+    auto bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 
     const size_t cap = size_t(numberOfPoints) * 2u;
     CUDA_MALLOC(&nodes, sizeof(DeviceOctreeNode) * cap);
@@ -86,9 +75,7 @@ void DeviceOctree::Initialize(
         aabbMin,
         aabbMax,
         voxelSize,
-        //depth, //Octree::kMaxDepth,
-        DeviceOctree::kMaxDepth,
-        GridOffset(),
+        leafDepth,
         nodes,
         allocatedNodes,
         d_numberOfNodes,

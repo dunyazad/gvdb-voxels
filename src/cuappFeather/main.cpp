@@ -545,8 +545,8 @@ int main(int argc, char** argv)
 					float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 					float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 
-					float voxelSize = 0.1f;
-					//float voxelSize = 0.0125f;
+					//float voxelSize = 0.1f;
+					float voxelSize = 0.0125f;
 					unsigned int maxDepth = 0;
 					float unitLength = maxLength;
 					while (unitLength > voxelSize)
@@ -614,9 +614,9 @@ int main(int argc, char** argv)
 						octree.Initialize(
 							cuInstance.d_mesh.positions,
 							cuInstance.d_mesh.numberOfPoints,
-							cuInstance.d_mesh.min,
-							cuInstance.d_mesh.max,
-							voxelSize);
+							bbMin,
+							bbMax,
+							maxDepth);
 
 						CUDA_TE(BuildOctreeInitialize);
 
@@ -634,45 +634,43 @@ int main(int argc, char** argv)
 							if (UINT64_MAX == entry.key) continue;
 							//printf("MortonCode: %llu, Count: %d\n", entry.key, entry.value);
 
-							DeviceOctree::PointFromCode_Voxel(entry.key, center, voxelSize, DeviceOctree::GridOffset());
-							auto depth = DeviceOctree::UnpackDepth(entry.key);
-							auto p = DeviceOctree::PointFromCode_Voxel(entry.key, center, 0.1f, DeviceOctree::GridOffset());
+							auto level = octree.GetDepth(entry.key);
+							const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+							const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+							//printf("level : %d\n", level);
+
+							auto p = DeviceOctree::ToPosition(entry.key, bbMin, bbMax);
 							//printf("%f, %f, %f\n", XYZ(p));
 							stringstream ss;
-							ss << "octree_" << depth;
-							if (depth == 8)
-							{
-								printf("%f, %f, %f\n", XYZ(p));
-								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(1.0f), Color::red());
-							}
-							else
-							{
-								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f * (float)maxDepth / (float)depth), Color::green());
-							}
+							ss << "octree_" << level;
+							VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
 						}
 
-						vector<DeviceOctreeNode> octreeNodes(octree.numberOfNodes);
-						CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(DeviceOctreeNode) * octree.numberOfNodes);
+						//vector<DeviceOctreeNode> octreeNodes(octree.numberOfNodes);
+						//CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(DeviceOctreeNode) * octree.numberOfNodes);
 
-						map<uint64_t, int> temp;
+						//map<uint64_t, int> temp;
 
-						for (auto& n : octreeNodes)
-						{
-							//printf("MortonCode: %llu, Level: %d\n", n.mortonCode, n.level);
+						//for (auto& n : octreeNodes)
+						//{
+						//	//printf("MortonCode: %llu, Level: %d\n", n.mortonCode, n.level);
 
-							temp[n.mortonCode]++;
+						//	temp[n.mortonCode]++;
 
-							auto p = DeviceOctree::PointFromCode_Voxel(n.mortonCode, center, 0.1f, DeviceOctree::GridOffset());
-							//printf("%f, %f, %f\n", XYZ(p));
-							VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f), Color::green());
-						}
+						//	auto p = DeviceOctree::ToPosition(n.mortonCode, cuInstance.h_mesh.min, cuInstance.h_mesh.max);
+						//	//printf("%f, %f, %f\n", XYZ(p));
+						//	VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f), Color::green());
+						//}
 
-						printf("temp.size() : %d\n", temp.size());
+						//printf("temp.size() : %d\n", temp.size());
 
 						for (size_t i = 0; i <= maxDepth; i++)
 						{
 							stringstream ss;
 							ss << "octree_" << i;
+
+							printf("%s\n", ss.str().c_str());
 
 							VD::AddToSelectionList(ss.str());
 						}
@@ -685,14 +683,16 @@ int main(int argc, char** argv)
 			{
 				if (event.action == 1)
 				{
-					VD::ShowNextSelection();
+					auto index = VD::ShowNextSelection();
+					printf("index : %d\n", index);
 				}
 			}
 			else if (GLFW_KEY_DOWN == event.keyCode)
 			{
 				if (event.action == 1)
 				{
-					VD::ShowPreviousSelection();
+					auto index = VD::ShowPreviousSelection();
+					printf("index : %d\n", index);
 				}
 			}
 			else if (GLFW_KEY_0 == event.keyCode)
