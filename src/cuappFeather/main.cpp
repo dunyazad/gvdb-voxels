@@ -545,8 +545,8 @@ int main(int argc, char** argv)
 					float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 					float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 
-					//float voxelSize = 0.1f;
-					float voxelSize = 0.0125f;
+					float voxelSize = 0.1f;
+					//float voxelSize = 0.0125f;
 					unsigned int maxDepth = 0;
 					float unitLength = maxLength;
 					while (unitLength > voxelSize)
@@ -558,112 +558,127 @@ int main(int argc, char** argv)
 					printf("unitLength : %f\n", unitLength);
 					printf("maxDepth : %d\n", maxDepth);
 
-					Octree octree;
-					octree.Initialize(
-						cuInstance.h_mesh.positions,
-						cuInstance.h_mesh.numberOfPoints,
-						cuInstance.h_mesh.min,
-						cuInstance.h_mesh.max,
-						maxDepth);
+					{ // Host
+						//HostOctree hostOctree;
+						//hostOctree.Initialize(
+						//	cuInstance.h_mesh.positions,
+						//	cuInstance.h_mesh.numberOfPoints,
+						//	cuInstance.h_mesh.min,
+						//	cuInstance.h_mesh.max,
+						//	maxDepth);
 
-					//octree.Initialize(
-					//	(float3*)ply.GetPoints().data(),
-					//	ply.GetPoints().size() / 3,
-					//	make_float3(get<0>(ply.GetAABBMin()), get<1>(ply.GetAABBMin()), get<2>(ply.GetAABBMin())),
-					//	make_float3(get<0>(ply.GetAABBMax()), get<1>(ply.GetAABBMax()), get<2>(ply.GetAABBMax())),
-					//	maxDepth
-					//);
+						//CUDA_TE(BuildOctreeInitialize);
 
-					CUDA_TE(BuildOctreeInitialize);
+						//{
+						//	for (const auto& node : hostOctree.nodes)
+						//	{
+						//		const auto p = hostOctree.ToPosition(node.key, bbMin, bbMax);
+
+						//		auto level = hostOctree.GetDepth(node.key);
+						//		const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+						//		const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+						//		stringstream ss;
+						//		ss << "octree_" << level;
+
+						//		//if (k == 1)
+						//		{
+						//			VD::AddWiredBox(
+						//				ss.str(),
+						//				{ XYZ(p) },
+						//				{ 0.0f, 1.0f, 0.0f },
+						//				glm::vec3(scale),            // AddWiredBox가 "전체 길이"를 받는다고 가정
+						//				Color::green()
+						//			);
+						//		}
+						//	}
+						//}
+
+						//for (size_t i = 0; i <= maxDepth; i++)
+						//{
+						//	stringstream ss;
+						//	ss << "octree_" << i;
+
+						//	VD::AddToSelectionList(ss.str());
+						//}
+
+						//hostOctree.Terminate();
+					}
 
 					{
-						for (const auto& node : octree.nodes)
+						CUDA_TS(BuildOctree);
+
+						CUDA_TS(BuildOctreeInitialize);
+
+						DeviceOctree octree;
+						octree.Initialize(
+							cuInstance.d_mesh.positions,
+							cuInstance.d_mesh.numberOfPoints,
+							cuInstance.d_mesh.min,
+							cuInstance.d_mesh.max,
+							voxelSize);
+
+						CUDA_TE(BuildOctreeInitialize);
+
+						unsigned int numberOfEntries = 0;
+						CUDA_COPY_D2H(&numberOfEntries, octree.mortonCodes.info.numberOfEntries, sizeof(unsigned int));
+
+						vector<HashMapEntry<uint64_t, unsigned int>> entries(octree.mortonCodes.info.capacity);
+						CUDA_COPY_D2H(entries.data(), octree.mortonCodes.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>) * octree.mortonCodes.info.capacity);
+
+						CUDA_SYNC();
+
+						for (size_t i = 0; i < octree.mortonCodes.info.capacity; i++)
 						{
-							// node.level(=이 노드의 깊이) 기준으로 중심 계산
-							const auto p = octree.ToPosition(node.key, bbMin, bbMax);
+							auto& entry = entries[i];
+							if (UINT64_MAX == entry.key) continue;
+							//printf("MortonCode: %llu, Count: %d\n", entry.key, entry.value);
 
-							// leaf 셀 한 변 길이(예: 전체 길이 / 2^maxDepth)가 unitLength라고 가정
-							const unsigned k = (maxDepth >= node.level) ? (maxDepth - node.level) : 0u;
-							const float scale = std::ldexp(unitLength, static_cast<int>(k)); // unitLength * 2^k
-
+							DeviceOctree::PointFromCode_Voxel(entry.key, center, voxelSize, DeviceOctree::GridOffset());
+							auto depth = DeviceOctree::UnpackDepth(entry.key);
+							auto p = DeviceOctree::PointFromCode_Voxel(entry.key, center, 0.1f, DeviceOctree::GridOffset());
+							//printf("%f, %f, %f\n", XYZ(p));
 							stringstream ss;
-							ss << "octree_" << node.level;
-
-							//if (k == 1)
+							ss << "octree_" << depth;
+							if (depth == 8)
 							{
-								VD::AddWiredBox(
-									ss.str(),
-									{ XYZ(p) },
-									{ 0.0f, 1.0f, 0.0f },
-									glm::vec3(scale),            // AddWiredBox가 "전체 길이"를 받는다고 가정
-									Color::green()
-								);
+								printf("%f, %f, %f\n", XYZ(p));
+								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(1.0f), Color::red());
+							}
+							else
+							{
+								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f * (float)maxDepth / (float)depth), Color::green());
 							}
 						}
+
+						vector<DeviceOctreeNode> octreeNodes(octree.numberOfNodes);
+						CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(DeviceOctreeNode) * octree.numberOfNodes);
+
+						map<uint64_t, int> temp;
+
+						for (auto& n : octreeNodes)
+						{
+							//printf("MortonCode: %llu, Level: %d\n", n.mortonCode, n.level);
+
+							temp[n.mortonCode]++;
+
+							auto p = DeviceOctree::PointFromCode_Voxel(n.mortonCode, center, 0.1f, DeviceOctree::GridOffset());
+							//printf("%f, %f, %f\n", XYZ(p));
+							VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f), Color::green());
+						}
+
+						printf("temp.size() : %d\n", temp.size());
+
+						for (size_t i = 0; i <= maxDepth; i++)
+						{
+							stringstream ss;
+							ss << "octree_" << i;
+
+							VD::AddToSelectionList(ss.str());
+						}
+
+						CUDA_TE(BuildOctree);
 					}
-
-					for (size_t i = 0; i <= maxDepth; i++)
-					{
-						stringstream ss;
-						ss << "octree_" << i;
-
-						VD::AddToSelectionList(ss.str());
-					}
-
-					//{
-					//unsigned int numberOfEntries = 0;
-					//CUDA_COPY_D2H(&numberOfEntries, octree.mortonCodes.info.numberOfEntries, sizeof(unsigned int));
-
-					//vector<HashMapEntry<uint64_t, unsigned int>> entries(octree.mortonCodes.info.capacity);
-					//CUDA_COPY_D2H(entries.data(), octree.mortonCodes.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>)* octree.mortonCodes.info.capacity);
-
-					//CUDA_SYNC();
-
-					//for (size_t i = 0; i < octree.mortonCodes.info.capacity; i++)
-					//{
-					//	auto& entry = entries[i];
-					//	if (UINT64_MAX == entry.key) continue;
-					//	//printf("MortonCode: %llu, Count: %d\n", entry.key, entry.value);
-
-					//	Octree::PointFromCode_Voxel(entry.key, center, voxelSize, Octree::GridOffset());
-					//	auto depth = Octree::UnpackDepth(entry.key);
-					//	auto p = Octree::PointFromCode_Voxel(entry.key, center, 0.1f, Octree::GridOffset());
-					//	//printf("%f, %f, %f\n", XYZ(p));
-					//	if (depth == 8)
-					//	{
-					//		printf("%f, %f, %f\n", XYZ(p));
-					//		VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(1.0f), Color::red());
-					//	}
-					//	else
-					//	{
-					//		VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f * (float)maxDepth / (float)depth), Color::green());
-					//	}
-					//}
-					//}
-
-					//{
-					//	vector<OctreeNode> octreeNodes(octree.numberOfNodes);
-					//	CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(OctreeNode) * octree.numberOfNodes);
-
-					//	map<uint64_t, int> temp;
-
-					//	for (auto& n : octreeNodes)
-					//	{
-					//		//printf("MortonCode: %llu, Level: %d\n", n.mortonCode, n.level);
-
-					//		temp[n.mortonCode]++;
-
-					//		auto p = Octree::PointFromCode_Voxel(n.mortonCode, center, 0.1f, Octree::GridOffset());
-					//		//printf("%f, %f, %f\n", XYZ(p));
-					//		VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f), Color::green());
-					//	}
-
-					//	printf("temp.size() : %d\n", temp.size());
-					//}
-
-					octree.Terminate();
-
-					CUDA_TE(BuildOctree);
 				}
 			}
 			else if (GLFW_KEY_UP == event.keyCode)
