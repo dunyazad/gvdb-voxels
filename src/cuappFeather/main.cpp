@@ -694,17 +694,17 @@ int main(int argc, char** argv)
 							CUDA_TE(BuildOctreeInitialize);
 
 							unsigned int numberOfEntries = 0;
-							CUDA_COPY_D2H(&numberOfEntries, octree.mortonCodes.info.numberOfEntries, sizeof(unsigned int));
+							CUDA_COPY_D2H(&numberOfEntries, octree.octreeKeys.info.numberOfEntries, sizeof(unsigned int));
 
-							vector<HashMapEntry<uint64_t, unsigned int>> entries(octree.mortonCodes.info.capacity);
-							CUDA_COPY_D2H(entries.data(), octree.mortonCodes.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>) * octree.mortonCodes.info.capacity);
+							vector<HashMapEntry<uint64_t, unsigned int>> entries(octree.octreeKeys.info.capacity);
+							CUDA_COPY_D2H(entries.data(), octree.octreeKeys.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>) * octree.octreeKeys.info.capacity);
 
 							CUDA_SYNC();
 
 							bool useOctreeKey = false;
 							if (useOctreeKey)
 							{
-								for (size_t i = 0; i < octree.mortonCodes.info.capacity; i++)
+								for (size_t i = 0; i < octree.octreeKeys.info.capacity; i++)
 								{
 									auto& entry = entries[i];
 									if (UINT64_MAX == entry.key) continue;

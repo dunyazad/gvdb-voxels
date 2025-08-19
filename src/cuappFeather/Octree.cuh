@@ -181,9 +181,5 @@ struct DeviceOctree
     unsigned int numberOfNodes = 0;
     unsigned int* d_numberOfNodes = nullptr;
 
-    HashMap<uint64_t, unsigned int> mortonCodes;
-
-    unsigned int numberOfPoints = 0;
-    float3 aabbMin = { FLT_MAX, FLT_MAX, FLT_MAX };
-    float3 aabbMax = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+    HashMap<uint64_t, unsigned int> octreeKeys;
 };

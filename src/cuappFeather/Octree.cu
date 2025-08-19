@@ -69,7 +69,7 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodeKeys(
     float3 aabbMin,
     float3 aabbMax,
     uint8_t depth,
-    HashMap<uint64_t, unsigned int> mortonCodes)
+    HashMap<uint64_t, unsigned int> octreeKeys)
 {
     const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= numberOfPoints) return;
@@ -77,26 +77,26 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodeKeys(
     const float3 p = positions[tid];
     const uint64_t code = Octree::ToKey(p, aabbMin, aabbMax, depth);
 
-    HashMap<uint64_t, unsigned int>::insert(mortonCodes.info, code, 1);
+    HashMap<uint64_t, unsigned int>::insert(octreeKeys.info, code, 1);
     
     //auto depth = DeviceOctree::GetDepth(code);
     auto parentCode = Octree::GetParentKey(code);
     for (int i = depth - 1; i >= 0; i--)
     {
-        HashMap<uint64_t, unsigned int>::insert(mortonCodes.info, parentCode, 1);
+        HashMap<uint64_t, unsigned int>::insert(octreeKeys.info, parentCode, 1);
         parentCode = Octree::GetParentKey(parentCode);
     }
 }
 
 __global__ void Kernel_DeviceOctree_BuildOctreeNodes(
-    HashMap<uint64_t, unsigned int> mortonCodes,
+    HashMap<uint64_t, unsigned int> octreeKeys,
     OctreeNode* nodes,
     unsigned int* numberOfNodes)
 {
     const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= mortonCodes.info.capacity) return;
+    if (tid >= octreeKeys.info.capacity) return;
     
-    auto& entry = mortonCodes.info.entries[tid];
+    auto& entry = octreeKeys.info.entries[tid];
     if (UINT64_MAX == entry.key) return;
  
     auto index = atomicAdd(numberOfNodes, 1);
@@ -115,7 +115,7 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodes(
 }
 
 __global__ void Kernel_DeviceOctree_LinkOctreenodes(
-    HashMap<uint64_t, unsigned int> mortonCodes,
+    HashMap<uint64_t, unsigned int> octreeKeys,
     OctreeNode* nodes,
     unsigned int numberOfNodes)
 {
@@ -127,7 +127,7 @@ __global__ void Kernel_DeviceOctree_LinkOctreenodes(
 
     auto parentKey = Octree::GetParentKey(node.key);
     unsigned int parentIndex = UINT32_MAX;
-    mortonCodes.find(mortonCodes.info, parentKey, &parentIndex);
+    octreeKeys.find(octreeKeys.info, parentKey, &parentIndex);
     if (UINT32_MAX == parentIndex) return;
 
     node.parent = parentIndex;
@@ -160,22 +160,22 @@ void DeviceOctree::Initialize(
     CUDA_MEMSET(d_numberOfNodes, 0, sizeof(unsigned int));
     CUDA_SYNC();
 
-    mortonCodes.Initialize(size_t(numberOfPoints) * 64u, 64u);
+    octreeKeys.Initialize(size_t(numberOfPoints) * 64u, 64u);
 
     LaunchKernel(Kernel_DeviceOctree_BuildOctreeNodeKeys, numberOfPoints,
         positions,
         numberOfPoints,
-        aabbMin,
-        aabbMax,
+        bbMin,
+        bbMax,
         leafDepth,
-        mortonCodes);
+        octreeKeys);
 
     unsigned int numberOfEntries = 0;
-    CUDA_COPY_D2H(&numberOfEntries, mortonCodes.info.numberOfEntries, sizeof(unsigned int));
+    CUDA_COPY_D2H(&numberOfEntries, octreeKeys.info.numberOfEntries, sizeof(unsigned int));
     CUDA_SYNC();
 
-    LaunchKernel(Kernel_DeviceOctree_BuildOctreeNodes, mortonCodes.info.capacity,
-        mortonCodes,
+    LaunchKernel(Kernel_DeviceOctree_BuildOctreeNodes, octreeKeys.info.capacity,
+        octreeKeys,
         nodes,
         d_numberOfNodes);
     CUDA_SYNC();
@@ -185,7 +185,7 @@ void DeviceOctree::Initialize(
     CUDA_SYNC();
 
     LaunchKernel(Kernel_DeviceOctree_LinkOctreenodes, numberOfNodes,
-        mortonCodes,
+        octreeKeys,
         nodes,
         numberOfNodes);
 
@@ -196,5 +196,5 @@ void DeviceOctree::Terminate()
 {
     CUDA_FREE(nodes);
     CUDA_FREE(d_numberOfNodes);
-    mortonCodes.Terminate();
+    octreeKeys.Terminate();
 }
