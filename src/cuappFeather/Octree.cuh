@@ -15,12 +15,14 @@
 #include <map>
 #include <vector>
 
+using OctreeKey = uint64_t;
+
 #ifndef HOST_OCTREE_NODE
 #define HOST_OCTREE_NODE
 struct HostOctreeNode
 {
-    uint64_t key = UINT64_MAX;
-    uint64_t parentKey = UINT64_MAX;
+    OctreeKey key = UINT64_MAX;
+    OctreeKey parentKey = UINT64_MAX;
     unsigned int children[8] = { UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX };
 };
 #endif
@@ -205,13 +207,12 @@ struct HostOctree
 };
 
 
-using OctreeKey = uint64_t;
 
 #ifndef DEVICE_OCTREE_NODE
 #define DEVICE_OCTREE_NODE
 struct DeviceOctreeNode
 {
-    uint64_t mortonCode = UINT64_MAX;
+    OctreeKey mortonCode = UINT64_MAX;
     unsigned int level = UINT32_MAX;
     unsigned int parent = UINT32_MAX;
     unsigned int children[8] = { UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX };
@@ -348,37 +349,20 @@ struct DeviceOctree
 
     void Initialize(
         float3* positions,
-        unsigned numberOfPoints,
+        unsigned int numberOfPoints,
         float3 aabbMin,
         float3 aabbMax,
         uint64_t leafDepth);
     void Terminate();
-
-    static const int kDepthBits = 6;
-    static const int kKeyBits = 58;
-    static const int kBitsPerLevel = 3;
-    static const int kMaxDepth = kKeyBits / kBitsPerLevel;     // 19
-
-    static const uint32_t range = 1u << DeviceOctree::kMaxDepth;
-    static __host__ __device__ inline int3 GridOffset()
-    {
-        int h = int(range / 2);
-        return make_int3(h, h, h);
-    }
-
-    static const uint64_t kKeyMask = (1ull << kKeyBits) - 1;   // 0x03FFFFFFFFFFFFFF
-    static const uint64_t kDepthMask = ~kKeyMask;              // 0xFC00000000000000
 
     DeviceOctreeNode* nodes = nullptr;
     unsigned int allocatedNodes = 0;
     unsigned int numberOfNodes = 0;
     unsigned int* d_numberOfNodes = nullptr;
 
-    HashMap<uint64_t, unsigned int> mortonCodeOctreeNodeMapping;
     HashMap<uint64_t, unsigned int> mortonCodes;
 
     unsigned int numberOfPoints = 0;
     float3 aabbMin = { FLT_MAX, FLT_MAX, FLT_MAX };
     float3 aabbMax = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
-    float voxelSize = 0.0f;
 };

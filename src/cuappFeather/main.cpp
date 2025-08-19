@@ -32,6 +32,16 @@ unsigned int vertexIndex = 0;
 vector<unsigned int> oneRing;
 vector<float3> oneRingPositions;
 
+
+float hashToFloat(uint32_t seed)
+{
+	seed ^= seed >> 13;
+	seed *= 0x5bd1e995;
+	seed ^= seed >> 15;
+	return (seed & 0xFFFFFF) / static_cast<float>(0xFFFFFF);
+};
+
+
 //#define SAVE_VOXEL_HASHMAP_POINT_CLOUD
 
 bool ForceGPUPerformance()
@@ -367,6 +377,8 @@ int main(int argc, char** argv)
 			{
 				printf("Finding Border\n");
 
+				cuInstance.h_mesh = cuInstance.d_mesh;
+
 				auto& mesh = cuInstance.h_mesh;
 
 				for (size_t i = 0; i < mesh.numberOfFaces * 3; i++)
@@ -529,11 +541,11 @@ int main(int argc, char** argv)
 
 					CUDA_TS(BuildOctreeInitialize);
 
-					auto center = (cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f;
+					auto center = (cuInstance.d_mesh.min + cuInstance.d_mesh.max) * 0.5f;
 
-					auto lx = cuInstance.h_mesh.max.x - cuInstance.h_mesh.min.x;
-					auto ly = cuInstance.h_mesh.max.y - cuInstance.h_mesh.min.y;
-					auto lz = cuInstance.h_mesh.max.z - cuInstance.h_mesh.min.z;
+					auto lx = cuInstance.d_mesh.max.x - cuInstance.d_mesh.min.x;
+					auto ly = cuInstance.d_mesh.max.y - cuInstance.d_mesh.min.y;
+					auto lz = cuInstance.d_mesh.max.z - cuInstance.d_mesh.min.z;
 
 					//auto center = (aabbMin + aabbMax) * 0.5f;
 
@@ -545,8 +557,8 @@ int main(int argc, char** argv)
 					float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 					float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 
-					//float voxelSize = 0.1f;
-					float voxelSize = 0.0125f;
+					float voxelSize = 0.1f;
+					//float voxelSize = 0.0125f;
 					unsigned int maxDepth = 0;
 					float unitLength = maxLength;
 					while (unitLength > voxelSize)
@@ -628,51 +640,53 @@ int main(int argc, char** argv)
 
 						CUDA_SYNC();
 
-						for (size_t i = 0; i < octree.mortonCodes.info.capacity; i++)
+						bool useOctreeKey = false;
+						if (useOctreeKey)
 						{
-							auto& entry = entries[i];
-							if (UINT64_MAX == entry.key) continue;
-							//printf("MortonCode: %llu, Count: %d\n", entry.key, entry.value);
+							for (size_t i = 0; i < octree.mortonCodes.info.capacity; i++)
+							{
+								auto& entry = entries[i];
+								if (UINT64_MAX == entry.key) continue;
 
-							auto level = octree.GetDepth(entry.key);
-							const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
-							const float scale = std::ldexp(unitLength, static_cast<int>(k));
+								auto level = octree.GetDepth(entry.key);
+								const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+								const float scale = std::ldexp(unitLength, static_cast<int>(k));
 
-							//printf("level : %d\n", level);
-
-							auto p = DeviceOctree::ToPosition(entry.key, bbMin, bbMax);
-							//printf("%f, %f, %f\n", XYZ(p));
-							stringstream ss;
-							ss << "octree_" << level;
-							VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+								auto p = DeviceOctree::ToPosition(entry.key, bbMin, bbMax);
+								
+								stringstream ss;
+								ss << "octree_" << level;
+								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+							}
 						}
+						else
+						{
+							vector<DeviceOctreeNode> octreeNodes(octree.numberOfNodes);
+							CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(DeviceOctreeNode) * octree.numberOfNodes);
 
-						//vector<DeviceOctreeNode> octreeNodes(octree.numberOfNodes);
-						//CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(DeviceOctreeNode) * octree.numberOfNodes);
+							for (auto& n : octreeNodes)
+							{
+								auto level = n.level;
+								const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+								const float scale = std::ldexp(unitLength, static_cast<int>(k));
 
-						//map<uint64_t, int> temp;
+								auto p = DeviceOctree::ToPosition(n.mortonCode, bbMin, bbMax);
+								stringstream ss;
+								ss << "octree_" << level;
 
-						//for (auto& n : octreeNodes)
-						//{
-						//	//printf("MortonCode: %llu, Level: %d\n", n.mortonCode, n.level);
-
-						//	temp[n.mortonCode]++;
-
-						//	auto p = DeviceOctree::ToPosition(n.mortonCode, cuInstance.h_mesh.min, cuInstance.h_mesh.max);
-						//	//printf("%f, %f, %f\n", XYZ(p));
-						//	VD::AddWiredBox("octree", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(0.1f), Color::green());
-						//}
-
-						//printf("temp.size() : %d\n", temp.size());
+								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+							}
+						}
 
 						for (size_t i = 0; i <= maxDepth; i++)
 						{
 							stringstream ss;
 							ss << "octree_" << i;
 
-							printf("%s\n", ss.str().c_str());
-
-							VD::AddToSelectionList(ss.str());
+							if (VD::AddToSelectionList(ss.str()))
+							{
+								printf("%s\n", ss.str().c_str());
+							}
 						}
 
 						CUDA_TE(BuildOctree);
@@ -1059,7 +1073,7 @@ int main(int argc, char** argv)
 #ifdef PLY_Model_File
 #pragma region Load PLY and Convert to ALP format
 		{
-			auto t = Time::Now();
+			TS(LoadingPointCloud);
 
 			if (false == alp.Deserialize(resource_file_name_alp))
 			{
@@ -1073,7 +1087,7 @@ int main(int argc, char** argv)
 				alp.Serialize(resource_file_name_alp);
 			}
 
-			t = Time::End(t, "Loading Compound");
+			TE(LoadingPointCloud);
 
 			auto entity = Feather.CreateEntity("Input Point Cloud _ O");
 
@@ -1107,16 +1121,17 @@ int main(int argc, char** argv)
 			printf("max : %f, %f, %f\n", Mx, My, Mz);
 			printf("dimensions : %f, %f, %f\n", lx, ly, lz);
 
-			Entity cam = Feather.GetEntityByName("Camera");
-			auto pcam = Feather.GetComponent<PerspectiveCamera>(cam);
-			auto cameraManipulator = Feather.GetComponent<CameraManipulatorTrackball>(cam);
-			cameraManipulator->SetRadius(lx + ly + lz);
-			auto camera = cameraManipulator->GetCamera();
-			camera->SetEye({ cx,cy,cz + cameraManipulator->GetRadius() });
-			camera->SetTarget({ cx,cy,cz });
+			{
+				Entity cam = Feather.GetEntityByName("Camera");
+				auto pcam = Feather.GetComponent<PerspectiveCamera>(cam);
+				auto cameraManipulator = Feather.GetComponent<CameraManipulatorTrackball>(cam);
+				cameraManipulator->SetRadius(lx + ly + lz);
+				auto camera = cameraManipulator->GetCamera();
+				camera->SetEye({ cx,cy,cz + cameraManipulator->GetRadius() });
+				camera->SetTarget({ cx,cy,cz });
 
-			cameraManipulator->MakeDefault();
-
+				cameraManipulator->MakeDefault();
+			}
 
 			Feather.CreateEventCallback<KeyEvent>(entity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
 				auto renderable = Feather.GetComponent<Renderable>(entity);
@@ -1169,15 +1184,6 @@ int main(int argc, char** argv)
 				//}
 				});
 
-			t = Time::End(t, "Upload to GPU");
-
-			auto hashToFloat = [](uint32_t seed) -> float {
-				seed ^= seed >> 13;
-				seed *= 0x5bd1e995;
-				seed ^= seed >> 15;
-				return (seed & 0xFFFFFF) / static_cast<float>(0xFFFFFF);
-			};
-
 			auto result = cuInstance.ProcessPointCloud(h_pointCloud);
 			//ApplyPointCloudToEntity(entity, result);
 			//cuInstance.d_input = result;
@@ -1216,50 +1222,12 @@ int main(int argc, char** argv)
 				}
 				});
 
-#ifdef SAVE_VOXEL_HASHMAP_POINT_CLOUD
-			PLYFormat ply;
-			for (size_t i = 0; i < result.numberOfPoints; i++)
-			{
-				auto& p = result.positions[i];
-				if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
-
-				auto& n = result.normals[i];
-				auto& c = result.colors[i];
-
-				ply.AddPoint(p.x, p.y, p.z);
-				ply.AddNormal(n.x, n.y, n.z);
-				ply.AddColor(c.x, c.y, c.z);
-			}
-			ply.Serialize("../../res/3D/VoxelHashMap.ply");
-#endif // SAVE_VOXEL_HASHMAP_POINT_CLOUD
-
 			result.Terminate();
 			h_pointCloud.Terminate();
 		}
 #pragma endregion
 #endif
 
-		{ // AABB
-			auto m = alp.GetAABBMin();
-			float x = get<0>(m);
-			float y = get<1>(m);
-			float z = get<2>(m);
-			auto M = alp.GetAABBMax();
-			float X = get<0>(M);
-			float Y = get<1>(M);
-			float Z = get<2>(M);
-
-			//auto width = w->GetWidth();
-			//auto height = w->GetHeight();
-
-			//Entity cam = Feather.GetEntityByName("Camera");
-			//auto pcam = Feather.GetComponent<PerspectiveCamera>(cam);
-
-			//auto projection = pcam->GetProjectionMatrix();
-			//auto view = pcam->GetViewMatrix();
-
-			VD::AddWiredBox("AABB", { { x, y, z }, { X, Y, Z } }, Color::blue());
-		}
 		});
 
 	Feather.AddOnUpdateCallback([&](f32 timeDelta) {
