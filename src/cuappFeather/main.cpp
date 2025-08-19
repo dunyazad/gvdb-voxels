@@ -606,7 +606,7 @@ int main(int argc, char** argv)
 							OctreeNode* root = nullptr;
 							for (auto& n : hostOctree.nodes)
 							{
-								auto level = HostOctree::GetDepth(n.key);
+								auto level = Octree::GetDepth(n.key);
 								if (0 == level)
 								{
 									root = &n;
@@ -615,11 +615,11 @@ int main(int argc, char** argv)
 
 							std::function<void(OctreeNode&)> draw_box;
 							draw_box = [&](OctreeNode& node) {
-								auto level = HostOctree::GetDepth(node.key);
+								auto level = Octree::GetDepth(node.key);
 								const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
 								const float scale = std::ldexp(unitLength, static_cast<int>(k));
 
-								auto p = HostOctree::ToPosition(node.key, bbMin, bbMax);
+								auto p = Octree::ToPosition(node.key, bbMin, bbMax);
 								stringstream ss;
 								ss << "octree_" << level;
 
@@ -709,11 +709,11 @@ int main(int argc, char** argv)
 									auto& entry = entries[i];
 									if (UINT64_MAX == entry.key) continue;
 
-									auto level = octree.GetDepth(entry.key);
+									auto level = Octree::GetDepth(entry.key);
 									const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
 									const float scale = std::ldexp(unitLength, static_cast<int>(k));
 
-									auto p = DeviceOctree::ToPosition(entry.key, bbMin, bbMax);
+									auto p = Octree::ToPosition(entry.key, bbMin, bbMax);
 
 									stringstream ss;
 									ss << "octree_" << level;
@@ -751,7 +751,7 @@ int main(int argc, char** argv)
 									OctreeNode* root = nullptr;
 									for (auto& n : octreeNodes)
 									{
-										auto level = DeviceOctree::GetDepth(n.key);
+										auto level = Octree::GetDepth(n.key);
 										if (0 == level)
 										{
 											root = &n;
@@ -760,11 +760,11 @@ int main(int argc, char** argv)
 
 									std::function<void(OctreeNode&)> draw_box;
 									draw_box = [&](OctreeNode& node) {
-										auto level = DeviceOctree::GetDepth(node.key);
+										auto level = Octree::GetDepth(node.key);
 										const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
 										const float scale = std::ldexp(unitLength, static_cast<int>(k));
 
-										auto p = DeviceOctree::ToPosition(node.key, bbMin, bbMax);
+										auto p = Octree::ToPosition(node.key, bbMin, bbMax);
 										stringstream ss;
 										ss << "octree_" << level;
 

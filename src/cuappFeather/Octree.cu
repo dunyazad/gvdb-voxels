@@ -1,5 +1,68 @@
 #include <Octree.cuh>
 
+void HostOctree::Initialize(float3* positions, unsigned int numberOfPositions, float3 aabbMin, float3 aabbMax, uint64_t leafDepth)
+{
+    auto dimension = aabbMax - aabbMin;
+    auto maxLength = fmaxf(dimension.x, fmaxf(dimension.y, dimension.z));
+    auto center = (aabbMin + aabbMax) * 0.5f;
+
+    auto bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+    auto bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+
+    std::map<uint64_t, uint64_t> codes;
+
+    for (size_t i = 0; i < numberOfPositions; ++i)
+    {
+        uint64_t leafKey = Octree::ToKey(positions[i], bbMin, bbMax, leafDepth);
+        codes[leafKey] = leafDepth;
+
+        uint64_t code = leafKey;
+        for (int j = leafDepth - 1; j >= 0; --j)
+        {
+            code = Octree::GetParentKey(code);
+
+            auto [it, inserted] = codes.emplace(code, (uint64_t)j);
+            if (!inserted)
+            {
+                break;
+            }
+        }
+    }
+
+    nodes.reserve(codes.size());
+    for (auto& kvp : codes)
+    {
+        nodes.push_back({
+            kvp.first,
+            UINT32_MAX,
+            { UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX,
+              UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX }
+            });
+
+        kvp.second = nodes.size() - 1;
+    }
+
+    for (unsigned int i = 0; i < nodes.size(); i++)
+    {
+        auto& node = nodes[i];
+
+        auto parentKey = Octree::GetParentKey(node.key);
+        auto it = codes.find(parentKey);
+        if (it == codes.end()) continue;
+        auto parentIndex = (*it).second;
+
+        node.parent = parentIndex;
+        auto& parentNode = nodes[parentIndex];
+        auto childIndex = Octree::GetCode(node.key, Octree::GetDepth(node.key) - 1);
+        parentNode.children[childIndex] = i;
+    }
+}
+
+void HostOctree::Terminate()
+{
+
+}
+
 __global__ void Kernel_DeviceOctree_BuildOctreeNodeKeys(
     const float3* __restrict__ positions,
     unsigned int numberOfPoints,
@@ -12,16 +75,16 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodeKeys(
     if (tid >= numberOfPoints) return;
 
     const float3 p = positions[tid];
-    const uint64_t code = DeviceOctree::ToKey(p, aabbMin, aabbMax, depth);
+    const uint64_t code = Octree::ToKey(p, aabbMin, aabbMax, depth);
 
     HashMap<uint64_t, unsigned int>::insert(mortonCodes.info, code, 1);
     
     //auto depth = DeviceOctree::GetDepth(code);
-    auto parentCode = DeviceOctree::GetParentKey(code);
+    auto parentCode = Octree::GetParentKey(code);
     for (int i = depth - 1; i >= 0; i--)
     {
         HashMap<uint64_t, unsigned int>::insert(mortonCodes.info, parentCode, 1);
-        parentCode = DeviceOctree::GetParentKey(parentCode);
+        parentCode = Octree::GetParentKey(parentCode);
     }
 }
 
@@ -60,16 +123,16 @@ __global__ void Kernel_DeviceOctree_LinkOctreenodes(
     if (tid >= numberOfNodes) return;
 
     auto& node = nodes[tid];
-    if (0 == DeviceOctree::GetDepth(node.key)) return;
+    if (0 == Octree::GetDepth(node.key)) return;
 
-    auto parentKey = DeviceOctree::GetParentKey(node.key);
+    auto parentKey = Octree::GetParentKey(node.key);
     unsigned int parentIndex = UINT32_MAX;
     mortonCodes.find(mortonCodes.info, parentKey, &parentIndex);
     if (UINT32_MAX == parentIndex) return;
 
     node.parent = parentIndex;
     auto& parentNode = nodes[parentIndex];
-    auto childIndex = DeviceOctree::GetCode(node.key, DeviceOctree::GetDepth(node.key) - 1);
+    auto childIndex = Octree::GetCode(node.key, Octree::GetDepth(node.key) - 1);
     //printf("childIndex = %d\n", childIndex);
     parentNode.children[childIndex] = tid;
 }
