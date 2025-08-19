@@ -537,8 +537,8 @@ int main(int argc, char** argv)
 			{
 				if (event.action == 1)
 				{
-					bool hostOctree = false;
-					if (hostOctree)
+					bool useHostOctree = true;
+					if (useHostOctree)
 					{
 						CUDA_TS(BuildOctree);
 
@@ -573,7 +573,8 @@ int main(int argc, char** argv)
 							cuInstance.h_mesh.numberOfPoints,
 							cuInstance.h_mesh.min,
 							cuInstance.h_mesh.max,
-							maxDepth);
+							maxDepth,
+							unitLength);
 
 						CUDA_TE(BuildOctreeInitialize);
 
@@ -604,14 +605,16 @@ int main(int argc, char** argv)
 
 						{
 							OctreeNode* root = nullptr;
-							for (auto& n : hostOctree.nodes)
-							{
-								auto level = Octree::GetDepth(n.key);
-								if (0 == level)
-								{
-									root = &n;
-								}
-							}
+							//for (auto& n : hostOctree.nodes)
+							//{
+							//	auto level = Octree::GetDepth(n.key);
+							//	if (0 == level)
+							//	{
+							//		root = &n;
+							//	}
+							//}
+
+							root = hostOctree.root;
 
 							std::function<void(OctreeNode&)> draw_box;
 							draw_box = [&](OctreeNode& node) {
@@ -645,6 +648,31 @@ int main(int argc, char** argv)
 							ss << "octree_" << i;
 
 							VD::AddToSelectionList(ss.str());
+						}
+
+						{
+							auto node = hostOctree.NN(cuInstance.h_mesh.positions[1] + make_float3(0.0f, hostOctree.unitLength, 0.0f));
+							if (nullptr != node)
+							{
+								printf("Key : %llu\n", node->key);
+
+								auto p = Octree::ToPosition(node->key, bbMin, bbMax);
+								auto scale = Octree::GetScale(node->key, hostOctree.leafDepth, hostOctree.unitLength);
+								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 1)), Color::red());
+								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 2)), Color::red());
+								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 3)), Color::red());
+								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 4)), Color::red());
+								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 5)), Color::red());
+								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 6)), Color::red());
+								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 7)), Color::red());
+								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 8)), Color::red());
+								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 9)), Color::red());
+								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 10)), Color::red());
+								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 11)), Color::red());
+								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 12)), Color::red());
+
+								VD::AddSphere("NodePoint", { XYZ(cuInstance.h_mesh.positions[1] + make_float3(0.0f, hostOctree.unitLength, 0.0f)) }, { 0.0f, 1.0f, 0.0f }, scale * 0.5f, Color::yellow());
+							}
 						}
 
 						hostOctree.Terminate();
@@ -683,28 +711,29 @@ int main(int argc, char** argv)
 
 							CUDA_TS(BuildOctreeInitialize);
 
-							DeviceOctree octree;
-							octree.Initialize(
+							DeviceOctree deviceOctree;
+							deviceOctree.Initialize(
 								cuInstance.d_mesh.positions,
 								cuInstance.d_mesh.numberOfPoints,
 								bbMin,
 								bbMax,
-								maxDepth);
+								maxDepth,
+								unitLength);
 
 							CUDA_TE(BuildOctreeInitialize);
 
 							unsigned int numberOfEntries = 0;
-							CUDA_COPY_D2H(&numberOfEntries, octree.octreeKeys.info.numberOfEntries, sizeof(unsigned int));
+							CUDA_COPY_D2H(&numberOfEntries, deviceOctree.octreeKeys.info.numberOfEntries, sizeof(unsigned int));
 
-							vector<HashMapEntry<uint64_t, unsigned int>> entries(octree.octreeKeys.info.capacity);
-							CUDA_COPY_D2H(entries.data(), octree.octreeKeys.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>) * octree.octreeKeys.info.capacity);
+							vector<HashMapEntry<uint64_t, unsigned int>> entries(deviceOctree.octreeKeys.info.capacity);
+							CUDA_COPY_D2H(entries.data(), deviceOctree.octreeKeys.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>) * deviceOctree.octreeKeys.info.capacity);
 
 							CUDA_SYNC();
 
 							bool useOctreeKey = false;
 							if (useOctreeKey)
 							{
-								for (size_t i = 0; i < octree.octreeKeys.info.capacity; i++)
+								for (size_t i = 0; i < deviceOctree.octreeKeys.info.capacity; i++)
 								{
 									auto& entry = entries[i];
 									if (UINT64_MAX == entry.key) continue;
@@ -722,8 +751,8 @@ int main(int argc, char** argv)
 							}
 							else
 							{
-								vector<OctreeNode> octreeNodes(octree.numberOfNodes);
-								CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(OctreeNode) * octree.numberOfNodes);
+								vector<OctreeNode> octreeNodes(deviceOctree.numberOfNodes);
+								CUDA_COPY_D2H(octreeNodes.data(), deviceOctree.nodes, sizeof(OctreeNode) * deviceOctree.numberOfNodes);
 
 								{
 									//for (auto& n : octreeNodes)
@@ -748,15 +777,20 @@ int main(int argc, char** argv)
 								}
 
 								{
-									OctreeNode* root = nullptr;
-									for (auto& n : octreeNodes)
-									{
-										auto level = Octree::GetDepth(n.key);
-										if (0 == level)
-										{
-											root = &n;
-										}
-									}
+									unsigned int rootIndex = UINT32_MAX;
+									CUDA_COPY_D2H(&rootIndex, deviceOctree.rootIndex, sizeof(unsigned int));
+									OctreeNode* root = &octreeNodes[rootIndex];
+
+									//OctreeNode* root = nullptr;
+									//for (auto& n : octreeNodes)
+									//{
+									//	auto level = Octree::GetDepth(n.key);
+									//	if (0 == level)
+									//	{
+									//		root = &n;
+									//		printf("ROOT\n");
+									//	}
+									//}
 
 									std::function<void(OctreeNode&)> draw_box;
 									draw_box = [&](OctreeNode& node) {
@@ -795,6 +829,8 @@ int main(int argc, char** argv)
 									printf("%s\n", ss.str().c_str());
 								}
 							}
+
+							deviceOctree.Terminate();
 
 							CUDA_TE(BuildOctree);
 						}

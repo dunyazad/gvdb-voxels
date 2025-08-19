@@ -73,10 +73,10 @@ struct Octree
     {
         auto depth = GetDepth(key);
 
-        auto child = (bx << 2) | (by << 1) | bz;
+        auto child = ((bx & 1ull) << 2) | ((by & 1ull) << 1) | (bz & 1ull);
         auto shift = depth * 3ull;
 
-        auto extended = key | child << shift;
+        auto extended = key | (child << shift);
         return SetDepth(extended, depth + 1);
     }
 
@@ -154,15 +154,64 @@ struct Octree
             0.5f * (bbMin.z + bbMax.z)
         };
     }
+
+    __host__ __device__ inline static float GetScale(OctreeKey key, uint64_t maxDepth, float unitLength)
+    {
+        auto level = Octree::GetDepth(key);
+        const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+        return std::ldexp(unitLength, static_cast<int>(k));
+    }
 };
 
 struct HostOctree
 {
-    vector<OctreeNode> nodes;
+    std::vector<OctreeNode> nodes;
+    OctreeNode* root = nullptr;
+    uint64_t leafDepth = UINT64_MAX;
+    float3 aabbMin = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+    float3 aabbMax = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+    float unitLength = 0.0f;
 
-    void Initialize(float3* positions, unsigned int numberOfPositions, float3 aabbMin, float3 aabbMax, uint64_t leafDepth);
+    void Initialize(
+        float3* positions,
+        unsigned int numberOfPositions,
+        float3 aabbMin,
+        float3 aabbMax,
+        uint64_t leafDepth,
+        float unitLength);
 
     void Terminate();
+
+    OctreeNode* Nearest(float3 query, OctreeNode* node)
+    {
+
+    }
+
+    OctreeNode* NN(float3 query)
+    {
+        bool exists = true;
+        auto key = Octree::ToKey(query, aabbMin, aabbMax, leafDepth);
+        auto node = root;
+        for (size_t i = 0; i < leafDepth; i++)
+        {
+            auto childIndex = Octree::GetCode(key, i);
+            if (UINT32_MAX == node->children[childIndex])
+            {
+                exists = false;
+                break;
+            }
+            node = &nodes[node->children[childIndex]];
+        }
+
+        if (exists)
+        {
+            return node;
+        }
+        else
+        {
+            return nullptr;
+        }
+    }
 };
 
 struct DeviceOctree
@@ -172,11 +221,17 @@ struct DeviceOctree
         unsigned int numberOfPoints,
         float3 aabbMin,
         float3 aabbMax,
-        uint64_t leafDepth);
+        uint64_t leafDepth,
+        float unitLength);
 
     void Terminate();
 
     OctreeNode* nodes = nullptr;
+    unsigned int* rootIndex = nullptr;
+    uint64_t leafDepth = UINT64_MAX;
+    float3 aabbMin = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+    float3 aabbMax = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+    float unitLength = 0.0f;
     unsigned int allocatedNodes = 0;
     unsigned int numberOfNodes = 0;
     unsigned int* d_numberOfNodes = nullptr;
