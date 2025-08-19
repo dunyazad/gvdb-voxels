@@ -557,8 +557,8 @@ int main(int argc, char** argv)
 					float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 					float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 
-					float voxelSize = 0.1f;
-					//float voxelSize = 0.0125f;
+					//float voxelSize = 0.1f;
+					float voxelSize = 0.0125f;
 					unsigned int maxDepth = 0;
 					float unitLength = maxLength;
 					while (unitLength > voxelSize)
@@ -664,18 +664,60 @@ int main(int argc, char** argv)
 							vector<DeviceOctreeNode> octreeNodes(octree.numberOfNodes);
 							CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(DeviceOctreeNode) * octree.numberOfNodes);
 
+							//for (auto& n : octreeNodes)
+							//{
+							//	auto level = n.level;
+							//	const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+							//	const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+							//	auto p = DeviceOctree::ToPosition(n.mortonCode, bbMin, bbMax);
+							//	stringstream ss;
+							//	ss << "octree_" << level;
+
+							//	if (UINT32_MAX == n.parent)
+							//	{
+							//		VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::red());
+							//	}
+							//	else
+							//	{
+							//		VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+							//	}
+							//}
+
+							DeviceOctreeNode* root = nullptr;
 							for (auto& n : octreeNodes)
 							{
 								auto level = n.level;
+								if (0 == level)
+								{
+									root = &n;
+								}
+							}
+
+							std::function<void(DeviceOctreeNode&)> draw_box;
+							draw_box = [&](DeviceOctreeNode& node) {
+								auto level = node.level;
 								const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
 								const float scale = std::ldexp(unitLength, static_cast<int>(k));
 
-								auto p = DeviceOctree::ToPosition(n.mortonCode, bbMin, bbMax);
+								auto p = DeviceOctree::ToPosition(node.mortonCode, bbMin, bbMax);
 								stringstream ss;
 								ss << "octree_" << level;
 
 								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
-							}
+
+								for (size_t i = 0; i < 8; i++)
+								{
+									auto childIndex = node.children[i];
+									if (UINT32_MAX != childIndex)
+									{
+										auto childNode = octreeNodes[childIndex];
+										draw_box(childNode);
+									}
+								}
+							};
+
+							draw_box(*root);
 						}
 
 						for (size_t i = 0; i <= maxDepth; i++)
