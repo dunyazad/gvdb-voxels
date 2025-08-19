@@ -537,181 +537,100 @@ int main(int argc, char** argv)
 			{
 				if (event.action == 1)
 				{
-					CUDA_TS(BuildOctree);
-
-					CUDA_TS(BuildOctreeInitialize);
-
-					auto center = (cuInstance.d_mesh.min + cuInstance.d_mesh.max) * 0.5f;
-
-					auto lx = cuInstance.d_mesh.max.x - cuInstance.d_mesh.min.x;
-					auto ly = cuInstance.d_mesh.max.y - cuInstance.d_mesh.min.y;
-					auto lz = cuInstance.d_mesh.max.z - cuInstance.d_mesh.min.z;
-
-					//auto center = (aabbMin + aabbMax) * 0.5f;
-
-					//auto lx = aabbMax.x - aabbMin.x;
-					//auto ly = aabbMax.y - aabbMin.y;
-					//auto lz = aabbMax.z - aabbMin.z;
-
-					auto maxLength = std::max({ lx, ly, lz });
-					float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
-					float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
-
-					//float voxelSize = 0.1f;
-					float voxelSize = 0.0125f;
-					unsigned int maxDepth = 0;
-					float unitLength = maxLength;
-					while (unitLength > voxelSize)
-					{
-						unitLength *= 0.5f;
-						maxDepth++;
-					}
-
-					printf("unitLength : %f\n", unitLength);
-					printf("maxDepth : %d\n", maxDepth);
-
-					{ // Host
-						//HostOctree hostOctree;
-						//hostOctree.Initialize(
-						//	cuInstance.h_mesh.positions,
-						//	cuInstance.h_mesh.numberOfPoints,
-						//	cuInstance.h_mesh.min,
-						//	cuInstance.h_mesh.max,
-						//	maxDepth);
-
-						//CUDA_TE(BuildOctreeInitialize);
-
-						//{
-						//	for (const auto& node : hostOctree.nodes)
-						//	{
-						//		const auto p = hostOctree.ToPosition(node.key, bbMin, bbMax);
-
-						//		auto level = hostOctree.GetDepth(node.key);
-						//		const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
-						//		const float scale = std::ldexp(unitLength, static_cast<int>(k));
-
-						//		stringstream ss;
-						//		ss << "octree_" << level;
-
-						//		//if (k == 1)
-						//		{
-						//			VD::AddWiredBox(
-						//				ss.str(),
-						//				{ XYZ(p) },
-						//				{ 0.0f, 1.0f, 0.0f },
-						//				glm::vec3(scale),            // AddWiredBox가 "전체 길이"를 받는다고 가정
-						//				Color::green()
-						//			);
-						//		}
-						//	}
-						//}
-
-						//for (size_t i = 0; i <= maxDepth; i++)
-						//{
-						//	stringstream ss;
-						//	ss << "octree_" << i;
-
-						//	VD::AddToSelectionList(ss.str());
-						//}
-
-						//hostOctree.Terminate();
-					}
-
+					bool hostOctree = false;
+					if (hostOctree)
 					{
 						CUDA_TS(BuildOctree);
 
 						CUDA_TS(BuildOctreeInitialize);
 
-						DeviceOctree octree;
-						octree.Initialize(
-							cuInstance.d_mesh.positions,
-							cuInstance.d_mesh.numberOfPoints,
-							bbMin,
-							bbMax,
+						auto center = (cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f;
+
+						auto lx = cuInstance.h_mesh.max.x - cuInstance.h_mesh.min.x;
+						auto ly = cuInstance.h_mesh.max.y - cuInstance.h_mesh.min.y;
+						auto lz = cuInstance.h_mesh.max.z - cuInstance.h_mesh.min.z;
+
+						auto maxLength = std::max({ lx, ly, lz });
+						float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+						float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+
+						//float voxelSize = 0.1f;
+						float voxelSize = 0.0125f;
+						unsigned int maxDepth = 0;
+						float unitLength = maxLength;
+						while (unitLength > voxelSize)
+						{
+							unitLength *= 0.5f;
+							maxDepth++;
+						}
+
+						printf("unitLength : %f\n", unitLength);
+						printf("maxDepth : %d\n", maxDepth);
+
+						HostOctree hostOctree;
+						hostOctree.Initialize(
+							cuInstance.h_mesh.positions,
+							cuInstance.h_mesh.numberOfPoints,
+							cuInstance.h_mesh.min,
+							cuInstance.h_mesh.max,
 							maxDepth);
 
 						CUDA_TE(BuildOctreeInitialize);
 
-						unsigned int numberOfEntries = 0;
-						CUDA_COPY_D2H(&numberOfEntries, octree.mortonCodes.info.numberOfEntries, sizeof(unsigned int));
-
-						vector<HashMapEntry<uint64_t, unsigned int>> entries(octree.mortonCodes.info.capacity);
-						CUDA_COPY_D2H(entries.data(), octree.mortonCodes.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>) * octree.mortonCodes.info.capacity);
-
-						CUDA_SYNC();
-
-						bool useOctreeKey = false;
-						if (useOctreeKey)
 						{
-							for (size_t i = 0; i < octree.mortonCodes.info.capacity; i++)
-							{
-								auto& entry = entries[i];
-								if (UINT64_MAX == entry.key) continue;
-
-								auto level = octree.GetDepth(entry.key);
-								const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
-								const float scale = std::ldexp(unitLength, static_cast<int>(k));
-
-								auto p = DeviceOctree::ToPosition(entry.key, bbMin, bbMax);
-								
-								stringstream ss;
-								ss << "octree_" << level;
-								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
-							}
-						}
-						else
-						{
-							vector<DeviceOctreeNode> octreeNodes(octree.numberOfNodes);
-							CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(DeviceOctreeNode) * octree.numberOfNodes);
-
-							//for (auto& n : octreeNodes)
+							//for (const auto& node : hostOctree.nodes)
 							//{
-							//	auto level = n.level;
+							//	const auto p = hostOctree.ToPosition(node.key, bbMin, bbMax);
+
+							//	auto level = hostOctree.GetDepth(node.key);
 							//	const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
 							//	const float scale = std::ldexp(unitLength, static_cast<int>(k));
 
-							//	auto p = DeviceOctree::ToPosition(n.mortonCode, bbMin, bbMax);
 							//	stringstream ss;
 							//	ss << "octree_" << level;
 
-							//	if (UINT32_MAX == n.parent)
+							//	//if (k == 1)
 							//	{
-							//		VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::red());
-							//	}
-							//	else
-							//	{
-							//		VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+							//		VD::AddWiredBox(
+							//			ss.str(),
+							//			{ XYZ(p) },
+							//			{ 0.0f, 1.0f, 0.0f },
+							//			glm::vec3(scale),            // AddWiredBox가 "전체 길이"를 받는다고 가정
+							//			Color::blue()
+							//		);
 							//	}
 							//}
+						}
 
-							DeviceOctreeNode* root = nullptr;
-							for (auto& n : octreeNodes)
+						{
+							OctreeNode* root = nullptr;
+							for (auto& n : hostOctree.nodes)
 							{
-								auto level = n.level;
+								auto level = HostOctree::GetDepth(n.key);
 								if (0 == level)
 								{
 									root = &n;
 								}
 							}
 
-							std::function<void(DeviceOctreeNode&)> draw_box;
-							draw_box = [&](DeviceOctreeNode& node) {
-								auto level = node.level;
+							std::function<void(OctreeNode&)> draw_box;
+							draw_box = [&](OctreeNode& node) {
+								auto level = HostOctree::GetDepth(node.key);
 								const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
 								const float scale = std::ldexp(unitLength, static_cast<int>(k));
 
-								auto p = DeviceOctree::ToPosition(node.mortonCode, bbMin, bbMax);
+								auto p = HostOctree::ToPosition(node.key, bbMin, bbMax);
 								stringstream ss;
 								ss << "octree_" << level;
 
-								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::blue());
 
 								for (size_t i = 0; i < 8; i++)
 								{
 									auto childIndex = node.children[i];
 									if (UINT32_MAX != childIndex)
 									{
-										auto childNode = octreeNodes[childIndex];
+										auto childNode = hostOctree.nodes[childIndex];
 										draw_box(childNode);
 									}
 								}
@@ -725,13 +644,160 @@ int main(int argc, char** argv)
 							stringstream ss;
 							ss << "octree_" << i;
 
-							if (VD::AddToSelectionList(ss.str()))
-							{
-								printf("%s\n", ss.str().c_str());
-							}
+							VD::AddToSelectionList(ss.str());
 						}
 
-						CUDA_TE(BuildOctree);
+						hostOctree.Terminate();
+					}
+					else
+					{
+						CUDA_TS(BuildOctree);
+
+						CUDA_TS(BuildOctreeInitialize);
+
+						auto center = (cuInstance.d_mesh.min + cuInstance.d_mesh.max) * 0.5f;
+
+						auto lx = cuInstance.d_mesh.max.x - cuInstance.d_mesh.min.x;
+						auto ly = cuInstance.d_mesh.max.y - cuInstance.d_mesh.min.y;
+						auto lz = cuInstance.d_mesh.max.z - cuInstance.d_mesh.min.z;
+
+						auto maxLength = std::max({ lx, ly, lz });
+						float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+						float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+
+						//float voxelSize = 0.1f;
+						float voxelSize = 0.0125f;
+						unsigned int maxDepth = 0;
+						float unitLength = maxLength;
+						while (unitLength > voxelSize)
+						{
+							unitLength *= 0.5f;
+							maxDepth++;
+						}
+
+						printf("unitLength : %f\n", unitLength);
+						printf("maxDepth : %d\n", maxDepth);
+
+						{
+							CUDA_TS(BuildOctree);
+
+							CUDA_TS(BuildOctreeInitialize);
+
+							DeviceOctree octree;
+							octree.Initialize(
+								cuInstance.d_mesh.positions,
+								cuInstance.d_mesh.numberOfPoints,
+								bbMin,
+								bbMax,
+								maxDepth);
+
+							CUDA_TE(BuildOctreeInitialize);
+
+							unsigned int numberOfEntries = 0;
+							CUDA_COPY_D2H(&numberOfEntries, octree.mortonCodes.info.numberOfEntries, sizeof(unsigned int));
+
+							vector<HashMapEntry<uint64_t, unsigned int>> entries(octree.mortonCodes.info.capacity);
+							CUDA_COPY_D2H(entries.data(), octree.mortonCodes.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>) * octree.mortonCodes.info.capacity);
+
+							CUDA_SYNC();
+
+							bool useOctreeKey = false;
+							if (useOctreeKey)
+							{
+								for (size_t i = 0; i < octree.mortonCodes.info.capacity; i++)
+								{
+									auto& entry = entries[i];
+									if (UINT64_MAX == entry.key) continue;
+
+									auto level = octree.GetDepth(entry.key);
+									const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+									const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+									auto p = DeviceOctree::ToPosition(entry.key, bbMin, bbMax);
+
+									stringstream ss;
+									ss << "octree_" << level;
+									VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+								}
+							}
+							else
+							{
+								vector<OctreeNode> octreeNodes(octree.numberOfNodes);
+								CUDA_COPY_D2H(octreeNodes.data(), octree.nodes, sizeof(OctreeNode) * octree.numberOfNodes);
+
+								{
+									//for (auto& n : octreeNodes)
+									//{
+									//	auto level = n.level;
+									//	const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+									//	const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+									//	auto p = DeviceOctree::ToPosition(n.mortonCode, bbMin, bbMax);
+									//	stringstream ss;
+									//	ss << "octree_" << level;
+
+									//	if (UINT32_MAX == n.parent)
+									//	{
+									//		VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::red());
+									//	}
+									//	else
+									//	{
+									//		VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+									//	}
+									//}
+								}
+
+								{
+									OctreeNode* root = nullptr;
+									for (auto& n : octreeNodes)
+									{
+										auto level = DeviceOctree::GetDepth(n.key);
+										if (0 == level)
+										{
+											root = &n;
+										}
+									}
+
+									std::function<void(OctreeNode&)> draw_box;
+									draw_box = [&](OctreeNode& node) {
+										auto level = DeviceOctree::GetDepth(node.key);
+										const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+										const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+										auto p = DeviceOctree::ToPosition(node.key, bbMin, bbMax);
+										stringstream ss;
+										ss << "octree_" << level;
+
+										VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+
+										for (size_t i = 0; i < 8; i++)
+										{
+											auto childIndex = node.children[i];
+											if (UINT32_MAX != childIndex)
+											{
+												auto childNode = octreeNodes[childIndex];
+												draw_box(childNode);
+											}
+										}
+									};
+
+									draw_box(*root);
+								}
+							}
+
+							for (size_t i = 0; i <= maxDepth; i++)
+							{
+								stringstream ss;
+								ss << "octree_" << i;
+
+								if (VD::AddToSelectionList(ss.str()))
+								{
+									printf("%s\n", ss.str().c_str());
+								}
+							}
+
+							CUDA_TE(BuildOctree);
+						}
 					}
 				}
 			}

@@ -17,19 +17,19 @@
 
 using OctreeKey = uint64_t;
 
-#ifndef HOST_OCTREE_NODE
-#define HOST_OCTREE_NODE
-struct HostOctreeNode
+#ifndef OCTREE_NODE
+#define OCTREE_NODE
+struct OctreeNode
 {
     OctreeKey key = UINT64_MAX;
-    OctreeKey parentKey = UINT64_MAX;
+    unsigned int parent = UINT32_MAX;
     unsigned int children[8] = { UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX };
 };
 #endif
 
 struct HostOctree
 {
-    vector<HostOctreeNode> nodes;
+    vector<OctreeNode> nodes;
 
     __host__ __device__ inline static uint64_t GetDepth(uint64_t key)
     {
@@ -189,14 +189,32 @@ struct HostOctree
         }
 
         nodes.reserve(codes.size());
-        for (const auto& kvp : codes)
+        for (auto& kvp : codes)
         {
             nodes.push_back({
                 kvp.first,
-                GetParentKey(UINT64_MAX),
+                UINT32_MAX,
                 { UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX,
                   UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX }
                 });
+
+            kvp.second = nodes.size() - 1;
+        }
+
+        for (unsigned int i = 0; i < nodes.size(); i++)
+        {
+            auto& node = nodes[i];
+
+            auto parentKey = HostOctree::GetParentKey(node.key);
+            auto it = codes.find(parentKey);
+            if (it == codes.end()) continue;
+            auto parentIndex = (*it).second;
+
+            node.parent = parentIndex;
+            auto& parentNode = nodes[parentIndex];
+            auto childIndex = HostOctree::GetCode(node.key, HostOctree::GetDepth(node.key) - 1);
+            //printf("childIndex = %d\n", childIndex);
+            parentNode.children[childIndex] = i;
         }
     }
 
@@ -205,19 +223,6 @@ struct HostOctree
 
     }
 };
-
-
-
-#ifndef DEVICE_OCTREE_NODE
-#define DEVICE_OCTREE_NODE
-struct DeviceOctreeNode
-{
-    OctreeKey mortonCode = UINT64_MAX;
-    unsigned int level = UINT32_MAX;
-    unsigned int parent = UINT32_MAX;
-    unsigned int children[8] = { UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX };
-};
-#endif
 
 struct DeviceOctree
 {
@@ -355,7 +360,7 @@ struct DeviceOctree
         uint64_t leafDepth);
     void Terminate();
 
-    DeviceOctreeNode* nodes = nullptr;
+    OctreeNode* nodes = nullptr;
     unsigned int allocatedNodes = 0;
     unsigned int numberOfNodes = 0;
     unsigned int* d_numberOfNodes = nullptr;

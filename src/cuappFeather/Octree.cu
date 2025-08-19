@@ -27,7 +27,7 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodeKeys(
 
 __global__ void Kernel_DeviceOctree_BuildOctreeNodes(
     HashMap<uint64_t, unsigned int> mortonCodes,
-    DeviceOctreeNode* nodes,
+    OctreeNode* nodes,
     unsigned int* numberOfNodes)
 {
     const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -37,8 +37,7 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodes(
     if (UINT64_MAX == entry.key) return;
  
     auto index = atomicAdd(numberOfNodes, 1);
-    nodes[index].mortonCode = entry.key;
-    nodes[index].level = (uint32_t)DeviceOctree::GetDepth(entry.key);
+    nodes[index].key = entry.key;
     nodes[index].parent = UINT32_MAX;
     nodes[index].children[0] = UINT32_MAX;
     nodes[index].children[1] = UINT32_MAX;
@@ -54,23 +53,23 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodes(
 
 __global__ void Kernel_DeviceOctree_LinkOctreenodes(
     HashMap<uint64_t, unsigned int> mortonCodes,
-    DeviceOctreeNode* nodes,
+    OctreeNode* nodes,
     unsigned int numberOfNodes)
 {
     const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= numberOfNodes) return;
 
     auto& node = nodes[tid];
-    if (0 == node.level) return;
+    if (0 == DeviceOctree::GetDepth(node.key)) return;
 
-    auto parentKey = DeviceOctree::GetParentKey(node.mortonCode);
+    auto parentKey = DeviceOctree::GetParentKey(node.key);
     unsigned int parentIndex = UINT32_MAX;
     mortonCodes.find(mortonCodes.info, parentKey, &parentIndex);
     if (UINT32_MAX == parentIndex) return;
 
     node.parent = parentIndex;
     auto& parentNode = nodes[parentIndex];
-    auto childIndex = DeviceOctree::GetCode(node.mortonCode, node.level - 1);
+    auto childIndex = DeviceOctree::GetCode(node.key, DeviceOctree::GetDepth(node.key) - 1);
     //printf("childIndex = %d\n", childIndex);
     parentNode.children[childIndex] = tid;
 }
@@ -90,8 +89,8 @@ void DeviceOctree::Initialize(
     auto bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 
     const size_t capacity = size_t(numberOfPoints) * 64;
-    CUDA_MALLOC(&nodes, sizeof(DeviceOctreeNode) * capacity);
-    CUDA_MEMSET(nodes, 0xFF, sizeof(DeviceOctreeNode) * capacity);
+    CUDA_MALLOC(&nodes, sizeof(OctreeNode) * capacity);
+    CUDA_MEMSET(nodes, 0xFF, sizeof(OctreeNode) * capacity);
     allocatedNodes = static_cast<unsigned int>(capacity);
 
     CUDA_MALLOC(&d_numberOfNodes, sizeof(unsigned int));
