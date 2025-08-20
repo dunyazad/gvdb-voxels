@@ -1,5 +1,188 @@
 #include <Octree.cuh>
 
+#pragma region Octree
+__host__ __device__ uint64_t Octree::GetDepth(uint64_t key)
+{
+    return (key >> 58) & 0x3Full;
+}
+
+__host__ __device__ uint64_t Octree::SetDepth(uint64_t key, uint64_t depth)
+{
+    return (key & ~(0x3Full << 58)) | ((depth & 0x3Full) << 58);
+}
+
+__host__ __device__ uint64_t Octree::GetCode(uint64_t key, uint64_t level)
+{
+    auto shift = level * 3ull;
+    return (shift >= 58ull) ? 0ull : ((key >> shift) & 0x7ull);
+}
+
+__host__ __device__ uint64_t Octree::SetCode(uint64_t key, uint64_t level, uint64_t x, uint64_t y, uint64_t z)
+{
+    auto code3 = (x & 1ull) << 2 | (y & 1ull) << 1 | (z & 1ull) << 0;
+
+    auto shift = level * 3ull;
+    if (shift >= 58ull) return key;
+
+    auto mask = 0x7ull << shift;
+    auto cleared = key & ~mask;
+    return cleared | ((code3 & 0x7ull) << shift);
+}
+
+__host__ __device__ uint64_t Octree::GetParentKey(uint64_t key)
+{
+    auto depth = GetDepth(key);
+    if (depth == 0) return key;
+
+    auto newDepth = depth - 1;
+    auto shift = (newDepth * 3ull);
+
+    auto cleared = key & ~(0x7ull << shift);
+    return SetDepth(cleared, newDepth);
+}
+
+__host__ __device__ uint64_t Octree::GetChildKey(uint64_t key, uint64_t bx, uint64_t by, uint64_t bz)
+{
+    auto depth = GetDepth(key);
+
+    auto child = ((bx & 1ull) << 2) | ((by & 1ull) << 1) | (bz & 1ull);
+    auto shift = depth * 3ull;
+
+    auto extended = key | (child << shift);
+    return SetDepth(extended, depth + 1);
+}
+
+__host__ __device__ uint64_t Octree::ToKey(float3 position, float3 aabbMin, float3 aabbMax, uint64_t depth)
+{
+    uint64_t payload = 0ull;
+    float3 bbMin = aabbMin;
+    float3 bbMax = aabbMax;
+
+    for (uint64_t i = 0; i < depth; ++i)
+    {
+        float3 center
+        {
+            0.5f * (bbMin.x + bbMax.x),
+            0.5f * (bbMin.y + bbMax.y),
+            0.5f * (bbMin.z + bbMax.z)
+        };
+
+        auto bx = (position.x >= center.x) ? 1ull : 0ull;
+        auto by = (position.y >= center.y) ? 1ull : 0ull;
+        auto bz = (position.z >= center.z) ? 1ull : 0ull;
+
+        auto child = (bx << 2) | (by << 1) | bz;
+
+        payload |= (child << (i * 3ull));
+
+        bbMin.x = bx ? center.x : bbMin.x;
+        bbMax.x = bx ? bbMax.x : center.x;
+
+        bbMin.y = by ? center.y : bbMin.y;
+        bbMax.y = by ? bbMax.y : center.y;
+
+        bbMin.z = bz ? center.z : bbMin.z;
+        bbMax.z = bz ? bbMax.z : center.z;
+    }
+
+    return SetDepth(payload, depth);
+}
+
+__host__ __device__ float3 Octree::ToPosition(uint64_t key, float3 aabbMin, float3 aabbMax)
+{
+    unsigned depth = GetDepth(key);
+
+    float3 bbMin = aabbMin;
+    float3 bbMax = aabbMax;
+
+    for (unsigned i = 0; i < depth; ++i)
+    {
+        float3 center
+        {
+            0.5f * (bbMin.x + bbMax.x),
+            0.5f * (bbMin.y + bbMax.y),
+            0.5f * (bbMin.z + bbMax.z)
+        };
+
+        unsigned code = GetCode(key, i);
+        unsigned bx = (code >> 2) & 1ull;
+        unsigned by = (code >> 1) & 1ull;
+        unsigned bz = (code >> 0) & 1ull;
+
+        bbMin.x = bx ? center.x : bbMin.x;
+        bbMax.x = bx ? bbMax.x : center.x;
+
+        bbMin.y = by ? center.y : bbMin.y;
+        bbMax.y = by ? bbMax.y : center.y;
+
+        bbMin.z = bz ? center.z : bbMin.z;
+        bbMax.z = bz ? bbMax.z : center.z;
+    }
+
+    return float3
+    {
+        0.5f * (bbMin.x + bbMax.x),
+        0.5f * (bbMin.y + bbMax.y),
+        0.5f * (bbMin.z + bbMax.z)
+    };
+}
+
+__host__ __device__ float Octree::GetScale(OctreeKey key, uint64_t maxDepth, float unitLength)
+{
+    auto level = Octree::GetDepth(key);
+    const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+
+#if defined(__CUDA_ARCH__)
+    // device path
+    return ldexpf(unitLength, static_cast<int>(k));
+#else
+    // host path
+    return std::ldexp(unitLength, static_cast<int>(k));
+#endif
+}
+
+__host__ __device__ void Octree::SplitChildAABB(
+    const float3& pmin,
+    const float3& pmax,
+    unsigned childCode3, // 0..7, (bx<<2)|(by<<1)|bz
+    float3* cmin,
+    float3* cmax)
+{
+    float3 center
+    {
+        0.5f * (pmin.x + pmax.x),
+        0.5f * (pmin.y + pmax.y),
+        0.5f * (pmin.z + pmax.z)
+    };
+
+    const unsigned bx = (childCode3 >> 2) & 1u;
+    const unsigned by = (childCode3 >> 1) & 1u;
+    const unsigned bz = (childCode3 >> 0) & 1u;
+
+    cmin->x = bx ? center.x : pmin.x;  cmax->x = bx ? pmax.x : center.x;
+    cmin->y = by ? center.y : pmin.y;  cmax->y = by ? pmax.y : center.y;
+    cmin->z = bz ? center.z : pmin.z;  cmax->z = bz ? pmax.z : center.z;
+}
+
+__host__ __device__ float Octree::Dist2PointAABB(const float3& q, const float3& bmin, const float3& bmax)
+{
+    const float dx = fmaxf(fmaxf(bmin.x - q.x, 0.0f), q.x - bmax.x);
+    const float dy = fmaxf(fmaxf(bmin.y - q.y, 0.0f), q.y - bmax.y);
+    const float dz = fmaxf(fmaxf(bmin.z - q.z, 0.0f), q.z - bmax.z);
+    return dx * dx + dy * dy + dz * dz;
+}
+
+__host__ __device__ float3 Octree::ClosestPointOnAABB(const float3& q, const float3& bmin, const float3& bmax)
+{
+    float3 c;
+    c.x = fminf(fmaxf(q.x, bmin.x), bmax.x);
+    c.y = fminf(fmaxf(q.y, bmin.y), bmax.y);
+    c.z = fminf(fmaxf(q.z, bmin.z), bmax.z);
+    return c;
+}
+#pragma endregion
+
+
 void HostOctree::Initialize(
     float3* positions,
     unsigned int numberOfPositions,
@@ -100,6 +283,80 @@ void HostOctree::Terminate()
     nodes.shrink_to_fit();
 }
 
+OctreeNode* HostOctree::NN(float3 query)
+{
+    if (rootIndex == UINT32_MAX || nodes.empty())
+    {
+        return nullptr;
+    }
+
+    struct Item
+    {
+        float d2;
+        unsigned idx;
+    };
+
+    struct Cmp
+    {
+        bool operator()(const Item& a, const Item& b) const
+        {
+            return a.d2 > b.d2; // min-heap
+        }
+    };
+
+    auto nodeDist2 = [&](unsigned idx) -> float
+    {
+        const auto& n = nodes[idx];
+        return Octree::Dist2PointAABB(query, n.bmin, n.bmax);
+    };
+
+    std::priority_queue<Item, std::vector<Item>, Cmp> pq;
+    pq.push({ nodeDist2(rootIndex), rootIndex });
+
+    float bestD2 = FLT_MAX;
+    OctreeNode* bestNode = nullptr;
+
+    while (!pq.empty())
+    {
+        Item it = pq.top();
+        pq.pop();
+
+        // 하한이 현재 best 이상이면 이 서브트리 전체 prune
+        if (it.d2 >= bestD2)
+        {
+            continue;
+        }
+
+        const OctreeNode& n = nodes[it.idx];
+
+        bool isLeaf = true;
+        for (int c = 0; c < 8; ++c)
+        {
+            unsigned ci = n.children[c];
+            if (ci == UINT32_MAX) continue;
+            isLeaf = false;
+
+            float cd2 = nodeDist2(ci);
+            if (cd2 < bestD2)
+            {
+                pq.push({ cd2, ci });
+            }
+        }
+
+        if (isLeaf)
+        {
+            // leaf 자체의 AABB 하한이 it.d2 이므로, 여기서 best 갱신
+            if (it.d2 < bestD2)
+            {
+                bestD2 = it.d2;
+                bestNode = const_cast<OctreeNode*>(&nodes[it.idx]);
+            }
+        }
+    }
+
+    return bestNode;
+}
+
 __global__ void Kernel_DeviceOctree_BuildOctreeNodeKeys(
     const float3* __restrict__ positions,
     unsigned int numberOfPoints,
@@ -150,67 +407,46 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodes(
     entry.value = index;
 }
 
+// 패스1: 링크(자식 AABB 계산 금지)
 __global__ void Kernel_DeviceOctree_LinkOctreeNodes(
-    HashMap<uint64_t, unsigned int> octreeKeys,
+    HashMap<uint64_t, unsigned int> hm,
     OctreeNode* __restrict__ nodes,
     unsigned int numberOfNodes,
     unsigned int* __restrict__ rootIndex,
-    float3 rootMin,
-    float3 rootMax)
+    float3 rootMin, float3 rootMax)
 {
-    const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= numberOfNodes) return;
-
     OctreeNode& node = nodes[tid];
-    const unsigned depth = static_cast<unsigned>(Octree::GetDepth(node.key));
-
-    if (depth == 0u)
-    {
-        // 루트만 AABB 세팅
-        *rootIndex = tid;
-        node.parent = UINT32_MAX;
-        node.bmin = rootMin;
-        node.bmax = rootMax;
-        return;
-    }
-
-    // 부모 찾고 링크만 설정 (AABB 계산 금지!)
-    const uint64_t parentKey = Octree::GetParentKey(node.key);
-    unsigned int parentIndex = UINT32_MAX;
-    octreeKeys.find(octreeKeys.info, parentKey, &parentIndex);
-    if (parentIndex == UINT32_MAX) return;
-
-    node.parent = parentIndex;
-    OctreeNode& parentNode = nodes[parentIndex];
-
-    const unsigned childCode =
-        static_cast<unsigned>(Octree::GetCode(node.key, depth - 1u));
-    parentNode.children[childCode] = tid;
+    unsigned depth = (unsigned)Octree::GetDepth(node.key);
+    if (depth == 0u) { *rootIndex = tid; node.parent = UINT32_MAX; node.bmin = rootMin; node.bmax = rootMax; return; }
+    uint64_t parentKey = Octree::GetParentKey(node.key);
+    unsigned parentIdx = UINT32_MAX;
+    hm.find(hm.info, parentKey, &parentIdx);
+    if (parentIdx == UINT32_MAX) return;
+    node.parent = parentIdx;
+    OctreeNode& p = nodes[parentIdx];
+    unsigned childCode = (unsigned)Octree::GetCode(node.key, depth - 1u);
+    p.children[childCode] = tid;
 }
 
 __global__ void Kernel_DeviceOctree_PropagateAABB_Level(
     OctreeNode* __restrict__ nodes,
-    unsigned int numberOfNodes,
-    unsigned int level)
+    unsigned numberOfNodes,
+    unsigned level)
 {
-    const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= numberOfNodes) return;
-
-    OctreeNode& node = nodes[tid];
-    const unsigned depth = static_cast<unsigned>(Octree::GetDepth(node.key));
+    OctreeNode& n = nodes[tid];
+    unsigned depth = (unsigned)Octree::GetDepth(n.key);
     if (depth != level) return;
-
-    const unsigned int parentIdx = node.parent;
-    if (parentIdx == UINT32_MAX) return; // safety
-
-    const OctreeNode& parent = nodes[parentIdx];
-    const unsigned childCode =
-        static_cast<unsigned>(Octree::GetCode(node.key, depth - 1u));
-
-    float3 cmn, cmx;
-    Octree::SplitChildAABB(parent.bmin, parent.bmax, childCode, &cmn, &cmx);
-    node.bmin = cmn;
-    node.bmax = cmx;
+    unsigned pidx = n.parent;
+    if (pidx == UINT32_MAX) return;
+    const OctreeNode& p = nodes[pidx];
+    unsigned code = (unsigned)Octree::GetCode(n.key, depth - 1u);
+    float3 cmin, cmax;
+    Octree::SplitChildAABB(p.bmin, p.bmax, code, &cmin, &cmax);
+    n.bmin = cmin; n.bmax = cmax;
 }
 
 void DeviceOctree::Initialize(
@@ -332,6 +568,7 @@ void DeviceOctree::NN(
     float* d_outNearestD2 = nullptr;
     CUDA_MALLOC(&d_outNearestD2, sizeof(float) * numberOfQueries);
     CUDA_MEMSET(d_outNearestD2, 0, sizeof(float) * numberOfQueries);
+    CUDA_SYNC();
 
     //unsigned int h_root = UINT32_MAX;
     //CUDA_COPY_D2H(&h_root, rootIndex, sizeof(unsigned int));
@@ -401,8 +638,208 @@ bool DeviceOctree::NN_Single(
     return idx != UINT32_MAX;
 }
 
+__device__ float DeviceOctree::nodeDist2_direct(
+    const OctreeNode* nodes,
+    unsigned int idx,
+    const float3& q)
+{
+    const OctreeNode& n = nodes[idx];
+    return Octree::Dist2PointAABB(q, n.bmin, n.bmax);
+}
+
+__device__ bool DeviceOctree::isLeaf(const OctreeNode& n)
+{
+    return (n.children[0] == UINT32_MAX) &&
+        (n.children[1] == UINT32_MAX) &&
+        (n.children[2] == UINT32_MAX) &&
+        (n.children[3] == UINT32_MAX) &&
+        (n.children[4] == UINT32_MAX) &&
+        (n.children[5] == UINT32_MAX) &&
+        (n.children[6] == UINT32_MAX) &&
+        (n.children[7] == UINT32_MAX);
+}
+
+// DeviceOctree 내부 (isLeaf 아래에 추가)
+__device__ void DeviceOctree::preferred_child_order(
+    const OctreeNode& n, const float3& q, int order[8])
+{
+    // 노드 박스 중심
+    float3 c{
+        0.5f * (n.bmin.x + n.bmax.x),
+        0.5f * (n.bmin.y + n.bmax.y),
+        0.5f * (n.bmin.z + n.bmax.z)
+    };
+
+    // 쿼리가 속한 옥탄을 우선 방문
+    const int prefer =
+        ((q.x >= c.x) ? 4 : 0) |
+        ((q.y >= c.y) ? 2 : 0) |
+        ((q.z >= c.z) ? 1 : 0);
+
+    // 인접 옥탄들까지 XOR 패턴으로 배치 (정렬 오버헤드 없음)
+    order[0] = prefer;
+    order[1] = prefer ^ 1;
+    order[2] = prefer ^ 2;
+    order[3] = prefer ^ 4;
+    order[4] = prefer ^ 3;
+    order[5] = prefer ^ 5;
+    order[6] = prefer ^ 6;
+    order[7] = prefer ^ 7;
+}
+
+__device__ void DeviceOctree::push_children_sorted(
+    const OctreeNode& n,
+    const float3& q,
+    const OctreeNode* __restrict__ nodes,
+    float bestD2,
+    unsigned int* __restrict__ stackIdx,
+    float* __restrict__ stackD2,
+    int* __restrict__ top,
+    const int STACK_CAP)
+{
+    // 수집
+    unsigned int cidx[8];
+    float        cd2[8];
+    int cnt = 0;
+
+#pragma unroll
+    for (int c = 0; c < 8; ++c)
+    {
+        unsigned int ci = n.children[c];
+        if (ci == UINT32_MAX) continue;
+
+        const OctreeNode& cn = nodes[ci];
+        float d2 = Octree::Dist2PointAABB(q, cn.bmin, cn.bmax);
+        if (d2 >= bestD2) continue; // 프루닝된 건 skip
+
+        cidx[cnt] = ci;
+        cd2[cnt] = d2;
+        ++cnt;
+    }
+
+    // 삽입정렬 (오름차순)
+#pragma unroll
+    for (int i = 1; i < cnt; ++i)
+    {
+        float        keyD = cd2[i];
+        unsigned int keyI = cidx[i];
+        int j = i - 1;
+        while (j >= 0 && cd2[j] > keyD)
+        {
+            cd2[j + 1] = cd2[j];
+            cidx[j + 1] = cidx[j];
+            --j;
+        }
+        cd2[j + 1] = keyD;
+        cidx[j + 1] = keyI;
+    }
+
+    // 가까운 것부터 push
+#pragma unroll
+    for (int i = 0; i < cnt; ++i)
+    {
+        if (*top >= STACK_CAP) break;
+        stackIdx[*top] = cidx[i];
+        stackD2[*top] = cd2[i];
+        ++(*top);
+    }
+}
+
+__device__ unsigned int DeviceOctree::DeviceOctree_NearestLeaf(
+    const float3& query,
+    const OctreeNode* __restrict__ nodes,
+    const unsigned int* __restrict__ rootIndex,
+    float* outBestD2)
+{
+    if (nodes == nullptr || *rootIndex == UINT32_MAX) {
+        if (outBestD2) *outBestD2 = FLT_MAX;
+        return UINT32_MAX;
+    }
+
+    // 스택: 인덱스만 유지 (거리 배열 제거)
+    const int STACK_CAP = 64;     // 필요하면 128로
+    unsigned int stackIdx[STACK_CAP];
+    int top = 0;
+
+    const unsigned int root = *rootIndex;
+    stackIdx[top++] = root;
+
+    float bestD2 = FLT_MAX;
+    unsigned int bestIdx = UINT32_MAX;
+
+    // 1) Greedy 하강: 가장 유력한 자식 하나로 계속 내려가며 bestD2 초기로 확 낮춤
+    {
+        unsigned int cur = root;
+        for (;;)
+        {
+            const OctreeNode& n = nodes[cur];
+            const float nd2 = Octree::Dist2PointAABB(query, n.bmin, n.bmax);
+            if (nd2 >= bestD2) break;
+
+            if (isLeaf(n)) {
+                bestD2 = nd2;
+                bestIdx = cur;
+                break;
+            }
+
+            int ord[8];
+            preferred_child_order(n, query, ord);
+
+            bool descended = false;
+            // 첫 번째(가장 유력) 자식으로 즉시 하강, 나머지는 스택에 후보로 적재
+#pragma unroll
+            for (int k = 0; k < 8; ++k) {
+                const unsigned int ci = n.children[ord[k]];
+                if (ci == UINT32_MAX) continue;
+
+                const OctreeNode& cn = nodes[ci];
+                const float cd2 = Octree::Dist2PointAABB(query, cn.bmin, cn.bmax);
+                if (cd2 >= bestD2) continue;
+
+                if (!descended) { cur = ci; descended = true; }
+                else if (top < STACK_CAP) { stackIdx[top++] = ci; }
+            }
+            if (!descended) break;
+        }
+    }
+
+    // 2) 남은 후보들에 대해 브랜치-앤-바운드
+    while (top > 0)
+    {
+        const unsigned int idx = stackIdx[--top];
+
+        const OctreeNode& n = nodes[idx];
+        const float nd2 = Octree::Dist2PointAABB(query, n.bmin, n.bmax);
+        if (nd2 >= bestD2) continue;
+
+        if (isLeaf(n)) {
+            if (nd2 < bestD2) { bestD2 = nd2; bestIdx = idx; }
+            if (bestD2 == 0.0f) break;
+            continue;
+        }
+
+        int ord[8];
+        preferred_child_order(n, query, ord);
+
+#pragma unroll
+        for (int k = 0; k < 8; ++k) {
+            const unsigned int ci = n.children[ord[k]];
+            if (ci == UINT32_MAX) continue;
+
+            const OctreeNode& cn = nodes[ci];
+            const float cd2 = Octree::Dist2PointAABB(query, cn.bmin, cn.bmax);
+            if (cd2 >= bestD2) continue;
+
+            if (top < STACK_CAP) stackIdx[top++] = ci;
+        }
+    }
+
+    if (outBestD2) *outBestD2 = bestD2;
+    return bestIdx;
+}
+
 __global__ void Kernel_DeviceOctree_NN_Batch(
-    OctreeNode* __restrict__ nodes,
+    const OctreeNode* __restrict__ nodes,   // const로
     const unsigned int* __restrict__ rootIndex,
     const float3* __restrict__ queries,
     unsigned int numberOfQueries,

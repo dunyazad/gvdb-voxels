@@ -366,7 +366,7 @@ int main(int argc, char** argv)
 				if (event.action == 1)
 				{
 					//cudaInstance.d_mesh.RadiusLaplacianSmoothing(0.5f, 10, 0.05f);
-					cuInstance.d_mesh.LaplacianSmoothing(5, 1.0f, false);
+					cuInstance.d_mesh.LaplacianSmoothing(50, 1.0f, false);
 					cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
 
 					VD::Clear("AABB");
@@ -605,8 +605,8 @@ int main(int argc, char** argv)
 						float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 						float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 
-						float voxelSize = 0.1f;
-						//float voxelSize = 0.0125f;
+						//float voxelSize = 0.1f;
+						float voxelSize = 0.0125f;
 						unsigned int maxDepth = 0;
 						float unitLength = maxLength;
 						while (unitLength > voxelSize)
@@ -772,9 +772,14 @@ int main(int argc, char** argv)
 									auto& p = inputPositions[i];
 
 									auto& node = nodes[indices[i]];
-									auto n = Octree::ToPosition(node.key, bbMin, bbMax);
+									auto n = (node.bmin + node.bmax) * 0.5f;
 
-									VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(deviceOctree.unitLength), Color::yellow());
+									float d2_check = Octree::Dist2PointAABB(p, node.bmin, node.bmax);
+									if (fabsf(d2_check - distances[i]) > 1e-6f) {
+										printf("mismatch i=%zu d2_kernel=%g d2_host=%g\n", i, distances[i], d2_check);
+									}
+
+									VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(deviceOctree.unitLength * 0.1f), Color::yellow());
 									VD::AddLine("Nearest", glm::vec3(XYZ(p)), glm::vec3(XYZ(n)), Color::red());
 								}
 							}
