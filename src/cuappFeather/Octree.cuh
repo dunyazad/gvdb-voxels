@@ -13,6 +13,7 @@
 #include <MortonCode.cuh>
 
 #include <map>
+#include <queue>
 #include <vector>
 
 using OctreeKey = uint64_t;
@@ -24,6 +25,8 @@ struct OctreeNode
     OctreeKey key = UINT64_MAX;
     unsigned int parent = UINT32_MAX;
     unsigned int children[8] = { UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX };
+    float3 bmin = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+    float3 bmax = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
 };
 #endif
 
@@ -159,14 +162,61 @@ struct Octree
     {
         auto level = Octree::GetDepth(key);
         const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+        
+#if defined(__CUDA_ARCH__)
+        // device path
+        return ldexpf(unitLength, static_cast<int>(k));
+#else
+        // host path
         return std::ldexp(unitLength, static_cast<int>(k));
+#endif
+    }
+
+    __host__ __device__ inline static void SplitChildAABB(
+        const float3& pmin,
+        const float3& pmax,
+        unsigned childCode3, // 0..7, (bx<<2)|(by<<1)|bz
+        float3* cmin,
+        float3* cmax)
+    {
+        float3 center
+        {
+            0.5f * (pmin.x + pmax.x),
+            0.5f * (pmin.y + pmax.y),
+            0.5f * (pmin.z + pmax.z)
+        };
+
+        const unsigned bx = (childCode3 >> 2) & 1u;
+        const unsigned by = (childCode3 >> 1) & 1u;
+        const unsigned bz = (childCode3 >> 0) & 1u;
+
+        cmin->x = bx ? center.x : pmin.x;  cmax->x = bx ? pmax.x : center.x;
+        cmin->y = by ? center.y : pmin.y;  cmax->y = by ? pmax.y : center.y;
+        cmin->z = bz ? center.z : pmin.z;  cmax->z = bz ? pmax.z : center.z;
+    }
+
+    __host__ __device__ inline static float Dist2PointAABB(const float3& q, const float3& bmin, const float3& bmax)
+    {
+        const float dx = fmaxf(fmaxf(bmin.x - q.x, 0.0f), q.x - bmax.x);
+        const float dy = fmaxf(fmaxf(bmin.y - q.y, 0.0f), q.y - bmax.y);
+        const float dz = fmaxf(fmaxf(bmin.z - q.z, 0.0f), q.z - bmax.z);
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    __host__ __device__ inline static float3 ClosestPointOnAABB(const float3& q, const float3& bmin, const float3& bmax)
+    {
+        float3 c;
+        c.x = fminf(fmaxf(q.x, bmin.x), bmax.x);
+        c.y = fminf(fmaxf(q.y, bmin.y), bmax.y);
+        c.z = fminf(fmaxf(q.z, bmin.z), bmax.z);
+        return c;
     }
 };
 
 struct HostOctree
 {
     std::vector<OctreeNode> nodes;
-    OctreeNode* root = nullptr;
+    unsigned int rootIndex = UINT32_MAX;
     uint64_t leafDepth = UINT64_MAX;
     float3 aabbMin = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
     float3 aabbMax = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
@@ -182,36 +232,80 @@ struct HostOctree
 
     void Terminate();
 
-    OctreeNode* Nearest(float3 query, OctreeNode* node)
+    OctreeNode* HostOctree::NN(float3 query)
     {
-
-    }
-
-    OctreeNode* NN(float3 query)
-    {
-        bool exists = true;
-        auto key = Octree::ToKey(query, aabbMin, aabbMax, leafDepth);
-        auto node = root;
-        for (size_t i = 0; i < leafDepth; i++)
-        {
-            auto childIndex = Octree::GetCode(key, i);
-            if (UINT32_MAX == node->children[childIndex])
-            {
-                exists = false;
-                break;
-            }
-            node = &nodes[node->children[childIndex]];
-        }
-
-        if (exists)
-        {
-            return node;
-        }
-        else
+        if (rootIndex == UINT32_MAX || nodes.empty())
         {
             return nullptr;
         }
+
+        struct Item
+        {
+            float d2;
+            unsigned idx;
+        };
+
+        struct Cmp
+        {
+            bool operator()(const Item& a, const Item& b) const
+            {
+                return a.d2 > b.d2; // min-heap
+            }
+        };
+
+        auto nodeDist2 = [&](unsigned idx) -> float
+        {
+            const auto& n = nodes[idx];
+            return Octree::Dist2PointAABB(query, n.bmin, n.bmax);
+        };
+
+        std::priority_queue<Item, std::vector<Item>, Cmp> pq;
+        pq.push({ nodeDist2(rootIndex), rootIndex });
+
+        float bestD2 = FLT_MAX;
+        OctreeNode* bestNode = nullptr;
+
+        while (!pq.empty())
+        {
+            Item it = pq.top();
+            pq.pop();
+
+            // 하한이 현재 best 이상이면 이 서브트리 전체 prune
+            if (it.d2 >= bestD2)
+            {
+                continue;
+            }
+
+            const OctreeNode& n = nodes[it.idx];
+
+            bool isLeaf = true;
+            for (int c = 0; c < 8; ++c)
+            {
+                unsigned ci = n.children[c];
+                if (ci == UINT32_MAX) continue;
+                isLeaf = false;
+
+                float cd2 = nodeDist2(ci);
+                if (cd2 < bestD2)
+                {
+                    pq.push({ cd2, ci });
+                }
+            }
+
+            if (isLeaf)
+            {
+                // leaf 자체의 AABB 하한이 it.d2 이므로, 여기서 best 갱신
+                if (it.d2 < bestD2)
+                {
+                    bestD2 = it.d2;
+                    bestNode = const_cast<OctreeNode*>(&nodes[it.idx]);
+                }
+            }
+        }
+
+        return bestNode;
     }
+
 };
 
 struct DeviceOctree
@@ -237,4 +331,115 @@ struct DeviceOctree
     unsigned int* d_numberOfNodes = nullptr;
 
     HashMap<uint64_t, unsigned int> octreeKeys;
+
+    __device__ static inline float nodeDist2(
+        OctreeNode* nodes,
+        unsigned int idx,
+        const float3& q)
+    {
+        const OctreeNode& n = nodes[idx];
+        return Octree::Dist2PointAABB(q, n.bmin, n.bmax);
+    }
+
+    __device__ static inline float nodeDist2_direct(
+        const OctreeNode* nodes,
+        unsigned int idx,
+        const float3& q)
+    {
+        const OctreeNode& n = nodes[idx];
+        return Octree::Dist2PointAABB(q, n.bmin, n.bmax);
+    }
+
+    __device__ static inline bool isLeaf(const OctreeNode& n)
+    {
+        return (n.children[0] == UINT32_MAX) &&
+            (n.children[1] == UINT32_MAX) &&
+            (n.children[2] == UINT32_MAX) &&
+            (n.children[3] == UINT32_MAX) &&
+            (n.children[4] == UINT32_MAX) &&
+            (n.children[5] == UINT32_MAX) &&
+            (n.children[6] == UINT32_MAX) &&
+            (n.children[7] == UINT32_MAX);
+    }
+
+    __device__ static inline unsigned int DeviceOctree_NearestLeaf(
+        const float3& query,
+        OctreeNode* __restrict__ nodes,
+        const unsigned int* __restrict__ rootIndex,
+        float* outBestD2)
+    {
+        if (nodes == nullptr || *rootIndex == UINT32_MAX)
+        {
+            if (outBestD2) *outBestD2 = FLT_MAX;
+            return UINT32_MAX;
+        }
+
+        const int STACK_CAP = 64;
+        unsigned int  stackIdx[STACK_CAP];
+        float         stackD2[STACK_CAP];
+        int top = 0;
+
+        const unsigned int root = *rootIndex;
+        float rootD2 = nodeDist2_direct(nodes, root, query);
+        stackIdx[top] = root;
+        stackD2[top] = rootD2;
+        ++top;
+
+        float bestD2 = FLT_MAX;
+        unsigned int bestIdx = UINT32_MAX;
+
+        while (top > 0)
+        {
+            --top;
+            const unsigned int idx = stackIdx[top];
+            const float nd2 = stackD2[top];
+
+            if (nd2 >= bestD2) continue;
+
+            const OctreeNode& n = nodes[idx];
+            if (isLeaf(n))
+            {
+                if (nd2 < bestD2) { bestD2 = nd2; bestIdx = idx; }
+                continue;
+            }
+
+            // 자식 push (하한 프루닝)
+#pragma unroll
+            for (int c = 0; c < 8; ++c)
+            {
+                const unsigned int ci = n.children[c];
+                if (ci == UINT32_MAX) continue;
+
+                const float cd2 = nodeDist2_direct(nodes, ci, query);
+                if (cd2 < bestD2 && top < STACK_CAP)
+                {
+                    stackIdx[top] = ci;
+                    stackD2[top] = cd2;
+                    ++top;
+                }
+            }
+        }
+
+        if (outBestD2) *outBestD2 = bestD2;
+        return bestIdx;
+    }
+
+    void NN(
+        float3* queries,
+        unsigned int numberOfQueries,
+        unsigned int* outNearestIndex,
+        float* outNearestD2);    
+
+    bool NN_Single(
+        const float3& query,
+        unsigned int* h_index,
+        float* h_d2);
 };
+
+__global__ void Kernel_DeviceOctree_NN_Batch(
+    OctreeNode* __restrict__ nodes,
+    const unsigned int* __restrict__ rootIndex,
+    const float3* __restrict__ queries,
+    unsigned int numberOfQueries,
+    unsigned int* __restrict__ outIndices,
+    float* __restrict__ outD2);

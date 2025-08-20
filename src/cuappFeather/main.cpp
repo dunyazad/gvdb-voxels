@@ -375,23 +375,414 @@ int main(int argc, char** argv)
 			}
 			else if (GLFW_KEY_ENTER == event.keyCode)
 			{
-				printf("Finding Border\n");
-
-				cuInstance.h_mesh = cuInstance.d_mesh;
-
-				auto& mesh = cuInstance.h_mesh;
-
-				for (size_t i = 0; i < mesh.numberOfFaces * 3; i++)
+				if (event.action == 1)
 				{
-					auto& he = mesh.halfEdges[i];
-					if (UINT32_MAX == he.oppositeIndex)
+					bool useHostOctree = false;
+					if (useHostOctree)
 					{
-						auto ne = mesh.halfEdges[he.nextIndex];
+						CUDA_TS(BuildOctree);
 
-						auto& v0 = mesh.positions[he.vertexIndex];
-						auto& v1 = mesh.positions[ne.vertexIndex];
+						CUDA_TS(BuildOctreeInitialize);
 
-						VD::AddLine("BorderLines", { XYZ(v0) }, { XYZ(v1) }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+						auto center = (cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f;
+
+						auto lx = cuInstance.h_mesh.max.x - cuInstance.h_mesh.min.x;
+						auto ly = cuInstance.h_mesh.max.y - cuInstance.h_mesh.min.y;
+						auto lz = cuInstance.h_mesh.max.z - cuInstance.h_mesh.min.z;
+
+						auto maxLength = std::max({ lx, ly, lz });
+						float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+						float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+
+						//float voxelSize = 0.1f;
+						float voxelSize = 0.0125f;
+						unsigned int maxDepth = 0;
+						float unitLength = maxLength;
+						while (unitLength > voxelSize)
+						{
+							unitLength *= 0.5f;
+							maxDepth++;
+						}
+
+						printf("unitLength : %f\n", unitLength);
+						printf("maxDepth : %d\n", maxDepth);
+
+						HostOctree hostOctree;
+						hostOctree.Initialize(
+							cuInstance.h_mesh.positions,
+							cuInstance.h_mesh.numberOfPoints,
+							cuInstance.h_mesh.min,
+							cuInstance.h_mesh.max,
+							maxDepth,
+							unitLength);
+
+						CUDA_TE(BuildOctreeInitialize);
+
+						{
+							//for (const auto& node : hostOctree.nodes)
+							//{
+							//	const auto p = hostOctree.ToPosition(node.key, bbMin, bbMax);
+
+							//	auto level = hostOctree.GetDepth(node.key);
+							//	const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+							//	const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+							//	stringstream ss;
+							//	ss << "octree_" << level;
+
+							//	//if (k == 1)
+							//	{
+							//		VD::AddWiredBox(
+							//			ss.str(),
+							//			{ XYZ(p) },
+							//			{ 0.0f, 1.0f, 0.0f },
+							//			glm::vec3(scale),            // AddWiredBox가 "전체 길이"를 받는다고 가정
+							//			Color::blue()
+							//		);
+							//	}
+							//}
+						}
+
+						{
+							OctreeNode* root = nullptr;
+							//for (auto& n : hostOctree.nodes)
+							//{
+							//	auto level = Octree::GetDepth(n.key);
+							//	if (0 == level)
+							//	{
+							//		root = &n;
+							//	}
+							//}
+
+							root = &hostOctree.nodes[hostOctree.rootIndex];
+
+							std::function<void(OctreeNode&)> draw_box;
+							draw_box = [&](OctreeNode& node) {
+								auto level = Octree::GetDepth(node.key);
+								const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+								const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+								auto p = Octree::ToPosition(node.key, bbMin, bbMax);
+								stringstream ss;
+								ss << "octree_" << level;
+
+								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::blue());
+
+								for (size_t i = 0; i < 8; i++)
+								{
+									auto childIndex = node.children[i];
+									if (UINT32_MAX != childIndex)
+									{
+										auto childNode = hostOctree.nodes[childIndex];
+										draw_box(childNode);
+									}
+								}
+							};
+
+							draw_box(*root);
+						}
+
+						for (size_t i = 0; i <= maxDepth; i++)
+						{
+							stringstream ss;
+							ss << "octree_" << i;
+
+							VD::AddToSelectionList(ss.str());
+						}
+
+						{
+							////float3 inputPosition = cuInstance.h_mesh.positions[1] + make_float3(0.0f, hostOctree.unitLength, 0.0f);
+							//float3 inputPosition = cuInstance.h_mesh.min;
+							//VD::AddSphere("NodePoint", { XYZ(inputPosition) }, { 0.0f, 1.0f, 0.0f }, hostOctree.unitLength, Color::yellow());
+							//VD::AddWiredBox("Node", { XYZ(inputPosition) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(hostOctree.unitLength * 100.0f), Color::yellow());
+
+							//TS(NN);
+							//auto node = hostOctree.NN(inputPosition);
+							//if (nullptr == node)
+							//{
+							//	node = hostOctree.NN(inputPosition);
+							//}
+							//TE(NN);
+
+							//if (nullptr != node)
+							//{
+							//	printf("Key : %llu\n", node->key);
+
+							//	auto p = Octree::ToPosition(node->key, bbMin, bbMax);
+							//	VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(hostOctree.unitLength), Color::yellow());
+							//	VD::AddLine("Nearest", glm::vec3(XYZ(inputPosition)), glm::vec3(XYZ(p)), Color::red());
+							//}
+						}
+						{
+							vector<float3> inputPositions;
+							inputPositions.push_back((cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f);
+							inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
+							inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
+							inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
+							inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
+							inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
+							inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
+							inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
+							inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
+
+							for (size_t i = 0; i < inputPositions.size(); i++)
+							{
+								float3 inputPosition = inputPositions[i];
+								VD::AddSphere("NodePoint", { XYZ(inputPosition) }, { 0.0f, 1.0f, 0.0f }, hostOctree.unitLength, Color::yellow());
+								VD::AddWiredBox("Node", { XYZ(inputPosition) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(hostOctree.unitLength * 100.0f), Color::yellow());
+
+								TS(NN);
+								auto node = hostOctree.NN(inputPosition);
+								if (nullptr == node)
+								{
+									node = hostOctree.NN(inputPosition);
+								}
+								TE(NN);
+
+								if (nullptr != node)
+								{
+									printf("Key : %llu\n", node->key);
+
+									auto p = Octree::ToPosition(node->key, bbMin, bbMax);
+									VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(hostOctree.unitLength), Color::yellow());
+									VD::AddLine("Nearest", glm::vec3(XYZ(inputPosition)), glm::vec3(XYZ(p)), Color::red());
+								}
+							}
+
+							auto isLeaf = [](OctreeNode* node) -> bool {
+								for (size_t i = 0; i < 8; i++)
+								{
+									if (UINT32_MAX != node->children[i]) return false;
+								}
+								return true;
+							};
+
+							vector<pair<float, OctreeNode*>> distances(inputPositions.size(), {FLT_MAX, nullptr});
+							for (size_t i = 0; i < hostOctree.nodes.size(); i++)
+							{
+								auto& node = hostOctree.nodes[i];
+								if (isLeaf(&node))
+								{
+									for (size_t j = 0; j < inputPositions.size(); j++)
+									{
+										auto inputPosition = inputPositions[j];
+										auto distance2 = Octree::Dist2PointAABB(inputPosition, node.bmin, node.bmax);
+
+										if (distance2 < distances[j].first)
+										{
+											distances[j].first = distance2;
+											distances[j].second = &hostOctree.nodes[i];
+										}
+									}
+								}
+							}
+
+							for (size_t i = 0; i < distances.size(); i++)
+							{
+								auto& p = inputPositions[i];
+								auto node = distances[i].second;
+								auto n = Octree::ToPosition(node->key, bbMin, bbMax);
+
+								VD::AddLine("Nearest", glm::vec3(XYZ(p)), glm::vec3(XYZ(n)), Color::violet());
+							}
+						}
+
+						hostOctree.Terminate();
+					}
+					else
+					{
+						CUDA_TS(BuildOctree);
+
+						CUDA_TS(BuildOctreeInitialize);
+
+						auto center = (cuInstance.d_mesh.min + cuInstance.d_mesh.max) * 0.5f;
+
+						auto lx = cuInstance.d_mesh.max.x - cuInstance.d_mesh.min.x;
+						auto ly = cuInstance.d_mesh.max.y - cuInstance.d_mesh.min.y;
+						auto lz = cuInstance.d_mesh.max.z - cuInstance.d_mesh.min.z;
+
+						auto maxLength = std::max({ lx, ly, lz });
+						float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+						float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+
+						float voxelSize = 0.1f;
+						//float voxelSize = 0.0125f;
+						unsigned int maxDepth = 0;
+						float unitLength = maxLength;
+						while (unitLength > voxelSize)
+						{
+							unitLength *= 0.5f;
+							maxDepth++;
+						}
+
+						printf("unitLength : %f\n", unitLength);
+						printf("maxDepth : %d\n", maxDepth);
+
+						{
+							CUDA_TS(BuildOctree);
+
+							CUDA_TS(BuildOctreeInitialize);
+
+							DeviceOctree deviceOctree;
+							deviceOctree.Initialize(
+								cuInstance.d_mesh.positions,
+								cuInstance.d_mesh.numberOfPoints,
+								bbMin,
+								bbMax,
+								maxDepth,
+								unitLength);
+
+							CUDA_TE(BuildOctreeInitialize);
+
+							unsigned int numberOfEntries = 0;
+							CUDA_COPY_D2H(&numberOfEntries, deviceOctree.octreeKeys.info.numberOfEntries, sizeof(unsigned int));
+
+							vector<HashMapEntry<uint64_t, unsigned int>> entries(deviceOctree.octreeKeys.info.capacity);
+							CUDA_COPY_D2H(entries.data(), deviceOctree.octreeKeys.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>) * deviceOctree.octreeKeys.info.capacity);
+
+							CUDA_SYNC();
+
+							bool useOctreeKey = false;
+							if (useOctreeKey)
+							{
+								for (size_t i = 0; i < deviceOctree.octreeKeys.info.capacity; i++)
+								{
+									auto& entry = entries[i];
+									if (UINT64_MAX == entry.key) continue;
+
+									auto level = Octree::GetDepth(entry.key);
+									const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+									const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+									auto p = Octree::ToPosition(entry.key, bbMin, bbMax);
+
+									stringstream ss;
+									ss << "octree_" << level;
+									VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+								}
+							}
+							else
+							{
+								vector<OctreeNode> octreeNodes(deviceOctree.numberOfNodes);
+								CUDA_COPY_D2H(octreeNodes.data(), deviceOctree.nodes, sizeof(OctreeNode) * deviceOctree.numberOfNodes);
+
+								{
+									//for (auto& n : octreeNodes)
+									//{
+									//	auto level = n.level;
+									//	const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+									//	const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+									//	auto p = DeviceOctree::ToPosition(n.mortonCode, bbMin, bbMax);
+									//	stringstream ss;
+									//	ss << "octree_" << level;
+
+									//	if (UINT32_MAX == n.parent)
+									//	{
+									//		VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::red());
+									//	}
+									//	else
+									//	{
+									//		VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+									//	}
+									//}
+								}
+
+								{
+									unsigned int rootIndex = UINT32_MAX;
+									CUDA_COPY_D2H(&rootIndex, deviceOctree.rootIndex, sizeof(unsigned int));
+									OctreeNode* root = &octreeNodes[rootIndex];
+
+									//OctreeNode* root = nullptr;
+									//for (auto& n : octreeNodes)
+									//{
+									//	auto level = Octree::GetDepth(n.key);
+									//	if (0 == level)
+									//	{
+									//		root = &n;
+									//		printf("ROOT\n");
+									//	}
+									//}
+
+									std::function<void(OctreeNode&)> draw_box;
+									draw_box = [&](OctreeNode& node) {
+										auto level = Octree::GetDepth(node.key);
+										const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+										const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+										auto p = Octree::ToPosition(node.key, bbMin, bbMax);
+										stringstream ss;
+										ss << "octree_" << level;
+
+										VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+
+										for (size_t i = 0; i < 8; i++)
+										{
+											auto childIndex = node.children[i];
+											if (UINT32_MAX != childIndex)
+											{
+												auto childNode = octreeNodes[childIndex];
+												draw_box(childNode);
+											}
+										}
+									};
+
+									draw_box(*root);
+								}
+							}
+
+							for (size_t i = 0; i <= maxDepth; i++)
+							{
+								stringstream ss;
+								ss << "octree_" << i;
+
+								if (VD::AddToSelectionList(ss.str()))
+								{
+									printf("%s\n", ss.str().c_str());
+								}
+							}
+
+							{
+								vector<float3> inputPositions;
+								//inputPositions.push_back((cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f);
+								//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
+								//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
+								//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
+								//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
+								//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
+								//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
+								//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
+								//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
+
+								for (size_t i = 0; i < cuInstance.h_mesh.numberOfPoints; i++)
+								{
+									inputPositions.push_back(cuInstance.h_mesh.positions[i]);
+								}
+
+								vector<unsigned int> indices(inputPositions.size());
+								vector<float> distances(inputPositions.size());
+
+								deviceOctree.NN(inputPositions.data(), inputPositions.size(), indices.data(), distances.data());
+
+								vector<OctreeNode> nodes(deviceOctree.numberOfNodes);
+								CUDA_COPY_D2H(nodes.data(), deviceOctree.nodes, sizeof(OctreeNode)* deviceOctree.numberOfNodes);
+
+								for (size_t i = 0; i < inputPositions.size(); i++)
+								{
+									auto& p = inputPositions[i];
+
+									auto& node = nodes[indices[i]];
+									auto n = Octree::ToPosition(node.key, bbMin, bbMax);
+
+									VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(deviceOctree.unitLength), Color::yellow());
+									VD::AddLine("Nearest", glm::vec3(XYZ(p)), glm::vec3(XYZ(n)), Color::red());
+								}
+							}
+
+							deviceOctree.Terminate();
+
+							CUDA_TE(BuildOctree);
+						}
 					}
 				}
 			}
@@ -535,305 +926,23 @@ int main(int argc, char** argv)
 			}
 			else if (GLFW_KEY_END == event.keyCode)
 			{
-				if (event.action == 1)
+				printf("Finding Border\n");
+
+				cuInstance.h_mesh = cuInstance.d_mesh;
+
+				auto& mesh = cuInstance.h_mesh;
+
+				for (size_t i = 0; i < mesh.numberOfFaces * 3; i++)
 				{
-					bool useHostOctree = true;
-					if (useHostOctree)
+					auto& he = mesh.halfEdges[i];
+					if (UINT32_MAX == he.oppositeIndex)
 					{
-						CUDA_TS(BuildOctree);
+						auto ne = mesh.halfEdges[he.nextIndex];
 
-						CUDA_TS(BuildOctreeInitialize);
+						auto& v0 = mesh.positions[he.vertexIndex];
+						auto& v1 = mesh.positions[ne.vertexIndex];
 
-						auto center = (cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f;
-
-						auto lx = cuInstance.h_mesh.max.x - cuInstance.h_mesh.min.x;
-						auto ly = cuInstance.h_mesh.max.y - cuInstance.h_mesh.min.y;
-						auto lz = cuInstance.h_mesh.max.z - cuInstance.h_mesh.min.z;
-
-						auto maxLength = std::max({ lx, ly, lz });
-						float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
-						float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
-
-						//float voxelSize = 0.1f;
-						float voxelSize = 0.0125f;
-						unsigned int maxDepth = 0;
-						float unitLength = maxLength;
-						while (unitLength > voxelSize)
-						{
-							unitLength *= 0.5f;
-							maxDepth++;
-						}
-
-						printf("unitLength : %f\n", unitLength);
-						printf("maxDepth : %d\n", maxDepth);
-
-						HostOctree hostOctree;
-						hostOctree.Initialize(
-							cuInstance.h_mesh.positions,
-							cuInstance.h_mesh.numberOfPoints,
-							cuInstance.h_mesh.min,
-							cuInstance.h_mesh.max,
-							maxDepth,
-							unitLength);
-
-						CUDA_TE(BuildOctreeInitialize);
-
-						{
-							//for (const auto& node : hostOctree.nodes)
-							//{
-							//	const auto p = hostOctree.ToPosition(node.key, bbMin, bbMax);
-
-							//	auto level = hostOctree.GetDepth(node.key);
-							//	const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
-							//	const float scale = std::ldexp(unitLength, static_cast<int>(k));
-
-							//	stringstream ss;
-							//	ss << "octree_" << level;
-
-							//	//if (k == 1)
-							//	{
-							//		VD::AddWiredBox(
-							//			ss.str(),
-							//			{ XYZ(p) },
-							//			{ 0.0f, 1.0f, 0.0f },
-							//			glm::vec3(scale),            // AddWiredBox가 "전체 길이"를 받는다고 가정
-							//			Color::blue()
-							//		);
-							//	}
-							//}
-						}
-
-						{
-							OctreeNode* root = nullptr;
-							//for (auto& n : hostOctree.nodes)
-							//{
-							//	auto level = Octree::GetDepth(n.key);
-							//	if (0 == level)
-							//	{
-							//		root = &n;
-							//	}
-							//}
-
-							root = hostOctree.root;
-
-							std::function<void(OctreeNode&)> draw_box;
-							draw_box = [&](OctreeNode& node) {
-								auto level = Octree::GetDepth(node.key);
-								const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
-								const float scale = std::ldexp(unitLength, static_cast<int>(k));
-
-								auto p = Octree::ToPosition(node.key, bbMin, bbMax);
-								stringstream ss;
-								ss << "octree_" << level;
-
-								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::blue());
-
-								for (size_t i = 0; i < 8; i++)
-								{
-									auto childIndex = node.children[i];
-									if (UINT32_MAX != childIndex)
-									{
-										auto childNode = hostOctree.nodes[childIndex];
-										draw_box(childNode);
-									}
-								}
-							};
-
-							draw_box(*root);
-						}
-
-						for (size_t i = 0; i <= maxDepth; i++)
-						{
-							stringstream ss;
-							ss << "octree_" << i;
-
-							VD::AddToSelectionList(ss.str());
-						}
-
-						{
-							auto node = hostOctree.NN(cuInstance.h_mesh.positions[1] + make_float3(0.0f, hostOctree.unitLength, 0.0f));
-							if (nullptr != node)
-							{
-								printf("Key : %llu\n", node->key);
-
-								auto p = Octree::ToPosition(node->key, bbMin, bbMax);
-								auto scale = Octree::GetScale(node->key, hostOctree.leafDepth, hostOctree.unitLength);
-								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 1)), Color::red());
-								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 2)), Color::red());
-								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 3)), Color::red());
-								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 4)), Color::red());
-								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 5)), Color::red());
-								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 6)), Color::red());
-								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 7)), Color::red());
-								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 8)), Color::red());
-								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 9)), Color::red());
-								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 10)), Color::red());
-								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 11)), Color::red());
-								VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale * powf(2, 12)), Color::red());
-
-								VD::AddSphere("NodePoint", { XYZ(cuInstance.h_mesh.positions[1] + make_float3(0.0f, hostOctree.unitLength, 0.0f)) }, { 0.0f, 1.0f, 0.0f }, scale * 0.5f, Color::yellow());
-							}
-						}
-
-						hostOctree.Terminate();
-					}
-					else
-					{
-						CUDA_TS(BuildOctree);
-
-						CUDA_TS(BuildOctreeInitialize);
-
-						auto center = (cuInstance.d_mesh.min + cuInstance.d_mesh.max) * 0.5f;
-
-						auto lx = cuInstance.d_mesh.max.x - cuInstance.d_mesh.min.x;
-						auto ly = cuInstance.d_mesh.max.y - cuInstance.d_mesh.min.y;
-						auto lz = cuInstance.d_mesh.max.z - cuInstance.d_mesh.min.z;
-
-						auto maxLength = std::max({ lx, ly, lz });
-						float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
-						float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
-
-						//float voxelSize = 0.1f;
-						float voxelSize = 0.0125f;
-						unsigned int maxDepth = 0;
-						float unitLength = maxLength;
-						while (unitLength > voxelSize)
-						{
-							unitLength *= 0.5f;
-							maxDepth++;
-						}
-
-						printf("unitLength : %f\n", unitLength);
-						printf("maxDepth : %d\n", maxDepth);
-
-						{
-							CUDA_TS(BuildOctree);
-
-							CUDA_TS(BuildOctreeInitialize);
-
-							DeviceOctree deviceOctree;
-							deviceOctree.Initialize(
-								cuInstance.d_mesh.positions,
-								cuInstance.d_mesh.numberOfPoints,
-								bbMin,
-								bbMax,
-								maxDepth,
-								unitLength);
-
-							CUDA_TE(BuildOctreeInitialize);
-
-							unsigned int numberOfEntries = 0;
-							CUDA_COPY_D2H(&numberOfEntries, deviceOctree.octreeKeys.info.numberOfEntries, sizeof(unsigned int));
-
-							vector<HashMapEntry<uint64_t, unsigned int>> entries(deviceOctree.octreeKeys.info.capacity);
-							CUDA_COPY_D2H(entries.data(), deviceOctree.octreeKeys.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>) * deviceOctree.octreeKeys.info.capacity);
-
-							CUDA_SYNC();
-
-							bool useOctreeKey = false;
-							if (useOctreeKey)
-							{
-								for (size_t i = 0; i < deviceOctree.octreeKeys.info.capacity; i++)
-								{
-									auto& entry = entries[i];
-									if (UINT64_MAX == entry.key) continue;
-
-									auto level = Octree::GetDepth(entry.key);
-									const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
-									const float scale = std::ldexp(unitLength, static_cast<int>(k));
-
-									auto p = Octree::ToPosition(entry.key, bbMin, bbMax);
-
-									stringstream ss;
-									ss << "octree_" << level;
-									VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
-								}
-							}
-							else
-							{
-								vector<OctreeNode> octreeNodes(deviceOctree.numberOfNodes);
-								CUDA_COPY_D2H(octreeNodes.data(), deviceOctree.nodes, sizeof(OctreeNode) * deviceOctree.numberOfNodes);
-
-								{
-									//for (auto& n : octreeNodes)
-									//{
-									//	auto level = n.level;
-									//	const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
-									//	const float scale = std::ldexp(unitLength, static_cast<int>(k));
-
-									//	auto p = DeviceOctree::ToPosition(n.mortonCode, bbMin, bbMax);
-									//	stringstream ss;
-									//	ss << "octree_" << level;
-
-									//	if (UINT32_MAX == n.parent)
-									//	{
-									//		VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::red());
-									//	}
-									//	else
-									//	{
-									//		VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
-									//	}
-									//}
-								}
-
-								{
-									unsigned int rootIndex = UINT32_MAX;
-									CUDA_COPY_D2H(&rootIndex, deviceOctree.rootIndex, sizeof(unsigned int));
-									OctreeNode* root = &octreeNodes[rootIndex];
-
-									//OctreeNode* root = nullptr;
-									//for (auto& n : octreeNodes)
-									//{
-									//	auto level = Octree::GetDepth(n.key);
-									//	if (0 == level)
-									//	{
-									//		root = &n;
-									//		printf("ROOT\n");
-									//	}
-									//}
-
-									std::function<void(OctreeNode&)> draw_box;
-									draw_box = [&](OctreeNode& node) {
-										auto level = Octree::GetDepth(node.key);
-										const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
-										const float scale = std::ldexp(unitLength, static_cast<int>(k));
-
-										auto p = Octree::ToPosition(node.key, bbMin, bbMax);
-										stringstream ss;
-										ss << "octree_" << level;
-
-										VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
-
-										for (size_t i = 0; i < 8; i++)
-										{
-											auto childIndex = node.children[i];
-											if (UINT32_MAX != childIndex)
-											{
-												auto childNode = octreeNodes[childIndex];
-												draw_box(childNode);
-											}
-										}
-									};
-
-									draw_box(*root);
-								}
-							}
-
-							for (size_t i = 0; i <= maxDepth; i++)
-							{
-								stringstream ss;
-								ss << "octree_" << i;
-
-								if (VD::AddToSelectionList(ss.str()))
-								{
-									printf("%s\n", ss.str().c_str());
-								}
-							}
-
-							deviceOctree.Terminate();
-
-							CUDA_TE(BuildOctree);
-						}
+						VD::AddLine("BorderLines", { XYZ(v0) }, { XYZ(v1) }, { 1.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
 					}
 				}
 			}
