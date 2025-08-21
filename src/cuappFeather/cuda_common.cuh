@@ -171,6 +171,13 @@ typedef double f64;
 #endif
 
 
+struct cuAABB
+{
+    float3 min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+    float3 max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+};
+
+
 #ifdef __CUDACC__
 __device__ inline void atomicMinF(float* addr, float val)
 {

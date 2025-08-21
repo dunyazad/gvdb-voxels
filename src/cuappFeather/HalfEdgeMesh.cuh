@@ -4,12 +4,6 @@
 #include <HashMap.hpp>
 #include <VoxelKey.hpp>
 
-struct cuAABB
-{
-    float3 min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
-    float3 max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
-};
-
 struct HalfEdge
 {
     unsigned int vertexIndex = UINT32_MAX;

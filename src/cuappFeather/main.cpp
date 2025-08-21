@@ -24,6 +24,7 @@ using VD = VisualDebugging;
 #include "nvapi510/include/nvapi.h"
 #include "nvapi510/include/NvApiDriverSettings.h"
 
+
 CUDAInstance cuInstance;
 
 glm::vec3 initialPosition;
@@ -466,7 +467,7 @@ int main(int argc, char** argv)
 								stringstream ss;
 								ss << "octree_" << level;
 
-								VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::blue());
+								VD::AddWiredBox(ss.str(), { XYZ(p) }, glm::vec3(scale), Color::blue());
 
 								for (size_t i = 0; i < 8; i++)
 								{
@@ -493,8 +494,8 @@ int main(int argc, char** argv)
 						{
 							////float3 inputPosition = cuInstance.h_mesh.positions[1] + make_float3(0.0f, hostOctree.unitLength, 0.0f);
 							//float3 inputPosition = cuInstance.h_mesh.min;
-							//VD::AddSphere("NodePoint", { XYZ(inputPosition) }, { 0.0f, 1.0f, 0.0f }, hostOctree.unitLength, Color::yellow());
-							//VD::AddWiredBox("Node", { XYZ(inputPosition) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(hostOctree.unitLength * 100.0f), Color::yellow());
+							//VD::AddSphere("NodePoint", { XYZ(inputPosition) }, hostOctree.unitLength, Color::yellow());
+							//VD::AddWiredBox("Node", { XYZ(inputPosition) }, glm::vec3(hostOctree.unitLength * 100.0f), Color::yellow());
 
 							//TS(NN);
 							//auto node = hostOctree.NN(inputPosition);
@@ -509,7 +510,7 @@ int main(int argc, char** argv)
 							//	printf("Key : %llu\n", node->key);
 
 							//	auto p = Octree::ToPosition(node->key, bbMin, bbMax);
-							//	VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(hostOctree.unitLength), Color::yellow());
+							//	VD::AddWiredBox("Node", { XYZ(p) }, glm::vec3(hostOctree.unitLength), Color::yellow());
 							//	VD::AddLine("Nearest", glm::vec3(XYZ(inputPosition)), glm::vec3(XYZ(p)), Color::red());
 							//}
 						}
@@ -528,8 +529,8 @@ int main(int argc, char** argv)
 							for (size_t i = 0; i < inputPositions.size(); i++)
 							{
 								float3 inputPosition = inputPositions[i];
-								VD::AddSphere("NodePoint", { XYZ(inputPosition) }, { 0.0f, 1.0f, 0.0f }, hostOctree.unitLength, Color::yellow());
-								VD::AddWiredBox("Node", { XYZ(inputPosition) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(hostOctree.unitLength * 100.0f), Color::yellow());
+								VD::AddSphere("NodePoint", { XYZ(inputPosition) }, hostOctree.unitLength, Color::yellow());
+								VD::AddWiredBox("Node", { XYZ(inputPosition) }, glm::vec3(hostOctree.unitLength * 100.0f), Color::yellow());
 
 								TS(NN);
 								auto node = hostOctree.NN(inputPosition);
@@ -544,7 +545,7 @@ int main(int argc, char** argv)
 									printf("Key : %llu\n", node->key);
 
 									auto p = Octree::ToPosition(node->key, bbMin, bbMax);
-									VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(hostOctree.unitLength), Color::yellow());
+									VD::AddWiredBox("Node", { XYZ(p) }, glm::vec3(hostOctree.unitLength), Color::yellow());
 									VD::AddLine("Nearest", glm::vec3(XYZ(inputPosition)), glm::vec3(XYZ(p)), Color::red());
 								}
 							}
@@ -658,7 +659,7 @@ int main(int argc, char** argv)
 
 									stringstream ss;
 									ss << "octree_" << level;
-									VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+									VD::AddWiredBox(ss.str(), { XYZ(p) }, glm::vec3(scale), Color::green());
 								}
 							}
 							else
@@ -679,11 +680,11 @@ int main(int argc, char** argv)
 
 									//	if (UINT32_MAX == n.parent)
 									//	{
-									//		VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::red());
+									//		VD::AddWiredBox(ss.str(), { XYZ(p) }, glm::vec3(scale), Color::red());
 									//	}
 									//	else
 									//	{
-									//		VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+									//		VD::AddWiredBox(ss.str(), { XYZ(p) }, glm::vec3(scale), Color::green());
 									//	}
 									//}
 								}
@@ -714,7 +715,7 @@ int main(int argc, char** argv)
 										stringstream ss;
 										ss << "octree_" << level;
 
-										VD::AddWiredBox(ss.str(), { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(scale), Color::green());
+										VD::AddWiredBox(ss.str(), { XYZ(p) }, glm::vec3(scale), Color::green());
 
 										for (size_t i = 0; i < 8; i++)
 										{
@@ -779,7 +780,7 @@ int main(int argc, char** argv)
 										printf("mismatch i=%zu d2_kernel=%g d2_host=%g\n", i, distances[i], d2_check);
 									}
 
-									VD::AddWiredBox("Node", { XYZ(p) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(deviceOctree.unitLength * 0.1f), Color::yellow());
+									VD::AddWiredBox("Node", { XYZ(p) }, glm::vec3(deviceOctree.unitLength * 0.1f), Color::yellow());
 									VD::AddLine("Nearest", glm::vec3(XYZ(p)), glm::vec3(XYZ(n)), Color::red());
 								}
 							}
@@ -845,7 +846,7 @@ int main(int argc, char** argv)
 							{
 								auto mortonCode = mortonCodes[count++];
 								auto position = Morton64ToFloat3(mortonCode, cuInstance.d_mesh.min, voxelSize);
-								VD::AddWiredBox("temp", { XYZ(position) }, { 0.0f, 1.0f, 0.0f }, glm::vec3(voxelSize * 100.0f), Color::green());
+								VD::AddWiredBox("temp", { XYZ(position) }, glm::vec3(voxelSize * 100.0f), Color::green());
 							}
 							if (count == mortonCodes.size())
 							{
@@ -1107,7 +1108,7 @@ int main(int argc, char** argv)
 			{
 				auto ray = manipulator->GetCamera()->ScreenPointToRay(event.xpos, event.ypos, w->GetWidth(), w->GetHeight());
 				//VD::Clear("PickingRay");
-				//VD::AddBox("PickingBox", ray.origin, { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
+				//VD::AddBox("PickingBox", ray.origin, { 1.0f, 1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f, 1.0f });
 
 				int hitIndex = -1;
 				float outHit = FLT_MAX;
@@ -1304,16 +1305,6 @@ int main(int argc, char** argv)
 
 #pragma region Status Panel
 	{
-		auto gui = Feather.CreateEntity("Panel");
-
-		auto panel = Feather.CreateComponent<Panel>(gui, "Mouse Position");
-		Feather.CreateEventCallback<MousePositionEvent>(gui, [](Entity entity, const MousePositionEvent& event) {
-			auto component = Feather.GetComponent<Panel>(entity);
-			component->mouseX = event.xpos;
-			component->mouseY = event.ypos;
-			});
-	}
-	{
 		auto gui = Feather.CreateEntity("Status Panel");
 
 		auto statusPanel = Feather.CreateComponent<StatusPanel>(gui);
@@ -1321,6 +1312,81 @@ int main(int argc, char** argv)
 			auto component = Feather.GetComponent<StatusPanel>(entity);
 			component->mouseX = event.xpos;
 			component->mouseY = event.ypos;
+			});
+	}
+
+	{
+		auto entity = Feather.CreateEntity("Control Panel");
+		auto controlPanel = Feather.CreateComponent<ControlPanel>(entity, "Control Panel");
+		controlPanel->AddButton("Generate MortonCodes", 0, 0, [&]() {
+			TS(GenerateMortonCodes);
+
+			auto m = cuInstance.d_mesh.min - make_float3(0.001f, 0.001f, 0.001f);
+			auto M = cuInstance.d_mesh.max + make_float3(0.001f, 0.001f, 0.001f);
+
+			vector<float3> positions(cuInstance.d_mesh.numberOfPoints);
+			CUDA_COPY_D2H(positions.data(), cuInstance.d_mesh.positions, sizeof(float3)* cuInstance.d_mesh.numberOfPoints);
+			CUDA_SYNC();
+
+			vector<uint64_t> mortonCodes;
+			mortonCodes.reserve(positions.size());
+
+			for (const auto& p : positions)
+			{
+				const uint64_t code = MortonCode::FromPosition(p, m, M);
+				mortonCodes.push_back(code);
+			}
+
+			{
+				TS(SortingMortonCode);
+				sort(mortonCodes.begin(), mortonCodes.end());
+				TE(SortingMortonCode);
+			}
+
+			for (auto code : mortonCodes)
+			{
+				const float3 center = MortonCode::ToCellCenter(code, m, M);
+				VD::AddBox("Morton codes", { XYZ(center) }, glm::vec3(0.05f), Color::yellow());
+			}
+
+			{
+				std::vector<uint64_t> codes = mortonCodes; // 기존 배열
+
+				TS(BVH_Build);
+				MortonCode::CodeBVH bvh;
+				bvh.Build(codes.data(), codes.size(), m, M); // m=mesh.min-ε, M=mesh.max+ε (정방화 동일)
+				TE(BVH_Build);
+
+				vector<float3> queries;
+				for (size_t i = 0; i < cuInstance.h_mesh.numberOfPoints; i++)
+				{
+					queries.push_back(cuInstance.h_mesh.positions[i]);
+				}
+
+				TS(NN);
+				for (auto& q : queries)
+				{
+					auto rr = bvh.Nearest(q);
+					if (rr.idx >= 0)
+					{
+						const float3 center = MortonCode::ToCellCenter(rr.code, m, M); // 정방화 규칙 그대로
+						VD::AddLine("NN Morton BVH", { XYZ(q) }, { XYZ(center) }, Color::red());
+					}
+				}
+				TE(NN);
+
+				//const float3 q = cuInstance.d_mesh.min; // 질의점
+				//TS(NN);
+				//auto rr = bvh.Nearest(q);
+				//TE(NN);
+				//// 시각화
+				//if (rr.idx >= 0)
+				//{
+				//	const float3 center = MortonCode::ToCellCenter(rr.code, m, M); // 정방화 규칙 그대로
+				//	VD::AddLine("NN Morton BVH", { XYZ(q) }, { XYZ(center) }, Color::red());
+				//}
+			}
+			TE(GenerateMortonCodes);
 			});
 	}
 #pragma endregion
@@ -1391,7 +1457,7 @@ int main(int argc, char** argv)
 				cameraManipulator->MakeDefault();
 			}
 
-			Feather.CreateEventCallback<KeyEvent>(entity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
+			Feather.CreateEventCallback<KeyEvent>(entity, [](Entity entity, const KeyEvent& event) {
 				auto renderable = Feather.GetComponent<Renderable>(entity);
 				if (nullptr == renderable) return;
 
@@ -1482,6 +1548,8 @@ int main(int argc, char** argv)
 
 			result.Terminate();
 			h_pointCloud.Terminate();
+
+
 		}
 #pragma endregion
 #endif
