@@ -689,6 +689,63 @@ struct MortonCode
         return make_float3((float)cx, (float)cy, (float)cz);
     }
 
+    __host__ __device__ __forceinline__ static double GetCellSize(
+        uint64_t code,
+        const float3 aabbMin,
+        const float3 aabbMax,
+        unsigned int depth)
+    {
+        float domainExtent = 0.0f;
+        const cuAABB dom = GetDomainAABB(aabbMin, aabbMax, domainExtent);
+        if (!(domainExtent > 0.0f))
+        {
+            return 0.0;
+        }
+
+        // µðÄÚµå
+        uint32_t ix, iy, iz;
+        DecodeMorton3D_21b(code, ix, iy, iz);
+
+        // N = 2^21
+        constexpr double N = (double)(1ull << 21);
+        const double cellSize = (double)domainExtent / N;
+        return cellSize;
+    }
+
+    __host__ __device__ __forceinline__ static cuAABB CodeToAABB(
+        uint64_t code,
+        const float3 aabbMin,
+        const float3 aabbMax,
+        unsigned int depth)
+    {
+        float domainExtent = 0.0f;
+        const cuAABB dom = GetDomainAABB(aabbMin, aabbMax, domainExtent);
+
+        if (!(domainExtent > 0.0f))
+        {
+            return { make_float3(0.f, 0.f, 0.f), make_float3(0.f, 0.f, 0.f) };
+        }
+
+        uint32_t ix, iy, iz;
+        DecodeMorton3D_21b(code, ix, iy, iz);
+
+        const unsigned int dim = 1u << depth;
+        const double cellSize = (double)domainExtent / (double)dim;
+
+        const double xmin = (double)dom.min.x + (double)ix * cellSize;
+        const double ymin = (double)dom.min.y + (double)iy * cellSize;
+        const double zmin = (double)dom.min.z + (double)iz * cellSize;
+
+        const double xmax = xmin + cellSize;
+        const double ymax = ymin + cellSize;
+        const double zmax = zmin + cellSize;
+
+        return {
+            make_float3((float)xmin, (float)ymin, (float)zmin),
+            make_float3((float)xmax, (float)ymax, (float)zmax)
+        };
+    }
+
     __host__ __device__ __forceinline__
         static size_t LowerBound(const uint64_t* data, size_t n, uint64_t key)
     {

@@ -18,6 +18,7 @@
     <CudaCompile Include="BitVolume.cu" />
     <ClCompile Include="HalfEdgeMeshInterop.cpp" />
     <CudaCompile Include="HalfEdgeMesh.cu" />
+    <CudaCompile Include="LBVH.cu" />
     <CudaCompile Include="main.cu" />
     <CudaCompile Include="Mesh.cu" />
     <CudaCompile Include="MortonCode.cu" />
@@ -36,6 +37,7 @@
     <ClInclude Include="DenseGrid.hpp" />
     <ClInclude Include="HalfEdgeMesh.cuh" />
     <ClInclude Include="KdTree.hpp" />
+    <ClInclude Include="LBVH.cuh" />
     <ClInclude Include="main.cuh" />
     <ClInclude Include="marching_cubes_constants.cuh" />
     <ClInclude Include="Mesh.cuh" />

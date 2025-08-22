@@ -12,6 +12,7 @@
     <CudaCompile Include="ThrustHalfEdgeMesh.cu" />
     <CudaCompile Include="Octree.cu" />
     <CudaCompile Include="MortonCode.cu" />
+    <CudaCompile Include="LBVH.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\External\glad\src\glad.c" />
@@ -37,6 +38,7 @@
     <ClInclude Include="KdTree.hpp" />
     <ClInclude Include="VoxelKey.hpp" />
     <ClInclude Include="MortonCode.cuh" />
+    <ClInclude Include="LBVH.cuh" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HashMap.hpp" />

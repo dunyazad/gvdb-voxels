@@ -20,6 +20,7 @@
 #include <HalfEdgeMeshInterop.h>
 #include <ThrustHalfEdgeMesh.cuh>
 #include <Octree.cuh>
+#include <LBVH.cuh>
 
 #include <Eigen/Core>
 #include <Eigen/Dense>

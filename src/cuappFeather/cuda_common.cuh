@@ -175,6 +175,47 @@ struct cuAABB
 {
     float3 min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
     float3 max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+    __host__ __device__ __forceinline__
+        void expand(const cuAABB& b)
+    {
+        min.x = fminf(min.x, b.min.x);
+        min.y = fminf(min.y, b.min.y);
+        min.z = fminf(min.z, b.min.z);
+
+        max.x = fmaxf(max.x, b.max.x);
+        max.y = fmaxf(max.y, b.max.y);
+        max.z = fmaxf(max.z, b.max.z);
+    }
+
+    __host__ __device__ __forceinline__
+        bool contains(const float3& p) const
+    {
+        return (p.x >= min.x && p.x <= max.x &&
+            p.y >= min.y && p.y <= max.y &&
+            p.z >= min.z && p.z <= max.z);
+    }
+
+    __host__ __device__ __forceinline__
+        float3 center() const
+    {
+        return make_float3((min.x + max.x) * 0.5f,
+            (min.y + max.y) * 0.5f,
+            (min.z + max.z) * 0.5f);
+    }
+
+    __host__ __device__ __forceinline__ static
+    cuAABB merge(const cuAABB& a, const cuAABB& b)
+    {
+        cuAABB out;
+        out.min = make_float3(fminf(a.min.x, b.min.x),
+            fminf(a.min.y, b.min.y),
+            fminf(a.min.z, b.min.z));
+        out.max = make_float3(fmaxf(a.max.x, b.max.x),
+            fmaxf(a.max.y, b.max.y),
+            fmaxf(a.max.z, b.max.z));
+        return out;
+    }
 };
 
 
