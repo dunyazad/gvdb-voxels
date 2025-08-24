@@ -1594,7 +1594,7 @@ int main(int argc, char** argv)
 #endif
 
 				{
-					int maxDepth = 0;
+					int maxDepth = 32;
 					function<void(LBVHNode*, int)> draw_box;
 					draw_box = [&](LBVHNode* node, int depth) {
 						if (maxDepth < depth) maxDepth = depth;
@@ -1602,16 +1602,20 @@ int main(int argc, char** argv)
 						auto aabbMin = glm::vec3(XYZ(node->aabb.min));
 						auto aabbMax = glm::vec3(XYZ(node->aabb.max));
 						auto center = (aabbMin + aabbMax) * 0.5f;
-						auto cellSize = MortonCode::GetCellSize(node->mortonCode, m, M, depth);
+						auto code = MortonCode::FromPosition(make_float3(XYZ(center)), m, M);
+						auto cellSize = MortonCode::GetCellSize(code, m, M, depth);
 						cellSize = std::fmaxf(cellSize, 0.1f);
 						string tag = "LBVH_" + std::to_string(depth);
+
+						auto boxColor = Color::Lerp(Color::blue(), Color::red(), (float)depth / (float)maxDepth);
+
 						if(0.05f > length(aabbMax - aabbMin))
 						{
-							VD::AddWiredBox(tag, glm::vec3(XYZ(center)), glm::vec3(0.05f, 0.05f, 0.05f), Color::red());
+							VD::AddWiredBox(tag, glm::vec3(XYZ(center)), glm::vec3(0.05f, 0.05f, 0.05f), boxColor);
 						}
 						else
 						{
-							VD::AddWiredBox(tag, { {aabbMin}, {aabbMax} }, Color::green());
+							VD::AddWiredBox(tag, { {aabbMin}, {aabbMax} }, boxColor);
 						}
 						
 						if (UINT32_MAX != node->leftNodeIndex)

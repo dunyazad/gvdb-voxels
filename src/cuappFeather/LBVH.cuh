@@ -26,8 +26,6 @@ struct LBVHNode
     unsigned int leftNodeIndex = UINT32_MAX;
     unsigned int rightNodeIndex = UINT32_MAX;
 
-	uint64_t mortonCode = UINT64_MAX; // 디버그 용도
-
     cuAABB aabb = { make_float3(FLT_MAX,  FLT_MAX,  FLT_MAX),
                     make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX) };
 };
@@ -99,8 +97,6 @@ struct LBVH
         node.leftNodeIndex = UINT32_MAX;
         node.rightNodeIndex = UINT32_MAX;
 
-		node.mortonCode = mortonKey.code; // 디버그 용도
-
         node.aabb = MortonCode::CodeToAABB(
             mortonKey.code,
             aabbMin,
@@ -166,19 +162,6 @@ struct LBVH
         }
     }
 
-    //// -------------------- 공통 유틸 --------------------
-    //static unsigned FindRoot(const LBVHNode* nodes, unsigned N) {
-    //    unsigned root = UINT32_MAX;
-    //    for (unsigned i = 0; i < N - 1; i++) {
-    //        if (nodes[i].parentNodeIndex == UINT32_MAX) {
-    //            printf("Candidate root: %u\n", i);
-    //            if (root == UINT32_MAX) root = i;
-    //            else printf("Multiple roots detected!\n");
-    //        }
-    //    }
-    //    return root;
-    //}
-
     static unsigned int CountLeadingZeros64(uint64_t x)
     {
         if (x == 0) return 64;
@@ -200,7 +183,6 @@ struct LBVH
         return CountLeadingZeros64(a.code ^ b.code);
     }
 
-    // -------------------- FindRange (정석) --------------------
     static void FindRange(
         const MortonKey* mortonKeys,
         unsigned int numCodes,
@@ -276,7 +258,6 @@ struct LBVH
         last = jdx;
     }
 
-    // -------------------- FindSplit (정석) --------------------
     static unsigned int FindSplit(
         const MortonKey* mortonKeys,
         unsigned int first,
