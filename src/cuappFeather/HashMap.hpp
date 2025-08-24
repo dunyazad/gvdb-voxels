@@ -101,6 +101,7 @@ struct HashMap
                 // ÇÊ¿ä ½Ã atomicExch(&info.entries[slot].value, value);
                 info.entries[slot].value = value;
                 return true;
+
             }
 
             if (k == empty_key<Key>())

@@ -1422,73 +1422,112 @@ int main(int argc, char** argv)
 			CUDA_COPY_D2H(positions.data(), cuInstance.d_mesh.positions, sizeof(float3) * cuInstance.d_mesh.numberOfPoints);
 			CUDA_SYNC();
 
-			vector<uint64_t> mortonCodes;
-			mortonCodes.reserve(positions.size());
+			vector<MortonKey> mortonKeys;
+			mortonKeys.reserve(positions.size());
 
-			unsigned int maxCount = 0;
-			uint64_t maxCode = 0;
-			map<uint64_t, vector<unsigned int>> counts;
-			for (size_t i = 0; i < positions.size(); i++)
 			{
-				auto& p = positions[i];
-
-				const uint64_t code = MortonCode::FromPosition(p, m, M);
-				mortonCodes.push_back(code);
-
-				counts[code].push_back(i);
-
-				if (counts[code].size() > maxCount)
+				ifstream tempIn("morton.bin", ios::binary);
+				if (tempIn.is_open())
 				{
-					maxCount = counts[code].size();
-					maxCode = code;
+					uint64_t code;
+					unsigned int index;
+					while (tempIn.read((char*)&code, sizeof(uint64_t)))
+					{
+						tempIn.read((char*)&index, sizeof(unsigned int));
+						mortonKeys.push_back({ code, index });
+					}
+					tempIn.close();
+				}
+				else
+				{
+					unsigned int maxCount = 0;
+					uint64_t maxCode = 0;
+					map<uint64_t, vector<unsigned int>> counts;
+					for (size_t i = 0; i < positions.size(); i++)
+					{
+						auto& p = positions[i];
+
+						const uint64_t code = MortonCode::FromPosition(p, m, M);
+						mortonKeys.push_back({ code, (unsigned int)i });
+
+						counts[code].push_back(i);
+
+						if (counts[code].size() > maxCount)
+						{
+							maxCount = counts[code].size();
+							maxCode = code;
+						}
+					}
+
+					printf("========= Max Count : %d ==========\n", maxCount);
+					for (size_t i = 0; i < counts[maxCode].size(); i++)
+					{
+						auto index = counts[maxCode][i];
+						auto& p = positions[index];
+						printf("postion : %f, %f, %f\n", XYZ(p));
+
+						if (i == 0)
+						{
+							auto entity = Feather.GetEntityByName("Camera");
+							auto camera = Feather.GetComponent<PerspectiveCamera>(entity);
+							auto manipulator = Feather.GetComponent<CameraManipulatorTrackball>(entity);
+
+							auto eye = camera->GetEye();
+							auto target = camera->GetTarget();
+							auto direction = glm::normalize(target - eye);
+
+							camera->SetTarget({ XYZ(p) });
+							camera->SetEye(glm::vec3(XYZ(p)) + (-direction) * manipulator->GetRadius());
+						}
+					}
+
+					ofstream tempOut("morton.bin", ios::binary);
+					for (size_t i = 0; i < mortonKeys.size(); i++)
+					{
+						auto& key = mortonKeys[i];
+						tempOut.write((char*)&key.code, sizeof(uint64_t));
+						tempOut.write((char*)&key.index, sizeof(unsigned int));
+					}
+					tempOut.close();
 				}
 			}
 
-			printf("========= Max Count : %d ==========\n", maxCount);
-			for (size_t i = 0; i < counts[maxCode].size(); i++)
-			{
-				auto index = counts[maxCode][i];
-				auto& p = positions[index];
-				printf("postion : %f, %f, %f\n", XYZ(p));
-
-				if (i == 0)
-				{
-					auto entity = Feather.GetEntityByName("Camera");
-					auto camera = Feather.GetComponent<PerspectiveCamera>(entity);
-					auto manipulator = Feather.GetComponent<CameraManipulatorTrackball>(entity);
-
-					auto eye = camera->GetEye();
-					auto target = camera->GetTarget();
-					auto direction = glm::normalize(target - eye);
-
-					camera->SetTarget({ XYZ(p) });
-					camera->SetEye(glm::vec3(XYZ(p)) + (-direction) * manipulator->GetRadius());
-				}
-			}
 			
-			vector<float3> inputPositions;
-			//inputPositions.push_back((cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f);
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
+			//vector<float3> inputPositions;
+			////inputPositions.push_back((cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f);
+			////inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
+			////inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
+			////inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
+			////inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
+			////inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
+			////inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
+			////inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
+			////inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
+			//for (size_t i = 0; i < cuInstance.h_mesh.numberOfPoints; i++)
+			//{
+			//	inputPositions.push_back(cuInstance.h_mesh.positions[i]);
+			//}
 
-			for (size_t i = 0; i < cuInstance.h_mesh.numberOfPoints; i++)
 			{
-				inputPositions.push_back(cuInstance.h_mesh.positions[i]);
-			}
-
-			{
-				sort(mortonCodes.begin(), mortonCodes.end());
+				sort(mortonKeys.begin(), mortonKeys.end());
 
 				TS(BVH_INIT);
 				LBVH bvh;
-				bvh.Initialize(mortonCodes, m, M);
+				bvh.Initialize(mortonKeys, m, M);
 				TE(BVH_INIT);
+
+				//{
+				//	uint64_t temp[30];
+				//	for (size_t i = 0; i < 30; i++)
+				//	{
+				//		printf("%llu\n", mortonCodes[i]);
+				//		temp[i] = mortonCodes[i];
+				//	}
+
+				//	unsigned int rangeStart = 0, rangeEnd = 0;
+				//	LBVH::FindRange(temp, 30, 0, rangeStart, rangeEnd);
+				//	printf("FindRange(0) : [%u, %u]\n", rangeStart, rangeEnd);
+				//}
 
 //InitialzeNodes Validation			
 #if 0
@@ -1547,7 +1586,7 @@ int main(int argc, char** argv)
 							}
 							else
 							{
-								//printf("ok\n");
+								printf("ok\n");
 							}
 						}
 					}
@@ -1555,8 +1594,44 @@ int main(int argc, char** argv)
 #endif
 
 				{
+					int maxDepth = 0;
+					function<void(LBVHNode*, int)> draw_box;
+					draw_box = [&](LBVHNode* node, int depth) {
+						if (maxDepth < depth) maxDepth = depth;
+
+						auto aabbMin = glm::vec3(XYZ(node->aabb.min));
+						auto aabbMax = glm::vec3(XYZ(node->aabb.max));
+						auto center = (aabbMin + aabbMax) * 0.5f;
+						auto cellSize = MortonCode::GetCellSize(node->mortonCode, m, M, depth);
+						cellSize = std::fmaxf(cellSize, 0.1f);
+						string tag = "LBVH_" + std::to_string(depth);
+						if(0.05f > length(aabbMax - aabbMin))
+						{
+							VD::AddWiredBox(tag, glm::vec3(XYZ(center)), glm::vec3(0.05f, 0.05f, 0.05f), Color::red());
+						}
+						else
+						{
+							VD::AddWiredBox(tag, { {aabbMin}, {aabbMax} }, Color::green());
+						}
+						
+						if (UINT32_MAX != node->leftNodeIndex)
+							draw_box(&bvh.nodes[node->leftNodeIndex], depth + 1);
+						if (UINT32_MAX != node->rightNodeIndex)
+							draw_box(&bvh.nodes[node->rightNodeIndex], depth + 1);
+						};
+					LBVHNode* root = &bvh.nodes[0];
+					draw_box(root, 0);
+
+					for (size_t i = 0; i < maxDepth; i++)
+					{
+						string name = "LBVH_" + std::to_string(i);
+						VD::AddToSelectionList(name);
+					}
+				}
+
+				{
 					TS(BVH_VALIDATE);
-					bool ok = bvh.ValidateBVH(bvh.nodes, (unsigned int)mortonCodes.size());
+					bool ok = bvh.ValidateBVH(bvh.nodes, (unsigned int)mortonKeys.size());
 					if (!ok) {
 						printf("LBVH build failed validation!\n");
 					}

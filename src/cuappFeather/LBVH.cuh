@@ -6,11 +6,27 @@
 
 #include <stack>
 
+struct MortonKey
+{
+    uint64_t code;
+    unsigned int index; // 원래 객체 인덱스
+
+    bool operator<(const MortonKey& other) const
+    {
+        if (code == other.code)
+            return index < other.index;
+        else
+            return code < other.code;
+    }
+};
+
 struct LBVHNode
 {
     unsigned int parentNodeIndex = UINT32_MAX;
     unsigned int leftNodeIndex = UINT32_MAX;
     unsigned int rightNodeIndex = UINT32_MAX;
+
+	uint64_t mortonCode = UINT64_MAX; // 디버그 용도
 
     cuAABB aabb = { make_float3(FLT_MAX,  FLT_MAX,  FLT_MAX),
                     make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX) };
@@ -21,9 +37,9 @@ struct LBVH
     LBVHNode* nodes = nullptr;
     unsigned int allocatedNodes = 0;
 
-    void Initialize(const std::vector<uint64_t>& mortonCodes, float3 aabbMin, float3 aabbMax)
+    void Initialize(const std::vector<MortonKey>& mortonKeys, float3 aabbMin, float3 aabbMax)
     {
-        unsigned int n = (unsigned int)mortonCodes.size();
+        unsigned int n = (unsigned int)mortonKeys.size();
         allocatedNodes = 2 * n - 1;
         nodes = new LBVHNode[allocatedNodes];
 
@@ -32,23 +48,31 @@ struct LBVH
         {
             InitializeLeafNodes(
                 n - 1 + i,
-                mortonCodes[i],
+                mortonKeys[i],
                 nodes,
                 aabbMin,
                 aabbMax
             );
         }
 
+        //unsigned root = FindRoot(nodes, n);
+
         // Internal nodes: [0, n-2]
         for (unsigned int i = 0; i < n - 1; i++)
         {
             InitializeInternalNodes(
                 i,
-                mortonCodes.data(),
+                mortonKeys.data(),
                 n,
                 nodes
             );
         }
+
+        //for (unsigned i = 0; i < n - 1; i++) {
+        //    if (nodes[i].parentNodeIndex == UINT32_MAX) {
+        //        printf("Candidate root: %u\n", i);
+        //    }
+        //}
 
         RefitAABB(nodes, n);
     }
@@ -62,8 +86,9 @@ struct LBVH
         }
     }
 
-    static void InitializeLeafNodes(unsigned int leafNodeIndex,
-        uint64_t mortonCode,
+    static void InitializeLeafNodes(
+        unsigned int leafNodeIndex,
+        const MortonKey& mortonKey,
         LBVHNode* nodes,
         const float3& aabbMin,
         const float3& aabbMax)
@@ -74,8 +99,10 @@ struct LBVH
         node.leftNodeIndex = UINT32_MAX;
         node.rightNodeIndex = UINT32_MAX;
 
+		node.mortonCode = mortonKey.code; // 디버그 용도
+
         node.aabb = MortonCode::CodeToAABB(
-            mortonCode,
+            mortonKey.code,
             aabbMin,
             aabbMax,
             MortonCode::GetMaxDepth()
@@ -84,54 +111,73 @@ struct LBVH
 
     static void InitializeInternalNodes(
         unsigned int internalIndex,
-        const uint64_t* mortonCodes,
+        const MortonKey* mortonKeys,
         unsigned int numberOfMortonCodes,
         LBVHNode* nodes)
     {
-        // 1) 이 내부 노드가 커버하는 [first, last]를 구함
+        // 내부 노드 마커
+        //nodes[internalIndex].objectIndex = 0xFFFFFFFF;
+
+        // 1) 범위 찾기 (determine_range 대응)
         unsigned int first, last;
-        FindRange(mortonCodes, numberOfMortonCodes, internalIndex, first, last);
+        FindRange(mortonKeys, numberOfMortonCodes, internalIndex, first, last);
 
-        // 2) 그 범위 안에서 split 찾기
-        unsigned int split = FindSplit(mortonCodes, first, last);
+        // 2) split 찾기 (find_split 대응)
+        unsigned int split = FindSplit(mortonKeys, first, last);
 
-        // 3) 왼/오 자식 인덱스 계산 (internal vs leaf 오프셋 구분)
-        unsigned int leftIndex = (split == first)
-            ? (numberOfMortonCodes - 1) + split      // leaf
-            : split;                                  // internal
+        // 3) 자식 인덱스 계산
+        unsigned int leftIndex = split;
+        unsigned int rightIndex = split + 1;
 
-        unsigned int rightIndex = (split + 1 == last)
-            ? (numberOfMortonCodes - 1) + (split + 1) // leaf
-            : (split + 1);                             // internal
-
-        // 4) 부모-자식 연결 (중복 부모 방지: 이미 부모가 있으면 충돌)
-        if (nodes[leftIndex].parentNodeIndex == UINT32_MAX)
-            nodes[leftIndex].parentNodeIndex = internalIndex;
-        else {
-            // 디버그 용도: 같은 리프/내부가 두 번 붙으려 하면 여기서 바로 발견됨
-            // printf("Parent conflict: left child %u already has parent %u (new %u)\n",
-            //        leftIndex, nodes[leftIndex].parentNodeIndex, internalIndex);
+        if (std::min(first, last) == split)
+        {
+            leftIndex += numberOfMortonCodes - 1;
+        }
+        if (std::max(first, last) == split + 1)
+        {
+            rightIndex += numberOfMortonCodes - 1;
         }
 
-        if (nodes[rightIndex].parentNodeIndex == UINT32_MAX)
-            nodes[rightIndex].parentNodeIndex = internalIndex;
-        else {
-            // printf("Parent conflict: right child %u already has parent %u (new %u)\n",
-            //        rightIndex, nodes[rightIndex].parentNodeIndex, internalIndex);
-        }
-
+        // 4) 부모-자식 연결
         nodes[internalIndex].leftNodeIndex = leftIndex;
         nodes[internalIndex].rightNodeIndex = rightIndex;
 
-        // AABB 초기화
-        nodes[internalIndex].aabb = {
-            make_float3(FLT_MAX,  FLT_MAX,  FLT_MAX),
-            make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX)
-        };
+        if (UINT32_MAX != nodes[leftIndex].parentNodeIndex)
+        {
+            printf("Error: left child %u already has parent %u (new parent %u)\n",
+				leftIndex, nodes[leftIndex].parentNodeIndex, internalIndex);
 
-        // 루트는 ‘부모가 한 번도 세팅되지 않은 내부 노드’가 자동으로 남습니다.
-        // 내부 노드의 parentNodeIndex는 기본값(UINT32_MAX) 그대로 두세요.
+            return;
+        }
+        else
+        {
+            nodes[leftIndex].parentNodeIndex = internalIndex;
+        }
+        if (UINT32_MAX != nodes[rightIndex].parentNodeIndex)
+        {
+			printf("Error: right child %u already has parent %u (new parent %u)\n",
+                rightIndex, nodes[rightIndex].parentNodeIndex, internalIndex);
+
+            return;
+		}
+        else
+        {
+            nodes[rightIndex].parentNodeIndex = internalIndex;
+        }
     }
+
+    //// -------------------- 공통 유틸 --------------------
+    //static unsigned FindRoot(const LBVHNode* nodes, unsigned N) {
+    //    unsigned root = UINT32_MAX;
+    //    for (unsigned i = 0; i < N - 1; i++) {
+    //        if (nodes[i].parentNodeIndex == UINT32_MAX) {
+    //            printf("Candidate root: %u\n", i);
+    //            if (root == UINT32_MAX) root = i;
+    //            else printf("Multiple roots detected!\n");
+    //        }
+    //    }
+    //    return root;
+    //}
 
     static unsigned int CountLeadingZeros64(uint64_t x)
     {
@@ -145,197 +191,125 @@ struct LBVH
 #endif
     }
 
-    static unsigned int CommonPrefixLength(uint64_t a, uint64_t b)
+    static unsigned int CommonPrefixLength(const MortonKey& a, const MortonKey& b)
     {
-        if (a == b) return 64;
-        return CountLeadingZeros64(a ^ b);
+        if (a.code == b.code) {
+            // 코드가 같으면 index 비교로 유일성 확보
+            return 64 + (a.index == b.index ? 32 : CountLeadingZeros64((uint64_t)(a.index ^ b.index)));
+        }
+        return CountLeadingZeros64(a.code ^ b.code);
     }
 
-    static unsigned int FindRange(
-        const uint64_t* mortonCodes,
-        unsigned int numberOfMortonCodes,
-        unsigned int nodeIndex,
-        unsigned int& rangeStart,
-        unsigned int& rangeEnd)
+    // -------------------- FindRange (정석) --------------------
+    static void FindRange(
+        const MortonKey* mortonKeys,
+        unsigned int numCodes,
+        unsigned int index,
+        unsigned int& first,
+        unsigned int& last)
     {
-        if (nodeIndex >= numberOfMortonCodes - 1) {
-            rangeStart = nodeIndex;
-            rangeEnd = nodeIndex;
-            return 0;
+        if (index == 0)
+        {
+            // 루트는 전체 범위
+            first = 0;
+            last = numCodes - 1;
+            return;
         }
 
-        // -----------------------
-        // 1. 방향 결정
-        // -----------------------
-        int direction = 0;
-        if (nodeIndex == 0) {
-            direction = 1;
-        }
-        else if (nodeIndex == numberOfMortonCodes - 1) {
-            direction = -1;
-        }
-        else {
-            int prefixWithNext = (int)CommonPrefixLength(mortonCodes[nodeIndex], mortonCodes[nodeIndex + 1]);
-            int prefixWithPrev = (int)CommonPrefixLength(mortonCodes[nodeIndex], mortonCodes[nodeIndex - 1]);
-            direction = (prefixWithNext > prefixWithPrev) ? 1 : -1;
-        }
+        // 기준 코드
+        const MortonKey& key = mortonKeys[index];
 
-        // -----------------------
-        // 2. 기준 prefix
-        // -----------------------
-        unsigned int minPrefix = CommonPrefixLength(
-            mortonCodes[nodeIndex],
-            mortonCodes[nodeIndex + direction]);
+        // 좌/우 prefix 길이
+        const int L_delta = CommonPrefixLength(key, mortonKeys[index - 1]);
+        const int R_delta = CommonPrefixLength(key, mortonKeys[index + 1]);
+        const int direction = (R_delta > L_delta) ? 1 : -1;
 
-        // -----------------------
-        // 3. 한쪽으로 최대 확장
-        // -----------------------
-        int maxStep = 2;
-        while (true) {
-            int testIndex = (int)nodeIndex + maxStep * direction;
-            if (testIndex < 0 || testIndex >= (int)numberOfMortonCodes) break;
-            unsigned int testPrefix = CommonPrefixLength(mortonCodes[nodeIndex], mortonCodes[testIndex]);
-            if (testPrefix < minPrefix) break;
-            maxStep *= 2;
+        // 최소 공통 prefix
+        const int delta_min = std::min(L_delta, R_delta);
+
+        // 지수적 확장
+        int l_max = 2;
+        int delta = -1;
+        int j = index + direction * l_max;
+        if (0 <= j && j < (int)numCodes)
+        {
+            delta = CommonPrefixLength(key, mortonKeys[j]);
         }
-
-        int step = 0;
-        for (int t = maxStep / 2; t >= 1; t /= 2) {
-            int testIndex = (int)nodeIndex + (step + t) * direction;
-            if (testIndex >= 0 && testIndex < (int)numberOfMortonCodes) {
-                unsigned int testPrefix = CommonPrefixLength(mortonCodes[nodeIndex], mortonCodes[testIndex]);
-                if (testPrefix >= minPrefix) step += t;
+        while (delta > delta_min)
+        {
+            l_max <<= 1;
+            j = index + direction * l_max;
+            delta = -1;
+            if (0 <= j && j < (int)numCodes)
+            {
+                delta = CommonPrefixLength(key, mortonKeys[j]);
             }
         }
 
-        int endIndex = (int)nodeIndex + step * direction;
-
-        // -----------------------
-        // 4. 반대쪽 확장 추가
-        // -----------------------
-        int otherEnd = nodeIndex;
-        while (otherEnd - direction >= 0 &&
-            otherEnd - direction < (int)numberOfMortonCodes &&
-            CommonPrefixLength(mortonCodes[nodeIndex], mortonCodes[otherEnd - direction]) >= minPrefix)
+        // 이진 탐색
+        int l = 0;
+        int t = l_max >> 1;
+        while (t > 0)
         {
-            otherEnd -= direction;
+            j = index + (l + t) * direction;
+            delta = -1;
+            if (0 <= j && j < (int)numCodes)
+            {
+                delta = CommonPrefixLength(key, mortonKeys[j]);
+            }
+            if (delta > delta_min)
+            {
+                l += t;
+            }
+            t >>= 1;
         }
 
-        // -----------------------
-        // 5. 구간 정리
-        // -----------------------
-        if (direction == 1) {
-            rangeStart = (unsigned int)otherEnd;
-            rangeEnd = (unsigned int)endIndex;
-        }
-        else {
-            rangeStart = (unsigned int)endIndex;
-            rangeEnd = (unsigned int)otherEnd;
+        unsigned int jdx = index + l * direction;
+
+        if (direction < 0)
+        {
+            // idx < jdx 보장
+            std::swap(index, jdx);
         }
 
-        return 1;
+        first = index;
+        last = jdx;
     }
 
-
-    // nodeIndex를 포함하는 구간 [rs, re]를
-    // brute force로 직접 확장해서 찾는다.
-    static unsigned int BruteForceRange(
-        const uint64_t* codes,
-        unsigned int n,
-        unsigned int nodeIndex,
-        unsigned int& rs,
-        unsigned int& re)
-    {
-        if (n == 0) {
-            rs = re = 0;
-            return 0;
-        }
-
-        // 현재 노드와 자기 자신 prefix
-        unsigned int minPrefix = 64; // 최대 prefix
-        if (nodeIndex < n - 1) {
-            minPrefix = CommonPrefixLength(codes[nodeIndex], codes[nodeIndex + 1]);
-        }
-        if (nodeIndex > 0) {
-            unsigned int prevPrefix = CommonPrefixLength(codes[nodeIndex], codes[nodeIndex - 1]);
-            if (prevPrefix > minPrefix) minPrefix = prevPrefix;
-        }
-
-        // 왼쪽 확장
-        int left = (int)nodeIndex;
-        while (left > 0 &&
-            CommonPrefixLength(codes[nodeIndex], codes[left - 1]) >= minPrefix)
-        {
-            left--;
-        }
-
-        // 오른쪽 확장
-        int right = (int)nodeIndex;
-        while (right < (int)n - 1 &&
-            CommonPrefixLength(codes[nodeIndex], codes[right + 1]) >= minPrefix)
-        {
-            right++;
-        }
-
-        rs = (unsigned int)left;
-        re = (unsigned int)right;
-        return 1;
-    }
-
+    // -------------------- FindSplit (정석) --------------------
     static unsigned int FindSplit(
-        const uint64_t* mortonCodes,
+        const MortonKey* mortonKeys,
         unsigned int first,
         unsigned int last)
     {
-        uint64_t firstCode = mortonCodes[first];
-        uint64_t lastCode = mortonCodes[last];
+        const MortonKey& firstKey = mortonKeys[first];
+        const MortonKey& lastKey = mortonKeys[last];
 
-        if (firstCode == lastCode) return (first + last) >> 1;
+        //// 모든 코드가 동일한 경우 중앙값 반환
+        //if (firstKey == lastKey)
+        //{
+        //    return (first + last) >> 1;
+        //}
 
-        unsigned int commonPrefix = CommonPrefixLength(firstCode, lastCode);
+        const int delta_node = CommonPrefixLength(firstKey, lastKey);
 
-        // Binary search
-        unsigned int split = first;
-        unsigned int step = last - first;
-
-        do {
-            step = (step + 1) >> 1; // 절반 줄이기
-            unsigned int newSplit = split + step;
-            if (newSplit < last) {
-                uint64_t splitCode = mortonCodes[newSplit];
-                unsigned int splitPrefix = CommonPrefixLength(firstCode, splitCode);
-                if (splitPrefix > commonPrefix) {
-                    split = newSplit;
+        // binary search...
+        int split = first;
+        int stride = last - first;
+        do
+        {
+            stride = (stride + 1) >> 1;
+            const int middle = split + stride;
+            if (middle < (int)last)
+            {
+                const int delta = CommonPrefixLength(firstKey, mortonKeys[middle]);
+                if (delta > delta_node)
+                {
+                    split = middle;
                 }
             }
-        } while (step > 1);
+        } while (stride > 1);
 
-        return split;
-    }
-
-    static unsigned int FindSplitBruteForce(
-        const uint64_t* mortonCodes,
-        unsigned int first,
-        unsigned int last)
-    {
-        uint64_t firstCode = mortonCodes[first];
-        uint64_t lastCode = mortonCodes[last];
-
-        if (firstCode == lastCode)
-            return (first + last) >> 1;
-
-        unsigned int commonPrefix = CommonPrefixLength(firstCode, lastCode);
-
-        unsigned int split = first;
-        for (unsigned int i = first; i < last; i++) {
-            unsigned int prefix = CommonPrefixLength(firstCode, mortonCodes[i]);
-            if (prefix > commonPrefix) {
-                split = i;
-            }
-            else {
-                break; // prefix가 줄어들면 멈춤
-            }
-        }
         return split;
     }
 
@@ -523,340 +497,5 @@ struct LBVH
             if (!visited[i]) { printf("Error: node %u is disconnected from root!\n", i); return false; }
         }
         return true;
-    }
-
-    static void DebugValidateRange(
-        unsigned int nodeIndex,
-        unsigned int first,
-        unsigned int last,
-        const uint64_t* mortonCodes,
-        unsigned int n)
-    {
-        if (first >= n || last >= n || nodeIndex >= n)
-        {
-            printf("FindRange Error: invalid range [%u,%u] for node %u (n=%u)\n",
-                first, last, nodeIndex, n);
-            return;
-        }
-
-        // 기준 prefix 길이 (nodeIndex와 first/last 비교)
-        unsigned int expectedPrefix = CommonPrefixLength(
-            mortonCodes[first],
-            mortonCodes[last]
-        );
-
-
-        for (unsigned int i = first; i <= last; i++)
-        {
-            unsigned int prefix = CommonPrefixLength(mortonCodes[first], mortonCodes[i]);
-            if (prefix < expectedPrefix)
-            {
-                printf("FindRange Warning: node %u range [%u,%u] "
-                    "has element %u with smaller prefix %u (expected >= %u)\n",
-                    nodeIndex, first, last, i, prefix, expectedPrefix);
-            }
-        }
-    }
-
-    // ============================
-// ===== Validation / Tests ===
-// ============================
-    static bool NearlyLE(float a, float b, float eps = 1e-5f)
-    {
-        return a <= b + eps;
-    }
-
-    static bool AABBContains(const cuAABB& outer, const cuAABB& inner, float eps = 1e-5f)
-    {
-        return NearlyLE(outer.min.x, inner.min.x, eps) &&
-            NearlyLE(outer.min.y, inner.min.y, eps) &&
-            NearlyLE(outer.min.z, inner.min.z, eps) &&
-            NearlyLE(inner.max.x, outer.max.x, eps) &&
-            NearlyLE(inner.max.y, outer.max.y, eps) &&
-            NearlyLE(inner.max.z, outer.max.z, eps);
-    }
-
-    static bool Test_CountLeadingZeros64()
-    {
-        bool ok = true;
-        ok = ok && (CountLeadingZeros64(0ull) == 64);
-        ok = ok && (CountLeadingZeros64(1ull << 63) == 0);
-        ok = ok && (CountLeadingZeros64(1ull << 0) == 63);
-        ok = ok && (CountLeadingZeros64((1ull << 62) | (1ull << 10)) == 1);
-        if (!ok) { printf("[TEST] CountLeadingZeros64 failed\n"); }
-        return ok;
-    }
-
-    static bool Test_CommonPrefixLength()
-    {
-        bool ok = true;
-        uint64_t a = 0xFFFF000000000000ull;
-        uint64_t b = 0xFFFF800000000000ull; // XOR 상위 비트 0..?
-        uint64_t c = 0xFFFE000000000000ull;
-
-        unsigned pab = CommonPrefixLength(a, b);
-        unsigned pac = CommonPrefixLength(a, c);
-        ok = ok && (pab > pac); // b가 a와 더 긴 prefix를 가정
-
-        // 동일 값이면 64
-        ok = ok && (CommonPrefixLength(a, a) == 64);
-
-        // 전혀 다른 값
-        ok = ok && (CommonPrefixLength(0ull, ~0ull) == 0);
-
-        if (!ok) { printf("[TEST] CommonPrefixLength failed\n"); }
-        return ok;
-    }
-
-    // 모든 i(0..n-2)에 대해 FindRange가 반환한 [first,last]의 prefix 불변식 확인
-    static bool Test_FindRange_All(const std::vector<uint64_t>& codes)
-    {
-        const unsigned n = (unsigned)codes.size();
-        if (n < 2) return true; // n=0,1은 내부 노드 없음
-
-        for (unsigned i = 0; i < n - 1; ++i)
-        {
-            unsigned first = 0, last = 0;
-            FindRange(codes.data(), n, i, first, last);
-
-            if (!(first <= i && i <= last))
-            {
-                printf("[TEST] FindRange: node %u not in range [%u,%u]\n", i, first, last);
-                return false;
-            }
-
-            // 기대 prefix = CPL(first, last)
-            unsigned expectedPrefix = CommonPrefixLength(codes[first], codes[last]);
-
-            for (unsigned k = first; k <= last; ++k)
-            {
-                unsigned pk = CommonPrefixLength(codes[first], codes[k]);
-                if (pk < expectedPrefix)
-                {
-                    printf("[TEST] FindRange: node %u range [%u,%u] has idx %u with prefix %u (expected >= %u)\n",
-                        i, first, last, k, pk, expectedPrefix);
-                    return false;
-                }
-            }
-
-            // 경계 바깥은 기대 prefix를 만족하지 않아야 함(가능한 경우)
-            if (first > 0)
-            {
-                unsigned pL = CommonPrefixLength(codes[first - 1], codes[first]);
-                if (pL >= expectedPrefix && codes[first - 1] != codes[first])
-                {
-                    printf("[TEST] FindRange: left boundary too small (idx=%u)\n", i);
-                    return false;
-                }
-            }
-            if (last + 1 < n)
-            {
-                unsigned pR = CommonPrefixLength(codes[first], codes[last + 1]);
-                if (pR >= expectedPrefix && codes[last + 1] != codes[first])
-                {
-                    printf("[TEST] FindRange: right boundary too large (idx=%u)\n", i);
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    // [first,last]에 대한 FindSplit 특성 확인 (Karras 2012)
-    static bool Test_FindSplit_OnRange(const std::vector<uint64_t>& codes, unsigned first, unsigned last)
-    {
-        if (first >= last) return true;
-
-        unsigned split = FindSplit(codes.data(), first, last);
-        if (!(first <= split && split < last))
-        {
-            printf("[TEST] FindSplit: split %u not in [%u,%u]\n", split, first, last);
-            return false;
-        }
-
-        uint64_t firstCode = codes[first];
-        uint64_t lastCode = codes[last];
-
-        if (firstCode == lastCode)
-        {
-            // 동일 코드 구간이면 split은 단순 중간값이 되는지(엄격 검증은 아님)
-            unsigned mid = (first + last) >> 1;
-            if (split != mid)
-            {
-                // 같은 코드가 길게 이어지는 구간에서는 정확히 mid가 아닐 수 있으므로 경고만
-                // 필요하다면 실패로 간주하려면 아래를 false로 바꾸세요.
-                // printf("[TEST] FindSplit: equal-code range split=%u mid=%u (warn)\n", split, mid);
-            }
-            return true;
-        }
-
-        unsigned commonPrefix = CommonPrefixLength(firstCode, lastCode);
-
-        // Karras 성질: k ∈ [first..split] => CPL(first, k) > commonPrefix
-        for (unsigned k = first; k <= split; ++k)
-        {
-            unsigned pk = CommonPrefixLength(firstCode, codes[k]);
-            if (!(pk > commonPrefix))
-            {
-                printf("[TEST] FindSplit: left side k=%u prefix=%u (need > %u)\n", k, pk, commonPrefix);
-                return false;
-            }
-        }
-        // k ∈ [split+1..last] => CPL(first, k) <= commonPrefix
-        for (unsigned k = split + 1; k <= last; ++k)
-        {
-            unsigned pk = CommonPrefixLength(firstCode, codes[k]);
-            if (pk > commonPrefix)
-            {
-                printf("[TEST] FindSplit: right side k=%u prefix=%u (need <= %u)\n", k, pk, commonPrefix);
-                return false;
-            }
-        }
-        return true;
-    }
-
-    static bool Test_FindSplit_All(const std::vector<uint64_t>& codes)
-    {
-        const unsigned n = (unsigned)codes.size();
-        if (n < 2) return true;
-
-        for (unsigned i = 0; i < n - 1; ++i)
-        {
-            unsigned first = 0, last = 0;
-            FindRange(codes.data(), n, i, first, last);
-            if (!Test_FindSplit_OnRange(codes, first, last))
-            {
-                printf("[TEST] FindSplit_All failed at node %u [range %u,%u]\n", i, first, last);
-                return false;
-            }
-        }
-        return true;
-    }
-
-    // 전체 BVH 빌드/검증 (Initialize + Validate + ExtraValidate + RefitAABB 포함)
-    static bool Test_BuildAndValidate(const std::vector<uint64_t>& codes)
-    {
-        if (codes.empty())
-        {
-            return true;
-        }
-
-        // AABB 입력(임의): MortonCode::GetMaxDepth()와 CodeToAABB가 유효하다고 가정
-        float3 aabbMin = make_float3(0, 0, 0);
-        float3 aabbMax = make_float3(1, 1, 1);
-
-        LBVH bvh;
-        bvh.Initialize(codes, aabbMin, aabbMax);
-
-        const unsigned n = (unsigned)codes.size();
-        if (!ValidateBVH(bvh.nodes, n))
-        {
-            printf("[TEST] ValidateBVH failed\n");
-            bvh.Terminate();
-            return false;
-        }
-        if (!ExtraValidate(bvh.nodes, n))
-        {
-            printf("[TEST] ExtraValidate failed\n");
-            bvh.Terminate();
-            return false;
-        }
-
-        // AABB refit 이후 부모 AABB가 자식 AABB를 포함하는지 확인
-        const unsigned total = 2u * n - 1u;
-        const unsigned leafBegin = n - 1u;
-
-        for (unsigned i = 0; i < leafBegin; ++i)
-        {
-            unsigned L = bvh.nodes[i].leftNodeIndex;
-            unsigned R = bvh.nodes[i].rightNodeIndex;
-            if (L == UINT32_MAX || R == UINT32_MAX)
-            {
-                printf("[TEST] Node %u children invalid\n", i);
-                bvh.Terminate();
-                return false;
-            }
-            const cuAABB& a = bvh.nodes[i].aabb;
-            const cuAABB& la = bvh.nodes[L].aabb;
-            const cuAABB& ra = bvh.nodes[R].aabb;
-
-            if (!AABBContains(a, la) || !AABBContains(a, ra))
-            {
-                printf("[TEST] AABB containment failed at node %u\n", i);
-                bvh.Terminate();
-                return false;
-            }
-        }
-
-        bvh.Terminate();
-        return true;
-    }
-
-    // 다양한 패턴의 Morton code 집합에 대해 전체 테스트 수행
-    static bool RunUnitTests()
-    {
-        bool ok = true;
-
-        // 1) 기본 유틸리티
-        ok = ok && Test_CountLeadingZeros64();
-        ok = ok && Test_CommonPrefixLength();
-
-        // 2) 단조 증가 시퀀스
-        {
-            std::vector<uint64_t> codes;
-            for (uint64_t i = 0; i < 512; ++i)
-            {
-                codes.push_back(i << 16); // 상위 비트에 차이를 두어 CPL 분포 확보
-            }
-            ok = ok && Test_FindRange_All(codes);
-            ok = ok && Test_FindSplit_All(codes);
-            ok = ok && Test_BuildAndValidate(codes);
-        }
-
-        // 3) 동일 코드가 섞인 구간
-        {
-            std::vector<uint64_t> codes;
-            for (int i = 0; i < 20; ++i) codes.push_back(0x12345678ull);
-            for (int i = 0; i < 20; ++i) codes.push_back(0x123456F0ull);
-            for (int i = 0; i < 20; ++i) codes.push_back(0x12345700ull);
-            ok = ok && Test_FindRange_All(codes);
-            ok = ok && Test_FindSplit_All(codes);
-            ok = ok && Test_BuildAndValidate(codes);
-        }
-
-        // 4) 랜덤(고정 시드) + 정렬
-        {
-            std::vector<uint64_t> codes;
-            uint64_t seed = 0x9e3779b97f4a7c15ull;
-            auto rnd = [&seed]() -> uint64_t
-            {
-                seed ^= seed >> 12; seed ^= seed << 25; seed ^= seed >> 27;
-                return seed * 2685821657736338717ull;
-            };
-            for (int i = 0; i < 1024; ++i)
-            {
-                // 하위 비트에 변화를 두되, 전체는 64-bit로 다양하게
-                codes.push_back(rnd() & 0x0000FFFFFFFFFFFFull);
-            }
-            std::sort(codes.begin(), codes.end());
-            ok = ok && Test_FindRange_All(codes);
-            ok = ok && Test_FindSplit_All(codes);
-            ok = ok && Test_BuildAndValidate(codes);
-        }
-
-        // 5) 엣지 케이스: n = 1, 2
-        {
-            std::vector<uint64_t> n1{ 0x5555ull };
-            ok = ok && Test_BuildAndValidate(n1);
-
-            std::vector<uint64_t> n2{ 0x1000ull, 0x1001ull };
-            ok = ok && Test_FindRange_All(n2);
-            ok = ok && Test_FindSplit_All(n2);
-            ok = ok && Test_BuildAndValidate(n2);
-        }
-
-        if (ok) printf("[TEST] LBVH all tests PASSED\n");
-        else     printf("[TEST] LBVH tests FAILED\n");
-        return ok;
     }
 };

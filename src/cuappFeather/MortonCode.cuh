@@ -665,26 +665,25 @@ struct MortonCode
     }
 
     __host__ __device__ __forceinline__ static float3 ToCellCenter(
-        const uint64_t code, const float3 aabbMin, const float3 aabbMax)
+        const uint64_t code, const float3 aabbMin, const float3 aabbMax, unsigned int depth = 21)
     {
         float domainExtent = 0.0f;
         const cuAABB dom = GetDomainAABB(aabbMin, aabbMax, domainExtent);
+
         if (!(domainExtent > 0.0f))
         {
             return make_float3(0.f, 0.f, 0.f);
         }
 
-        // µðÄÚµå
         uint32_t ix, iy, iz;
         DecodeMorton3D_21b(code, ix, iy, iz);
 
-        // N = 2^21
-        constexpr double N = (double)(1ull << 21);
-        const double cellSize = (double)domainExtent / N;
+        const unsigned int dim = 1u << depth;
+        const double cellSize = (double)domainExtent / (double)dim;
 
-        const double cx = (double)dom.min.x + ((double)ix + 0.5) * cellSize;
-        const double cy = (double)dom.min.y + ((double)iy + 0.5) * cellSize;
-        const double cz = (double)dom.min.z + ((double)iz + 0.5) * cellSize;
+        const double cx = (double)dom.min.x + (double)ix * cellSize * 0.5;
+        const double cy = (double)dom.min.y + (double)iy * cellSize * 0.5;
+        const double cz = (double)dom.min.z + (double)iz * cellSize * 0.5;
 
         return make_float3((float)cx, (float)cy, (float)cz);
     }
@@ -707,7 +706,7 @@ struct MortonCode
         DecodeMorton3D_21b(code, ix, iy, iz);
 
         // N = 2^21
-        constexpr double N = (double)(1ull << 21);
+        double N = (double)(1ull << depth);
         const double cellSize = (double)domainExtent / N;
         return cellSize;
     }
