@@ -177,6 +177,18 @@ struct cuAABB
     float3 max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
 
     __host__ __device__ __forceinline__
+        void expand(const float3& p)
+    {
+        min.x = fminf(min.x, p.x);
+        min.y = fminf(min.y, p.y);
+        min.z = fminf(min.z, p.z);
+
+        max.x = fmaxf(max.x, p.x);
+        max.y = fmaxf(max.y, p.y);
+        max.z = fmaxf(max.z, p.z);
+    }
+
+    __host__ __device__ __forceinline__
         void expand(const cuAABB& b)
     {
         min.x = fminf(min.x, b.min.x);
@@ -215,6 +227,15 @@ struct cuAABB
             fmaxf(a.max.y, b.max.y),
             fmaxf(a.max.z, b.max.z));
         return out;
+    }
+
+    __host__ __device__ __forceinline__ static float Distance2(const cuAABB& aabb, const float3& p)
+    {
+        float3 clamped;
+        clamped.x = fmaxf(aabb.min.x, fminf(p.x, aabb.max.x));
+        clamped.y = fmaxf(aabb.min.y, fminf(p.y, aabb.max.y));
+        clamped.z = fmaxf(aabb.min.z, fminf(p.z, aabb.max.z));
+        return length2(p - clamped);
     }
 };
 

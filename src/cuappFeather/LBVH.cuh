@@ -479,4 +479,57 @@ struct LBVH
         }
         return true;
     }
+
+    int NearestNeighbor(const float3& query, const std::vector<MortonKey>& mortonKeys, const std::vector<float3>& points, float3& nearestPosition)
+    {
+        if (!nodes) return -1;
+
+        unsigned n = (unsigned)mortonKeys.size();
+        unsigned root = FindRootInternal(nodes, n);
+        if (root == UINT32_MAX) return -1;
+
+        float bestDist2 = FLT_MAX;
+        int bestIdx = -1;
+
+        struct Frame { unsigned idx; float dist2; };
+        std::stack<Frame> st;
+        st.push({ root, 0.0f });
+
+        while (!st.empty())
+        {
+            auto [idx, _] = st.top(); st.pop();
+            const LBVHNode& node = nodes[idx];
+
+            float nodeDist2 = cuAABB::Distance2(node.aabb, query);
+            if (nodeDist2 >= bestDist2) continue; // prune
+
+            if (idx >= n - 1) // leaf node
+            {
+                unsigned leafIdx = idx - (n - 1);
+                const MortonKey& mk = mortonKeys[leafIdx];
+
+                // MortonKey.index = ¿ø·¡ °´Ã¼ ÀÎµ¦½º
+                float3 objPos = points[mk.index];
+
+                float dist2 = length2(query - objPos);
+                if (dist2 < bestDist2)
+                {
+                    bestDist2 = dist2;
+                    bestIdx = mk.index;
+					nearestPosition = objPos;
+                }
+            }
+            else // internal node
+            {
+                unsigned L = node.leftNodeIndex;
+                unsigned R = node.rightNodeIndex;
+                float dL = cuAABB::Distance2(nodes[L].aabb, query);
+                float dR = cuAABB::Distance2(nodes[R].aabb, query);
+
+                if (dL < dR) { st.push({ R, dR }); st.push({ L, dL }); }
+                else { st.push({ L, dL }); st.push({ R, dR }); }
+            }
+        }
+        return bestIdx;
+    }
 };

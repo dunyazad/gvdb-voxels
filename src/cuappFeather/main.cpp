@@ -1426,20 +1426,48 @@ int main(int argc, char** argv)
 			mortonKeys.reserve(positions.size());
 
 			{
-				ifstream tempIn("morton.bin", ios::binary);
-				if (tempIn.is_open())
+				ifstream posIn("positions.bin", ios::binary);
+				if (posIn.is_open())
 				{
-					uint64_t code;
-					unsigned int index;
-					while (tempIn.read((char*)&code, sizeof(uint64_t)))
+					size_t s = 0;
+					posIn.read((char*)&s, sizeof(size_t));
+					posIn.read((char*)&m, sizeof(float3));
+					posIn.read((char*)&M, sizeof(float3));
+
+					positions.clear();
+
+					cuAABB aabb{ make_float3(FLT_MAX,FLT_MAX,FLT_MAX) , make_float3(-FLT_MAX,-FLT_MAX,-FLT_MAX) };
+					for (size_t i = 0; i < s; i++)
 					{
-						tempIn.read((char*)&index, sizeof(unsigned int));
-						mortonKeys.push_back({ code, index });
+						float3 p;
+						posIn.read((char*)&p.x, sizeof(float));
+						posIn.read((char*)&p.y, sizeof(float));
+						posIn.read((char*)&p.z, sizeof(float));
+
+						positions.push_back(p);
+
+						aabb.expand(p);
 					}
-					tempIn.close();
+					posIn.close();
+
+					printf("min : %f, %f, %f - max : %f, %f, %f\n", XYZ(aabb.min), XYZ(aabb.max));
+
+					mortonKeys.clear();
+					mortonKeys.resize(positions.size());
+					for (size_t i = 0; i < positions.size(); i++)
+					{
+						auto& p = positions[i];
+						auto code = MortonCode::FromPosition(p, aabb.min, aabb.max);
+						mortonKeys[i].code = code;
+						mortonKeys[i].index = i;
+					}
+
+					sort(mortonKeys.begin(), mortonKeys.end());
 				}
 				else
 				{
+					mortonKeys.clear();
+
 					unsigned int maxCount = 0;
 					uint64_t maxCode = 0;
 					map<uint64_t, vector<unsigned int>> counts;
@@ -1481,35 +1509,46 @@ int main(int argc, char** argv)
 						}
 					}
 
-					ofstream tempOut("morton.bin", ios::binary);
-					for (size_t i = 0; i < mortonKeys.size(); i++)
+					sort(mortonKeys.begin(), mortonKeys.end());
+
 					{
-						auto& key = mortonKeys[i];
-						tempOut.write((char*)&key.code, sizeof(uint64_t));
-						tempOut.write((char*)&key.index, sizeof(unsigned int));
+						ofstream tempOut("positions.bin", ios::binary);
+						size_t s = positions.size();
+						tempOut.write((const char*)&s, sizeof(size_t));
+						tempOut.write((const char*)&m, sizeof(float3));
+						tempOut.write((const char*)&M, sizeof(float3));
+						for (size_t i = 0; i < s; i++)
+						{
+							auto& p = positions[i];
+							tempOut.write((char*)&p.x, sizeof(float));
+							tempOut.write((char*)&p.y, sizeof(float));
+							tempOut.write((char*)&p.z, sizeof(float));
+						}
+						tempOut.close();
+
+						printf("min : %f, %f, %f - max : %f, %f, %f\n", XYZ(m), XYZ(M));
 					}
-					tempOut.close();
 				}
 			}
 
 			
-			//vector<float3> inputPositions;
-			////inputPositions.push_back((cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f);
-			////inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
-			////inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
-			////inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
-			////inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
-			////inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
-			////inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
-			////inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
-			////inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
-			//for (size_t i = 0; i < cuInstance.h_mesh.numberOfPoints; i++)
-			//{
-			//	inputPositions.push_back(cuInstance.h_mesh.positions[i]);
-			//}
+			vector<float3> inputPositions;
+			//inputPositions.push_back((cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f);
+			//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
+			//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
+			//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
+			//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
+			//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
+			//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
+			//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
+			//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
+			for (size_t i = 0; i < cuInstance.h_mesh.numberOfPoints; i++)
+			{
+				inputPositions.push_back(cuInstance.h_mesh.positions[i]);
+			}
 
 			{
-				sort(mortonKeys.begin(), mortonKeys.end());
+				//sort(mortonKeys.begin(), mortonKeys.end());
 
 				TS(BVH_INIT);
 				LBVH bvh;
@@ -1549,7 +1588,7 @@ int main(int argc, char** argv)
 				}
 #endif
 
-//FindRange Validation
+				//FindRange Validation
 #if 0
 				{
 					for (unsigned int i = 0; i < mortonCodes.size(); ++i) {
@@ -1569,7 +1608,7 @@ int main(int argc, char** argv)
 				}
 #endif
 
-// FindSplit Validation
+				// FindSplit Validation
 #if 0
 				{
 					auto N = mortonCodes.size();
@@ -1609,7 +1648,7 @@ int main(int argc, char** argv)
 
 						auto boxColor = Color::Lerp(Color::blue(), Color::red(), (float)depth / (float)maxDepth);
 
-						if(0.05f > length(aabbMax - aabbMin))
+						if (0.05f > length(aabbMax - aabbMin))
 						{
 							VD::AddWiredBox(tag, glm::vec3(XYZ(center)), glm::vec3(0.05f, 0.05f, 0.05f), boxColor);
 						}
@@ -1617,7 +1656,7 @@ int main(int argc, char** argv)
 						{
 							VD::AddWiredBox(tag, { {aabbMin}, {aabbMax} }, boxColor);
 						}
-						
+
 						if (UINT32_MAX != node->leftNodeIndex)
 							draw_box(&bvh.nodes[node->leftNodeIndex], depth + 1);
 						if (UINT32_MAX != node->rightNodeIndex)
@@ -1650,6 +1689,29 @@ int main(int argc, char** argv)
 					}
 					TE(BVH_EXTRA_VALIDATE);
 				}
+
+				{
+					TS(NN);
+
+					for (size_t i = 0; i < inputPositions.size(); i++)
+					//for (size_t i = 0; i < 1000; i++)
+					{
+						auto& q = inputPositions[i];
+						float3 np;
+						auto ni = bvh.NearestNeighbor(q, mortonKeys, positions, np);
+						if (ni >= 0)
+						{
+							//auto& key = mortonKeys[ni];
+							//auto& n = positions[key.index];
+							//auto& n = positions[ni];
+							VD::AddLine("NN Morton BVH", { XYZ(q) }, { XYZ(np) }, Color::red());
+						}
+					}
+
+					TE(NN);
+				}
+
+				bvh.Terminate();
 			}
 			});
 
