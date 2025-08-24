@@ -1638,14 +1638,14 @@ int main(int argc, char** argv)
 					TE(BVH_VALIDATE);
 				}
 
-				//{
-				//	TS(BVH_EXTRA_VALIDATE);
-				//	bool ok = bvh.ExtraValidate(bvh.nodes, (unsigned int)mortonCodes.size());
-				//	if (!ok) {
-				//		printf("LBVH build failed extra validation!\n");
-				//	}
-				//	TE(BVH_EXTRA_VALIDATE);
-				//}
+				{
+					TS(BVH_EXTRA_VALIDATE);
+					bool ok = bvh.ExtraValidate(bvh.nodes, (unsigned int)mortonKeys.size());
+					if (!ok) {
+						printf("LBVH build failed extra validation!\n");
+					}
+					TE(BVH_EXTRA_VALIDATE);
+				}
 			}
 			});
 
