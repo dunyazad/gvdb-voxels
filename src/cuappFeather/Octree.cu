@@ -546,7 +546,7 @@ void DeviceOctree::Terminate()
     octreeKeys.Terminate();
 }
 
-void DeviceOctree::NN(
+void DeviceOctree::NN_H(
     float3* queries,
     unsigned int numberOfQueries,
     unsigned int* outNearestIndex,
@@ -574,7 +574,7 @@ void DeviceOctree::NN(
     //CUDA_COPY_D2H(&h_root, rootIndex, sizeof(unsigned int));
     //CUDA_SYNC();
 
-    CUDA_TS(NN);
+    CUDA_TS(NN_H);
 
     LaunchKernel(Kernel_DeviceOctree_NN_Batch, numberOfQueries,
         nodes,
@@ -585,7 +585,7 @@ void DeviceOctree::NN(
         d_outNearestD2);
     CUDA_SYNC();
 
-    CUDA_TE(NN);
+    CUDA_TE(NN_H);
 
     CUDA_COPY_D2H(outNearestIndex, d_outNearestIndex, sizeof(unsigned int) * numberOfQueries);
     CUDA_COPY_D2H(outNearestD2, d_outNearestD2, sizeof(float) * numberOfQueries);
@@ -595,6 +595,31 @@ void DeviceOctree::NN(
     CUDA_FREE(d_queries);
     CUDA_FREE(d_outNearestIndex);
     CUDA_FREE(d_outNearestD2);
+}
+
+void DeviceOctree::NN_D(
+    float3* d_queries,
+    unsigned int numberOfQueries,
+    unsigned int* d_outNearestIndex,
+    float* d_outNearestD2)
+{
+    if (nodes == nullptr || rootIndex == nullptr || nullptr == d_outNearestIndex || numberOfNodes == 0 || numberOfQueries == 0)
+    {
+        return;
+    }
+
+    CUDA_TS(NN_D);
+
+    LaunchKernel(Kernel_DeviceOctree_NN_Batch, numberOfQueries,
+        nodes,
+        rootIndex,
+        d_queries,
+        numberOfQueries,
+        d_outNearestIndex,
+        d_outNearestD2);
+    CUDA_SYNC();
+
+    CUDA_TE(NN_D);
 }
 
 bool DeviceOctree::NN_Single(
@@ -619,7 +644,7 @@ bool DeviceOctree::NN_Single(
     CUDA_COPY_H2D(d_q, &query, sizeof(float3));
 
     // 호출
-    NN(d_q, 1u, d_idx, d_d2);
+    NN_D(d_q, 1u, d_idx, d_d2);
 
     // 결과 수거
     unsigned int idx;
@@ -839,7 +864,7 @@ __device__ unsigned int DeviceOctree::DeviceOctree_NearestLeaf(
 }
 
 __global__ void Kernel_DeviceOctree_NN_Batch(
-    const OctreeNode* __restrict__ nodes,   // const로
+    const OctreeNode* __restrict__ nodes,
     const unsigned int* __restrict__ rootIndex,
     const float3* __restrict__ queries,
     unsigned int numberOfQueries,
@@ -854,5 +879,5 @@ __global__ void Kernel_DeviceOctree_NN_Batch(
         DeviceOctree::DeviceOctree_NearestLeaf(queries[tid], nodes, rootIndex, &bestD2);
 
     outIndices[tid] = bestIdx;
-    outD2[tid] = bestD2;
+    if(outD2) outD2[tid] = bestD2;
 }

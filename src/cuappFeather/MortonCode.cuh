@@ -794,11 +794,6 @@ struct MortonCode
         float dist2;
     };
 
-
-// ============================================================================
-// MortonCode::CodeBVH  (code-only exact NN; domain = GetDomainAABB 정방화)
-// 빌드 O(N log N), 질의 평균 O(log N). 셀 중심 == 포인트 가정.
-// ============================================================================
     struct MortonCode::CodeBVH
     {
         struct Node
@@ -1011,5 +1006,4 @@ struct MortonCode
             return out;
         }
     };
-
 };

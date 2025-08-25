@@ -109,11 +109,17 @@ struct DeviceOctree
 
     HashMap<uint64_t, unsigned int> octreeKeys;
 
-    void NN(
+    void NN_H(
         float3* queries,
         unsigned int numberOfQueries,
         unsigned int* outNearestIndex,
-        float* outNearestD2);    
+        float* outNearestD2);
+
+    void NN_D(
+        float3* d_queries,
+        unsigned int numberOfQueries,
+        unsigned int* d_outNearestIndex,
+        float* d_outNearestD2 = nullptr);
 
     bool NN_Single(
         const float3& query,
@@ -145,7 +151,7 @@ struct DeviceOctree
         const float3& query,
         const OctreeNode* __restrict__ nodes,
         const unsigned int* __restrict__ rootIndex,
-        float* outBestD2);
+        float* outBestD2 = nullptr);
 };
 
 __global__ void Kernel_DeviceOctree_NN_Batch(
@@ -154,4 +160,4 @@ __global__ void Kernel_DeviceOctree_NN_Batch(
     const float3* __restrict__ queries,
     unsigned int numberOfQueries,
     unsigned int* __restrict__ outIndices,
-    float* __restrict__ outD2);
+    float* __restrict__ outD2 = nullptr);

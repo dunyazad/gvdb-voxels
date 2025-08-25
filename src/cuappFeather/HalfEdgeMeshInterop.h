@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cuda_common.cuh>
 
 #include <HalfEdgeMesh.cuh>

@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cuda_common.cuh>
 
 #include <VoxelKey.hpp>
@@ -45,6 +47,7 @@ struct SCVoxelHashMap
 	void CheckOccupiedIndicesLength(unsigned int numberOfVoxelsToOccupy);
 
 	void Occupy(const DevicePointCloud& d_input, int offset = 1);
+	void Occupy(float3* d_positions, float3* d_normals, float3* d_colors, unsigned int numberOfPoints, int offset = 1);
 
 	HostPointCloud Serialize();
 

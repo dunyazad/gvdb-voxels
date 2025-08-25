@@ -79,6 +79,22 @@ void SCVoxelHashMap::Occupy(const DevicePointCloud& d_input, int offset)
 	CUDA_TE(SCVoxelHashMap_Occupy);
 }
 
+void SCVoxelHashMap::Occupy(float3* d_positions, float3* d_normals, float3* d_colors, unsigned int numberOfPoints, int offset)
+{
+	CUDA_TS(SCVoxelHashMap_Occupy);
+
+	if (1 > offset) offset = 1;
+	int count = (offset * 2 + 1) * (offset * 2 + 1) * (offset * 2 + 1);
+
+	CheckOccupiedIndicesLength(numberOfPoints * count);
+	LaunchKernel(Kernel_SCVoxelHashMap_Occupy, numberOfPoints, info, d_positions, d_normals, d_colors, numberOfPoints, offset);
+	CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
+	CUDA_SYNC();
+
+	printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
+	CUDA_TE(SCVoxelHashMap_Occupy);
+}
+
 HostPointCloud SCVoxelHashMap::Serialize()
 {
 	HostPointCloud h_result;

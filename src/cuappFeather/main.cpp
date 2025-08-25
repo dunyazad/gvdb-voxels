@@ -1156,7 +1156,7 @@ int main(int argc, char** argv)
 			float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 			float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
 
-			float voxelSize = 0.1f;
+			float voxelSize = 0.05f;
 			//float voxelSize = 0.0125f;
 			unsigned int maxDepth = 0;
 			float unitLength = maxLength;
@@ -1313,7 +1313,198 @@ int main(int argc, char** argv)
 					vector<unsigned int> indices(inputPositions.size());
 					vector<float> distances(inputPositions.size());
 
-					deviceOctree.NN(inputPositions.data(), inputPositions.size(), indices.data(), distances.data());
+					deviceOctree.NN_H(inputPositions.data(), inputPositions.size(), indices.data(), distances.data());
+
+					vector<OctreeNode> nodes(deviceOctree.numberOfNodes);
+					CUDA_COPY_D2H(nodes.data(), deviceOctree.nodes, sizeof(OctreeNode) * deviceOctree.numberOfNodes);
+
+					for (size_t i = 0; i < inputPositions.size(); i++)
+					{
+						auto& p = inputPositions[i];
+
+						auto& node = nodes[indices[i]];
+						auto n = (node.bmin + node.bmax) * 0.5f;
+
+						float d2_check = Octree::Dist2PointAABB(p, node.bmin, node.bmax);
+						if (fabsf(d2_check - distances[i]) > 1e-6f) {
+							printf("mismatch i=%zu d2_kernel=%g d2_host=%g\n", i, distances[i], d2_check);
+						}
+
+						VD::AddWiredBox("Node", { XYZ(p) }, glm::vec3(deviceOctree.unitLength * 0.1f), Color::yellow());
+						VD::AddLine("Nearest", glm::vec3(XYZ(p)), glm::vec3(XYZ(n)), Color::red());
+					}
+				}
+
+				deviceOctree.Terminate();
+
+				CUDA_TE(BuildOctree);
+			}
+			});
+
+		controlPanel->AddButton("Find NN using Octree - Device - Test", 0, 0, [&]() {
+			CUDA_TS(BuildOctree);
+
+			CUDA_TS(BuildOctreeInitialize);
+
+			auto center = (cuInstance.d_mesh.min + cuInstance.d_mesh.max) * 0.5f;
+
+			auto lx = cuInstance.d_mesh.max.x - cuInstance.d_mesh.min.x;
+			auto ly = cuInstance.d_mesh.max.y - cuInstance.d_mesh.min.y;
+			auto lz = cuInstance.d_mesh.max.z - cuInstance.d_mesh.min.z;
+
+			auto maxLength = std::max({ lx, ly, lz });
+			float3 bbMin = center - make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+			float3 bbMax = center + make_float3(maxLength * 0.5f, maxLength * 0.5f, maxLength * 0.5f);
+
+			float voxelSize = 0.05f;
+			//float voxelSize = 0.0125f;
+			unsigned int maxDepth = 0;
+			float unitLength = maxLength;
+			while (unitLength > voxelSize)
+			{
+				unitLength *= 0.5f;
+				maxDepth++;
+			}
+
+			printf("unitLength : %f\n", unitLength);
+			printf("maxDepth : %d\n", maxDepth);
+
+			{
+				CUDA_TS(BuildOctree);
+
+				CUDA_TS(BuildOctreeInitialize);
+
+				auto deviceOctree = cuInstance.d_mesh.octree;				
+
+				unsigned int numberOfEntries = 0;
+				CUDA_COPY_D2H(&numberOfEntries, deviceOctree.octreeKeys.info.numberOfEntries, sizeof(unsigned int));
+
+				vector<HashMapEntry<uint64_t, unsigned int>> entries(deviceOctree.octreeKeys.info.capacity);
+				CUDA_COPY_D2H(entries.data(), deviceOctree.octreeKeys.info.entries, sizeof(HashMapEntry<uint64_t, unsigned int>) * deviceOctree.octreeKeys.info.capacity);
+
+				CUDA_SYNC();
+
+				//bool useOctreeKey = false;
+				//if (useOctreeKey)
+				//{
+				//	for (size_t i = 0; i < deviceOctree.octreeKeys.info.capacity; i++)
+				//	{
+				//		auto& entry = entries[i];
+				//		if (UINT64_MAX == entry.key) continue;
+
+				//		auto level = Octree::GetDepth(entry.key);
+				//		const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+				//		const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+				//		auto p = Octree::ToPosition(entry.key, bbMin, bbMax);
+
+				//		stringstream ss;
+				//		ss << "octree_" << level;
+				//		VD::AddWiredBox(ss.str(), { XYZ(p) }, glm::vec3(scale), Color::green());
+				//	}
+				//}
+				//else
+				//{
+				//	vector<OctreeNode> octreeNodes(deviceOctree.numberOfNodes);
+				//	CUDA_COPY_D2H(octreeNodes.data(), deviceOctree.nodes, sizeof(OctreeNode) * deviceOctree.numberOfNodes);
+
+				//	{
+				//		//for (auto& n : octreeNodes)
+				//		//{
+				//		//	auto level = n.level;
+				//		//	const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+				//		//	const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+				//		//	auto p = DeviceOctree::ToPosition(n.mortonCode, bbMin, bbMax);
+				//		//	stringstream ss;
+				//		//	ss << "octree_" << level;
+
+				//		//	if (UINT32_MAX == n.parent)
+				//		//	{
+				//		//		VD::AddWiredBox(ss.str(), { XYZ(p) }, glm::vec3(scale), Color::red());
+				//		//	}
+				//		//	else
+				//		//	{
+				//		//		VD::AddWiredBox(ss.str(), { XYZ(p) }, glm::vec3(scale), Color::green());
+				//		//	}
+				//		//}
+				//	}
+
+				//	{
+				//		unsigned int rootIndex = UINT32_MAX;
+				//		CUDA_COPY_D2H(&rootIndex, deviceOctree.rootIndex, sizeof(unsigned int));
+				//		OctreeNode* root = &octreeNodes[rootIndex];
+
+				//		//OctreeNode* root = nullptr;
+				//		//for (auto& n : octreeNodes)
+				//		//{
+				//		//	auto level = Octree::GetDepth(n.key);
+				//		//	if (0 == level)
+				//		//	{
+				//		//		root = &n;
+				//		//		printf("ROOT\n");
+				//		//	}
+				//		//}
+
+				//		std::function<void(OctreeNode&)> draw_box;
+				//		draw_box = [&](OctreeNode& node) {
+				//			auto level = Octree::GetDepth(node.key);
+				//			const unsigned k = (maxDepth >= level) ? (maxDepth - level) : 0u;
+				//			const float scale = std::ldexp(unitLength, static_cast<int>(k));
+
+				//			auto p = Octree::ToPosition(node.key, bbMin, bbMax);
+				//			stringstream ss;
+				//			ss << "octree_" << level;
+
+				//			VD::AddWiredBox(ss.str(), { XYZ(p) }, glm::vec3(scale), Color::green());
+
+				//			for (size_t i = 0; i < 8; i++)
+				//			{
+				//				auto childIndex = node.children[i];
+				//				if (UINT32_MAX != childIndex)
+				//				{
+				//					auto childNode = octreeNodes[childIndex];
+				//					draw_box(childNode);
+				//				}
+				//			}
+				//		};
+
+				//		draw_box(*root);
+				//	}
+				//}
+
+				//for (size_t i = 0; i <= maxDepth; i++)
+				//{
+				//	stringstream ss;
+				//	ss << "octree_" << i;
+
+				//	if (VD::AddToSelectionList(ss.str()))
+				//	{
+				//		printf("%s\n", ss.str().c_str());
+				//	}
+				//}
+
+				{
+					vector<float3> inputPositions;
+					//inputPositions.push_back((cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f);
+					//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
+					//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
+					//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
+					//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
+					//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
+					//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
+					//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
+					//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
+
+					for (size_t i = 0; i < cuInstance.h_mesh.numberOfPoints; i++)
+					{
+						inputPositions.push_back(cuInstance.h_mesh.positions[i]);
+					}
+
+					vector<unsigned int> indices(inputPositions.size());
+					vector<float> distances(inputPositions.size());
+
+					deviceOctree.NN_H(inputPositions.data(), inputPositions.size(), indices.data(), distances.data());
 
 					vector<OctreeNode> nodes(deviceOctree.numberOfNodes);
 					CUDA_COPY_D2H(nodes.data(), deviceOctree.nodes, sizeof(OctreeNode) * deviceOctree.numberOfNodes);
@@ -1342,77 +1533,6 @@ int main(int argc, char** argv)
 			});
 
 		controlPanel->AddButton("Find NN using BVH - Host", 0, 0, [&]() {
-			TS(GenerateMortonCodes);
-
-			auto m = cuInstance.d_mesh.min - make_float3(0.001f, 0.001f, 0.001f);
-			auto M = cuInstance.d_mesh.max + make_float3(0.001f, 0.001f, 0.001f);
-
-			vector<float3> positions(cuInstance.d_mesh.numberOfPoints);
-			CUDA_COPY_D2H(positions.data(), cuInstance.d_mesh.positions, sizeof(float3)* cuInstance.d_mesh.numberOfPoints);
-			CUDA_SYNC();
-
-			vector<uint64_t> mortonCodes;
-			mortonCodes.reserve(positions.size());
-
-			for (const auto& p : positions)
-			{
-				const uint64_t code = MortonCode::FromPosition(p, m, M);
-				mortonCodes.push_back(code);
-			}
-
-			{
-				TS(SortingMortonCode);
-				sort(mortonCodes.begin(), mortonCodes.end());
-				TE(SortingMortonCode);
-			}
-
-			for (auto code : mortonCodes)
-			{
-				const float3 center = MortonCode::ToCellCenter(code, m, M);
-				VD::AddBox("Morton codes", { XYZ(center) }, glm::vec3(0.05f), Color::yellow());
-			}
-
-			{
-				std::vector<uint64_t> codes = mortonCodes; // 기존 배열
-
-				TS(BVH_Build);
-				MortonCode::CodeBVH bvh;
-				bvh.Build(codes.data(), codes.size(), m, M); // m=mesh.min-ε, M=mesh.max+ε (정방화 동일)
-				TE(BVH_Build);
-
-				vector<float3> queries;
-				for (size_t i = 0; i < cuInstance.h_mesh.numberOfPoints; i++)
-				{
-					queries.push_back(cuInstance.h_mesh.positions[i]);
-				}
-
-				TS(NN);
-				for (auto& q : queries)
-				{
-					auto rr = bvh.Nearest(q);
-					if (rr.idx >= 0)
-					{
-						const float3 center = MortonCode::ToCellCenter(rr.code, m, M); // 정방화 규칙 그대로
-						VD::AddLine("NN Morton BVH", { XYZ(q) }, { XYZ(center) }, Color::red());
-					}
-				}
-				TE(NN);
-
-				//const float3 q = cuInstance.d_mesh.min; // 질의점
-				//TS(NN);
-				//auto rr = bvh.Nearest(q);
-				//TE(NN);
-				//// 시각화
-				//if (rr.idx >= 0)
-				//{
-				//	const float3 center = MortonCode::ToCellCenter(rr.code, m, M); // 정방화 규칙 그대로
-				//	VD::AddLine("NN Morton BVH", { XYZ(q) }, { XYZ(center) }, Color::red());
-				//}
-			}
-			TE(GenerateMortonCodes);
-			});
-
-		controlPanel->AddButton("Find NN using BVH - Device", 0, 0, [&]() {
 			TS(TestDeviceRadixSort);
 
 			auto m = cuInstance.d_mesh.min - make_float3(0.001f, 0.001f, 0.001f);
@@ -1893,8 +2013,6 @@ int main(int argc, char** argv)
 
 			result.Terminate();
 			h_pointCloud.Terminate();
-
-
 		}
 #pragma endregion
 #endif

@@ -3,6 +3,7 @@
 #include <cuda_common.cuh>
 #include <HashMap.hpp>
 #include <VoxelKey.hpp>
+#include <Octree.cuh>
 
 struct HalfEdge
 {
@@ -51,6 +52,8 @@ struct HostHalfEdgeMesh
     HalfEdge* halfEdges = nullptr;
     HalfEdgeFace* halfEdgeFaces = nullptr;
     unsigned int* vertexToHalfEdge = nullptr;
+    
+    HostOctree octree;
 
     HostHalfEdgeMesh();
     HostHalfEdgeMesh(const HostHalfEdgeMesh& other);
@@ -66,6 +69,7 @@ struct HostHalfEdgeMesh
     void CopyToDevice(DeviceHalfEdgeMesh& deviceMesh) const;
 
     void RecalcAABB();
+    void RecalcOctree();
 
     uint64_t PackEdge(unsigned int v0, unsigned int v1);
     bool PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const;
@@ -101,6 +105,8 @@ struct DeviceHalfEdgeMesh
     HashMap<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap;
     FaceNode* faceNodes = nullptr;
 
+    DeviceOctree octree;
+
     DeviceHalfEdgeMesh();
     DeviceHalfEdgeMesh(const HostHalfEdgeMesh& other);
     DeviceHalfEdgeMesh& operator=(const HostHalfEdgeMesh& other);
@@ -114,6 +120,7 @@ struct DeviceHalfEdgeMesh
     void CopyToHost(HostHalfEdgeMesh& hostMesh) const;
 
     void RecalcAABB();
+    void RecalcOctree();
 
     void BuildHalfEdges();
     void RemoveIsolatedVertices();
@@ -182,182 +189,3 @@ struct DeviceHalfEdgeMesh
         return normalize(cross(v1 - v0, v2 - v0));
     }
 };
-
-__global__ void Kernel_DeviceHalfEdgeMesh_RecalcAABB(float3* positions, float3* min, float3* max, unsigned int numberOfPoints);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
-    const uint3* faces,
-    unsigned int numberOfFaces,
-    HalfEdge* halfEdges,
-    HalfEdgeFace* halfEdgeFaces,
-    HashMapInfo<uint64_t, unsigned int> info);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_LinkOpposites(
-    const uint3* faces,
-    unsigned int numberOfFaces,
-    HalfEdge* halfEdges,
-    HashMapInfo<uint64_t, unsigned int> info);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_ValidateOppositeEdges(const HalfEdge* halfEdges, size_t numHalfEdges);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdgeMapping(
-    const HalfEdge* halfEdges,
-    unsigned int* vertexToHalfEdge,
-    unsigned int numberOfHalfEdges);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_CompactVertices(
-    unsigned int* vertexToHalfEdge,
-    unsigned int* vertexIndexMapping,
-    unsigned int* vertexIndexMappingIndex,
-    const float3* oldPositions,
-    const float3* oldNormals,
-    const float3* oldColors,
-    float3* newPositions,
-    float3* newNormals,
-    float3* newColors,
-    unsigned int numberOfPoints);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_RemapVertexToHalfEdge(
-    unsigned int* vertexToHalfEdge,
-    unsigned int* newVertexToHalfEdge,
-    unsigned int* vertexIndexMapping,
-    unsigned int numberOfPoints);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_RemapVertexIndexOfFacesAndHalfEdges(
-    uint3* faces, HalfEdge* halfEdges, unsigned int numberOfFaces, unsigned int* vertexIndexMapping);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap(
-    HashMapInfo<uint64_t, FaceNodeHashMapEntry> info,
-    float3* positions,
-    uint3* faces,
-    FaceNode* faceNodes,
-    float voxelSize,
-    unsigned int numberOfFaces,
-    unsigned int* d_numDropped);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_HashMap(
-    const float3* points,
-    unsigned int numPoints,
-    const float3* positions,
-    const uint3* faces,
-    HashMapInfo<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap,
-    const FaceNode* faceNodes,
-    float voxelSize,
-    unsigned int* outIndices);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_HashMap_ClosestPoint(
-    const float3* points,
-    unsigned int numPoints,
-    const float3* positions,
-    const uint3* faces,
-    HashMapInfo<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap,
-    const FaceNode* faceNodes,
-    float voxelSize,
-    int offset,
-    unsigned int* outIndices,
-    float3* outClosestPoints);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
-    float3* positions_in,
-    float3* positions_out,
-    unsigned int numberOfPoints,
-    bool fixborderVertices,
-    const HalfEdge* halfEdges,
-    unsigned int numberOfHalfEdges,
-    unsigned int* vertexToHalfEdge,
-    float lambda);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_PickFace(
-    const float3 rayOrigin,
-    const float3 rayDir,
-    const float3* positions,
-    const uint3* faces,
-    unsigned int numberOfFaces,
-    int* outHitIndex,
-    float* outHitT);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_OneRing(
-    const HalfEdge* halfEdges,
-    const unsigned int* vertexToHalfEdge,
-    unsigned int numberOfPoints,
-    unsigned int v,
-    bool fixBorderVertices,
-    unsigned int* outBuffer,
-    unsigned int* outCount);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_GetVerticesInRadius(
-    const float3* positions,
-    unsigned int numberOfPoints,
-    const HalfEdge* halfEdges,
-    const unsigned int* vertexToHalfEdge,
-    const unsigned int* frontier,
-    unsigned int frontierSize,
-    unsigned int* visited,
-    unsigned int* nextFrontier,
-    unsigned int* nextFrontierSize,
-    unsigned int* result,
-    unsigned int* resultSize,
-    unsigned int startVertex,
-    float radius);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_OneRingFaces(
-    unsigned int f,
-    const HalfEdge* halfEdges,
-    unsigned int numberOfFaces,
-    unsigned int* outFaces,
-    unsigned int* outCount);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_GetFacesInRadius(
-    const float3* positions,
-    const uint3* faces,
-    const HalfEdge* halfEdges,
-    unsigned int numberOfFaces,
-    const unsigned int* frontier,
-    unsigned int frontierSize,
-    unsigned int* visited,
-    unsigned int* nextFrontier,
-    unsigned int* nextFrontierSize,
-    unsigned int* result,
-    unsigned int* resultSize,
-    unsigned int startFace,
-    float radius);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_RadiusLaplacianSmooth(
-    const float3* positions_in,
-    float3* positions_out,
-    unsigned int numberOfPoints,
-    const HalfEdge* halfEdges,
-    const unsigned int* vertexToHalfEdge,
-    unsigned int maxNeighbors,
-    float radius,
-    float lambda);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_GetAABB(
-    float3* positions,
-    uint3* faces,
-    cuAABB* aabbs,
-    cuAABB* mMaabbs,
-    unsigned int numberOfPoints,
-    unsigned int numberOfFaces);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_GetMortonCodes(
-    const float3* positions,
-    const uint3* faces,
-    uint64_t* mortonCodes,
-    unsigned int numberOfPoints,
-    unsigned int numberOfFaces,
-    float3 min_corner,
-    float voxel_size);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_RecalcAABB(
-    float3* positions,
-    float3* min,
-    float3* max,
-    unsigned int numberOfPoints);
-
-__global__ void Kernel_DeviceHalfEdgeMesh_GetFaceCurvatures(
-    const float3* positions,
-    const uint3* faces,
-    const HalfEdge* halfEdges,
-    unsigned int numberOfFaces,
-    float* outCurvatures);
