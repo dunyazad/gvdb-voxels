@@ -1584,6 +1584,66 @@ vector<float> DeviceHalfEdgeMesh::GetFaceCurvatures()
 
     return h_curvatures;
 }
+
+__global__ void Kernel_DeviceHalfEdgeMesh_FindNearestPosition(
+    unsigned int vid,
+    const float3* positions,
+    unsigned int numberOfPoints,
+    const HalfEdge* halfEdges,
+    const unsigned int* vertexToHalfEdge,
+    const uint3* faces,
+    unsigned int numberOfFaces,
+    float3* outPositions)
+{
+    unsigned int tid = blockDim.x * blockIdx.x + threadIdx.x;
+    if (tid >= numberOfPoints) return;
+
+    auto& he = halfEdges[vertexToHalfEdge[tid]];
+    auto faceIndex = he.faceIndex;
+
+    unsigned int outFaces[64];
+    unsigned int numberOfOutFaces = 0;
+    DeviceHalfEdgeMesh::GetOneRingFaces_Device(faceIndex, halfEdges, numberOfFaces, outFaces, numberOfOutFaces);
+
+    auto& ip = positions[vid];
+    float minDistance = FLT_MAX;
+    float3 minPosition = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+
+    for (unsigned int i = 0; i < numberOfOutFaces; i++)
+    {
+        auto outFaceIndex = outFaces[i];
+        auto& face = faces[outFaceIndex];
+
+        auto& p0 = positions[face.x];
+        auto& p1 = positions[face.y];
+        auto& p2 = positions[face.z];
+
+        auto& cp = ClosestPointOnTriangle(positions[vid], p0, p1, p2);
+        auto distance = length2(ip - cp);
+        if (distance < minDistance)
+        {
+            minDistance = distance;
+            minPosition = cp;
+        }
+    }
+
+    outPositions[tid] = minPosition;
+}
+
+vector<float3> DeviceHalfEdgeMesh::GetMinimumDistancePoints(float3* d_inputPositions, unsigned int numberOfPositions)
+{
+    vector<float3> result;
+
+    unsigned int* d_nearestIndices = nullptr;
+    CUDA_MALLOC(&d_nearestIndices, sizeof(unsigned int) * numberOfPositions);
+
+    float3* d_nearestPositions = nullptr;
+    CUDA_MALLOC(&d_nearestPositions, sizeof(float3) * numberOfPositions);
+
+    octree.NN_D(d_inputPositions, numberOfPositions, d_nearestIndices);
+
+    return result;
+}
 #pragma endregion
 
 #pragma region DeviceHalfEdgeMesh Device Functions

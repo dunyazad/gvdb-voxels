@@ -300,7 +300,7 @@ OctreeNode* HostOctree::NN(float3 query)
     {
         bool operator()(const Item& a, const Item& b) const
         {
-            return a.d2 > b.d2; // min-heap
+            return a.d2 > b.d2;
         }
     };
 
@@ -321,7 +321,6 @@ OctreeNode* HostOctree::NN(float3 query)
         Item it = pq.top();
         pq.pop();
 
-        // 하한이 현재 best 이상이면 이 서브트리 전체 prune
         if (it.d2 >= bestD2)
         {
             continue;
@@ -345,7 +344,6 @@ OctreeNode* HostOctree::NN(float3 query)
 
         if (isLeaf)
         {
-            // leaf 자체의 AABB 하한이 it.d2 이므로, 여기서 best 갱신
             if (it.d2 < bestD2)
             {
                 bestD2 = it.d2;
@@ -407,7 +405,6 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodes(
     entry.value = index;
 }
 
-// 패스1: 링크(자식 AABB 계산 금지)
 __global__ void Kernel_DeviceOctree_LinkOctreeNodes(
     HashMap<uint64_t, unsigned int> hm,
     OctreeNode* __restrict__ nodes,
@@ -470,7 +467,6 @@ void DeviceOctree::Initialize(
     this->aabbMax = bbMax;
     this->unitLength = unitLength;
 
-    // Build key set first (unique keys go into the hashmap)
     octreeKeys.Initialize(static_cast<size_t>(numberOfPoints) * 64u, 64u);
 
     LaunchKernel(Kernel_DeviceOctree_BuildOctreeNodeKeys, numberOfPoints,
@@ -482,7 +478,6 @@ void DeviceOctree::Initialize(
         octreeKeys);
     CUDA_SYNC();
 
-    // Determine number of unique entries and size node buffer accordingly
     unsigned int numberOfEntries = 0;
     CUDA_COPY_D2H(&numberOfEntries, octreeKeys.info.numberOfEntries, sizeof(unsigned int));
     CUDA_SYNC();
@@ -495,7 +490,6 @@ void DeviceOctree::Initialize(
     CUDA_MEMSET(d_numberOfNodes, 0, sizeof(unsigned int));
     CUDA_SYNC();
 
-    // Build nodes (scan hashmap slots)
     LaunchKernel(Kernel_DeviceOctree_BuildOctreeNodes, octreeKeys.info.capacity,
         octreeKeys,
         nodes,
@@ -508,7 +502,6 @@ void DeviceOctree::Initialize(
     CUDA_MALLOC(&rootIndex, sizeof(unsigned int));
     CUDA_MEMSET(rootIndex, 0xFF, sizeof(unsigned int));
 
-    // Link parents/children (no child AABB)
     LaunchKernel(Kernel_DeviceOctree_LinkOctreeNodes, numberOfNodes,
         octreeKeys,
         nodes,
@@ -518,7 +511,6 @@ void DeviceOctree::Initialize(
         bbMax);
     CUDA_SYNC();
 
-    // AABB propagate by depth (parents are ready from previous level)
     for (unsigned int lvl = 1; lvl <= leafDepth; ++lvl)
     {
         LaunchKernel(Kernel_DeviceOctree_PropagateAABB_Level, numberOfNodes,
@@ -634,7 +626,6 @@ bool DeviceOctree::NN_Single(
         return false;
     }
 
-    // 디바이스 버퍼 임시 할당
     float3* d_q = nullptr;
     unsigned int* d_idx = nullptr;
     float* d_d2 = nullptr;
@@ -643,10 +634,8 @@ bool DeviceOctree::NN_Single(
     CUDA_MALLOC(&d_d2, sizeof(float));
     CUDA_COPY_H2D(d_q, &query, sizeof(float3));
 
-    // 호출
     NN_D(d_q, 1u, d_idx, d_d2);
 
-    // 결과 수거
     unsigned int idx;
     float d2;
     CUDA_COPY_D2H(&idx, d_idx, sizeof(unsigned int));
@@ -672,36 +661,41 @@ __device__ float DeviceOctree::nodeDist2_direct(
     return Octree::Dist2PointAABB(q, n.bmin, n.bmax);
 }
 
-__device__ bool DeviceOctree::isLeaf(const OctreeNode& n)
-{
-    return (n.children[0] == UINT32_MAX) &&
-        (n.children[1] == UINT32_MAX) &&
-        (n.children[2] == UINT32_MAX) &&
-        (n.children[3] == UINT32_MAX) &&
-        (n.children[4] == UINT32_MAX) &&
-        (n.children[5] == UINT32_MAX) &&
-        (n.children[6] == UINT32_MAX) &&
-        (n.children[7] == UINT32_MAX);
+//__device__ bool DeviceOctree::isLeaf(const OctreeNode& n)
+//{
+//    return (n.children[0] == UINT32_MAX) &&
+//        (n.children[1] == UINT32_MAX) &&
+//        (n.children[2] == UINT32_MAX) &&
+//        (n.children[3] == UINT32_MAX) &&
+//        (n.children[4] == UINT32_MAX) &&
+//        (n.children[5] == UINT32_MAX) &&
+//        (n.children[6] == UINT32_MAX) &&
+//        (n.children[7] == UINT32_MAX);
+//}
+
+__device__ bool DeviceOctree::isLeaf(const OctreeNode& n) {
+#pragma unroll
+    for (int i = 0; i < 8; ++i) {
+        if (n.children[i] != UINT32_MAX)
+            return false;
+    }
+    return true;
 }
 
-// DeviceOctree 내부 (isLeaf 아래에 추가)
 __device__ void DeviceOctree::preferred_child_order(
     const OctreeNode& n, const float3& q, int order[8])
 {
-    // 노드 박스 중심
     float3 c{
         0.5f * (n.bmin.x + n.bmax.x),
         0.5f * (n.bmin.y + n.bmax.y),
         0.5f * (n.bmin.z + n.bmax.z)
     };
 
-    // 쿼리가 속한 옥탄을 우선 방문
     const int prefer =
         ((q.x >= c.x) ? 4 : 0) |
         ((q.y >= c.y) ? 2 : 0) |
         ((q.z >= c.z) ? 1 : 0);
 
-    // 인접 옥탄들까지 XOR 패턴으로 배치 (정렬 오버헤드 없음)
     order[0] = prefer;
     order[1] = prefer ^ 1;
     order[2] = prefer ^ 2;
@@ -710,64 +704,6 @@ __device__ void DeviceOctree::preferred_child_order(
     order[5] = prefer ^ 5;
     order[6] = prefer ^ 6;
     order[7] = prefer ^ 7;
-}
-
-__device__ void DeviceOctree::push_children_sorted(
-    const OctreeNode& n,
-    const float3& q,
-    const OctreeNode* __restrict__ nodes,
-    float bestD2,
-    unsigned int* __restrict__ stackIdx,
-    float* __restrict__ stackD2,
-    int* __restrict__ top,
-    const int STACK_CAP)
-{
-    // 수집
-    unsigned int cidx[8];
-    float        cd2[8];
-    int cnt = 0;
-
-#pragma unroll
-    for (int c = 0; c < 8; ++c)
-    {
-        unsigned int ci = n.children[c];
-        if (ci == UINT32_MAX) continue;
-
-        const OctreeNode& cn = nodes[ci];
-        float d2 = Octree::Dist2PointAABB(q, cn.bmin, cn.bmax);
-        if (d2 >= bestD2) continue; // 프루닝된 건 skip
-
-        cidx[cnt] = ci;
-        cd2[cnt] = d2;
-        ++cnt;
-    }
-
-    // 삽입정렬 (오름차순)
-#pragma unroll
-    for (int i = 1; i < cnt; ++i)
-    {
-        float        keyD = cd2[i];
-        unsigned int keyI = cidx[i];
-        int j = i - 1;
-        while (j >= 0 && cd2[j] > keyD)
-        {
-            cd2[j + 1] = cd2[j];
-            cidx[j + 1] = cidx[j];
-            --j;
-        }
-        cd2[j + 1] = keyD;
-        cidx[j + 1] = keyI;
-    }
-
-    // 가까운 것부터 push
-#pragma unroll
-    for (int i = 0; i < cnt; ++i)
-    {
-        if (*top >= STACK_CAP) break;
-        stackIdx[*top] = cidx[i];
-        stackD2[*top] = cd2[i];
-        ++(*top);
-    }
 }
 
 __device__ unsigned int DeviceOctree::DeviceOctree_NearestLeaf(
@@ -781,9 +717,8 @@ __device__ unsigned int DeviceOctree::DeviceOctree_NearestLeaf(
         return UINT32_MAX;
     }
 
-    // 스택: 인덱스만 유지 (거리 배열 제거)
-    const int STACK_CAP = 64;     // 필요하면 128로
-    unsigned int stackIdx[STACK_CAP];
+    const int STACK_CAPACITY = 64;
+    unsigned int stackIdx[STACK_CAPACITY];
     int top = 0;
 
     const unsigned int root = *rootIndex;
@@ -792,43 +727,38 @@ __device__ unsigned int DeviceOctree::DeviceOctree_NearestLeaf(
     float bestD2 = FLT_MAX;
     unsigned int bestIdx = UINT32_MAX;
 
-    // 1) Greedy 하강: 가장 유력한 자식 하나로 계속 내려가며 bestD2 초기로 확 낮춤
+    unsigned int cur = root;
+    while (true)
     {
-        unsigned int cur = root;
-        for (;;)
-        {
-            const OctreeNode& n = nodes[cur];
-            const float nd2 = Octree::Dist2PointAABB(query, n.bmin, n.bmax);
-            if (nd2 >= bestD2) break;
+        const OctreeNode& n = nodes[cur];
+        const float nd2 = Octree::Dist2PointAABB(query, n.bmin, n.bmax);
+        if (nd2 >= bestD2) break;
 
-            if (isLeaf(n)) {
-                bestD2 = nd2;
-                bestIdx = cur;
-                break;
-            }
-
-            int ord[8];
-            preferred_child_order(n, query, ord);
-
-            bool descended = false;
-            // 첫 번째(가장 유력) 자식으로 즉시 하강, 나머지는 스택에 후보로 적재
-#pragma unroll
-            for (int k = 0; k < 8; ++k) {
-                const unsigned int ci = n.children[ord[k]];
-                if (ci == UINT32_MAX) continue;
-
-                const OctreeNode& cn = nodes[ci];
-                const float cd2 = Octree::Dist2PointAABB(query, cn.bmin, cn.bmax);
-                if (cd2 >= bestD2) continue;
-
-                if (!descended) { cur = ci; descended = true; }
-                else if (top < STACK_CAP) { stackIdx[top++] = ci; }
-            }
-            if (!descended) break;
+        if (isLeaf(n)) {
+            bestD2 = nd2;
+            bestIdx = cur;
+            break;
         }
+
+        int ord[8];
+        preferred_child_order(n, query, ord);
+
+        bool descended = false;
+#pragma unroll
+        for (int k = 0; k < 8; ++k) {
+            const unsigned int ci = n.children[ord[k]];
+            if (ci == UINT32_MAX) continue;
+
+            const OctreeNode& cn = nodes[ci];
+            const float cd2 = Octree::Dist2PointAABB(query, cn.bmin, cn.bmax);
+            if (cd2 >= bestD2) continue;
+
+            if (!descended) { cur = ci; descended = true; }
+            else if (top < STACK_CAPACITY) { stackIdx[top++] = ci; }
+        }
+        if (!descended) break;
     }
 
-    // 2) 남은 후보들에 대해 브랜치-앤-바운드
     while (top > 0)
     {
         const unsigned int idx = stackIdx[--top];
@@ -855,7 +785,7 @@ __device__ unsigned int DeviceOctree::DeviceOctree_NearestLeaf(
             const float cd2 = Octree::Dist2PointAABB(query, cn.bmin, cn.bmax);
             if (cd2 >= bestD2) continue;
 
-            if (top < STACK_CAP) stackIdx[top++] = ci;
+            if (top < STACK_CAPACITY) stackIdx[top++] = ci;
         }
     }
 

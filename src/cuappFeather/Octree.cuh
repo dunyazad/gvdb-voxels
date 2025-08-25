@@ -137,16 +137,6 @@ struct DeviceOctree
     __device__ static void preferred_child_order(
         const OctreeNode& n, const float3& q, int order[8]);
 
-    __device__ static void push_children_sorted(
-        const OctreeNode& n,
-        const float3& q,
-        const OctreeNode* __restrict__ nodes,
-        float bestD2,
-        unsigned int* __restrict__ stackIdx,
-        float* __restrict__ stackD2,
-        int* __restrict__ top,
-        const int STACK_CAP);
-
     __device__ static unsigned int DeviceOctree_NearestLeaf(
         const float3& query,
         const OctreeNode* __restrict__ nodes,
