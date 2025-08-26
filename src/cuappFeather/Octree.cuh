@@ -27,6 +27,7 @@ struct OctreeNode
     unsigned int children[8] = { UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX };
     float3 bmin = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
     float3 bmax = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+    unsigned int positionIndex = UINT32_MAX;
 };
 #endif
 

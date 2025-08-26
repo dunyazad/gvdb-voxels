@@ -369,7 +369,7 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodeKeys(
     const float3 p = positions[tid];
     const uint64_t code = Octree::ToKey(p, aabbMin, aabbMax, depth);
 
-    HashMap<uint64_t, unsigned int>::insert(octreeKeys.info, code, 1);
+    HashMap<uint64_t, unsigned int>::insert(octreeKeys.info, code, tid);
     
     if (depth == 0u) return;
 
@@ -401,6 +401,8 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodes(
 
     n.bmin = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
     n.bmax = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+    n.positionIndex = entry.value;
 
     entry.value = index;
 }

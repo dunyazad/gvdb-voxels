@@ -3,7 +3,7 @@
 #include <cuda_common.cuh>
 #include <HashMap.hpp>
 #include <VoxelKey.hpp>
-#include <Octree.cuh>
+#include <LBVH.cuh>
 
 struct HalfEdge
 {
@@ -53,8 +53,6 @@ struct HostHalfEdgeMesh
     HalfEdgeFace* halfEdgeFaces = nullptr;
     unsigned int* vertexToHalfEdge = nullptr;
     
-    HostOctree octree;
-
     HostHalfEdgeMesh();
     HostHalfEdgeMesh(const HostHalfEdgeMesh& other);
     HostHalfEdgeMesh& operator=(const HostHalfEdgeMesh& other);
@@ -69,7 +67,6 @@ struct HostHalfEdgeMesh
     void CopyToDevice(DeviceHalfEdgeMesh& deviceMesh) const;
 
     void RecalcAABB();
-    void RecalcOctree();
 
     uint64_t PackEdge(unsigned int v0, unsigned int v1);
     bool PickFace(const float3& rayOrigin, const float3& rayDir, int& outHitIndex, float& outHitT) const;
@@ -105,7 +102,8 @@ struct DeviceHalfEdgeMesh
     HashMap<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap;
     FaceNode* faceNodes = nullptr;
 
-    DeviceOctree octree;
+    DeviceLBVH bvh;
+    MortonKey* mortonKeys = nullptr;
 
     DeviceHalfEdgeMesh();
     DeviceHalfEdgeMesh(const HostHalfEdgeMesh& other);
@@ -120,7 +118,7 @@ struct DeviceHalfEdgeMesh
     void CopyToHost(HostHalfEdgeMesh& hostMesh) const;
 
     void RecalcAABB();
-    void RecalcOctree();
+    void UpdateBVH();
 
     void BuildHalfEdges();
     void RemoveIsolatedVertices();
@@ -148,8 +146,6 @@ struct DeviceHalfEdgeMesh
     vector<uint64_t> GetMortonCodes();
 
     vector<float> GetFaceCurvatures();
-
-    vector<float3> GetMinimumDistancePoints(float3* d_inputPositions, unsigned int numberOfPositions);
 
     __host__ __device__ static uint64_t PackEdge(unsigned int v0, unsigned int v1);
     __device__ static bool HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value);

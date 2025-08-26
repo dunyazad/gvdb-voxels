@@ -147,6 +147,9 @@ void HostHalfEdgeMesh::CopyToDevice(DeviceHalfEdgeMesh& deviceMesh) const
 
 void HostHalfEdgeMesh::RecalcAABB()
 {
+    min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+    max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
     for (size_t i = 0; i < numberOfPoints; i++)
     {
         auto& p = positions[i];
@@ -159,24 +162,6 @@ void HostHalfEdgeMesh::RecalcAABB()
         max.y = fmaxf(max.y, p.y);
         max.z = fmaxf(max.z, p.z);
     }
-}
-
-void HostHalfEdgeMesh::RecalcOctree()
-{
-    for (size_t i = 0; i < numberOfPoints; i++)
-    {
-        auto& p = positions[i];
-
-        min.x = fminf(min.x, p.x);
-        min.y = fminf(min.y, p.y);
-        min.z = fminf(min.z, p.z);
-
-        max.x = fmaxf(max.x, p.x);
-        max.y = fmaxf(max.y, p.y);
-        max.z = fmaxf(max.z, p.z);
-    }
-
-    octree.Initialize(positions, numberOfPoints, min, max, MortonCode::GetMaxDepth(), MortonCode::GetDomainVoxelSize(min, max));
 }
 
 uint64_t HostHalfEdgeMesh::PackEdge(unsigned int v0, unsigned int v1)
@@ -851,11 +836,18 @@ void DeviceHalfEdgeMesh::RecalcAABB()
     CUDA_SYNC();
 }
 
-void DeviceHalfEdgeMesh::RecalcOctree()
+void DeviceHalfEdgeMesh::UpdateBVH()
 {
-    octree.Terminate();
+    bvh.Terminate();
 
-    octree.Initialize(positions, numberOfPoints, min, max, MortonCode::GetMaxDepth(), MortonCode::GetDomainVoxelSize(min, max));
+    if (nullptr == mortonKeys)
+    {
+        CUDA_MALLOC(&mortonKeys, sizeof(MortonKey) * numberOfFaces);
+    }
+
+    CUDA_TS(InitializeBVH);
+    bvh.Initialize(positions, faces, min, max, numberOfFaces);
+    CUDA_TE(InitializeBVH);
 }
 
 void DeviceHalfEdgeMesh::BuildHalfEdges()
@@ -942,7 +934,7 @@ void DeviceHalfEdgeMesh::RemoveIsolatedVertices()
     CUDA_FREE(vertexIndexMappingIndex);
 
     RecalcAABB();
-    RecalcOctree();
+    UpdateBVH();
 }
 
 void DeviceHalfEdgeMesh::BuildFaceNodeHashMap()
@@ -1491,7 +1483,7 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
     CUDA_FREE(toFree);
 
     RecalcAABB();
-    RecalcOctree();
+    UpdateBVH();
 }
 
 void DeviceHalfEdgeMesh::RadiusLaplacianSmoothing(float radius, unsigned int iterations, float lambda)
@@ -1521,7 +1513,7 @@ void DeviceHalfEdgeMesh::RadiusLaplacianSmoothing(float radius, unsigned int ite
     CUDA_FREE(toFree);
 
     RecalcAABB();
-    RecalcOctree();
+    UpdateBVH();
 }
 
 void DeviceHalfEdgeMesh::GetAABBs(vector<cuAABB>& result, cuAABB& mMaabbs)
@@ -1583,66 +1575,6 @@ vector<float> DeviceHalfEdgeMesh::GetFaceCurvatures()
     CUDA_FREE(d_curvatures);
 
     return h_curvatures;
-}
-
-__global__ void Kernel_DeviceHalfEdgeMesh_FindNearestPosition(
-    unsigned int vid,
-    const float3* positions,
-    unsigned int numberOfPoints,
-    const HalfEdge* halfEdges,
-    const unsigned int* vertexToHalfEdge,
-    const uint3* faces,
-    unsigned int numberOfFaces,
-    float3* outPositions)
-{
-    unsigned int tid = blockDim.x * blockIdx.x + threadIdx.x;
-    if (tid >= numberOfPoints) return;
-
-    auto& he = halfEdges[vertexToHalfEdge[tid]];
-    auto faceIndex = he.faceIndex;
-
-    unsigned int outFaces[64];
-    unsigned int numberOfOutFaces = 0;
-    DeviceHalfEdgeMesh::GetOneRingFaces_Device(faceIndex, halfEdges, numberOfFaces, outFaces, numberOfOutFaces);
-
-    auto& ip = positions[vid];
-    float minDistance = FLT_MAX;
-    float3 minPosition = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
-
-    for (unsigned int i = 0; i < numberOfOutFaces; i++)
-    {
-        auto outFaceIndex = outFaces[i];
-        auto& face = faces[outFaceIndex];
-
-        auto& p0 = positions[face.x];
-        auto& p1 = positions[face.y];
-        auto& p2 = positions[face.z];
-
-        auto& cp = ClosestPointOnTriangle(positions[vid], p0, p1, p2);
-        auto distance = length2(ip - cp);
-        if (distance < minDistance)
-        {
-            minDistance = distance;
-            minPosition = cp;
-        }
-    }
-
-    outPositions[tid] = minPosition;
-}
-
-vector<float3> DeviceHalfEdgeMesh::GetMinimumDistancePoints(float3* d_inputPositions, unsigned int numberOfPositions)
-{
-    vector<float3> result;
-
-    unsigned int* d_nearestIndices = nullptr;
-    CUDA_MALLOC(&d_nearestIndices, sizeof(unsigned int) * numberOfPositions);
-
-    float3* d_nearestPositions = nullptr;
-    CUDA_MALLOC(&d_nearestPositions, sizeof(float3) * numberOfPositions);
-
-    octree.NN_D(d_inputPositions, numberOfPositions, d_nearestIndices);
-
-    return result;
 }
 #pragma endregion
 
