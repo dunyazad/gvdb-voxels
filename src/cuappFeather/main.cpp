@@ -891,7 +891,7 @@ int main(int argc, char** argv)
 	}
 #pragma endregion
 
-#pragma region Status Panel
+#pragma region Panels
 	{
 		auto gui = Feather.CreateEntity("Status Panel");
 
@@ -1028,7 +1028,7 @@ int main(int argc, char** argv)
 							draw_box(childNode);
 						}
 					}
-				};
+					};
 
 				draw_box(*root);
 			}
@@ -1106,7 +1106,7 @@ int main(int argc, char** argv)
 						if (UINT32_MAX != node->children[i]) return false;
 					}
 					return true;
-				};
+					};
 
 				vector<pair<float, OctreeNode*>> distances(inputPositions.size(), { FLT_MAX, nullptr });
 				for (size_t i = 0; i < hostOctree.nodes.size(); i++)
@@ -1276,7 +1276,7 @@ int main(int argc, char** argv)
 									draw_box(childNode);
 								}
 							}
-						};
+							};
 
 						draw_box(*root);
 					}
@@ -1352,7 +1352,7 @@ int main(int argc, char** argv)
 			CUDA_SYNC();
 
 			vector<uint3> faces(cuInstance.d_mesh.numberOfFaces);
-			CUDA_COPY_D2H(faces.data(), cuInstance.d_mesh.faces, sizeof(uint3)* cuInstance.d_mesh.numberOfFaces);
+			CUDA_COPY_D2H(faces.data(), cuInstance.d_mesh.faces, sizeof(uint3) * cuInstance.d_mesh.numberOfFaces);
 			CUDA_SYNC();
 
 			vector<float3> centerPositions(cuInstance.d_mesh.numberOfFaces);
@@ -1573,7 +1573,7 @@ int main(int argc, char** argv)
 					TS(NN);
 
 					for (size_t i = 0; i < inputPositions.size(); i++)
-					//for (size_t i = 0; i < 1000; i++)
+						//for (size_t i = 0; i < 1000; i++)
 					{
 						auto& q = inputPositions[i];
 						float3 np;
@@ -1694,7 +1694,7 @@ int main(int argc, char** argv)
 
 				TS(BVH_INIT);
 				DeviceLBVH bvh;
-				bvh.Initialize(mortonKeys, m, M);
+				//bvh.Initialize(mortonKeys, m, M);
 				TE(BVH_INIT);
 
 				//{
@@ -1803,7 +1803,7 @@ int main(int argc, char** argv)
 							draw_box(&bvh.nodes[node->leftNodeIndex], depth + 1);
 						if (UINT32_MAX != node->rightNodeIndex)
 							draw_box(&bvh.nodes[node->rightNodeIndex], depth + 1);
-					};
+						};
 					LBVHNode* root = &bvh.nodes[0];
 					draw_box(root, 0);
 
@@ -1812,24 +1812,6 @@ int main(int argc, char** argv)
 						string name = "LBVH_" + std::to_string(i);
 						VD::AddToSelectionList(name);
 					}
-				}
-
-				{
-					TS(BVH_VALIDATE);
-					bool ok = bvh.ValidateBVH(bvh.nodes, (unsigned int)mortonKeys.size());
-					if (!ok) {
-						printf("LBVH build failed validation!\n");
-					}
-					TE(BVH_VALIDATE);
-				}
-
-				{
-					TS(BVH_EXTRA_VALIDATE);
-					bool ok = bvh.ExtraValidate(bvh.nodes, (unsigned int)mortonKeys.size());
-					if (!ok) {
-						printf("LBVH build failed extra validation!\n");
-					}
-					TE(BVH_EXTRA_VALIDATE);
 				}
 
 				{
@@ -1867,25 +1849,53 @@ int main(int argc, char** argv)
 			}
 			});
 
-		controlPanel->AddButton("Test Device Radix Sort", 0, 0, [&]() {
-			TS(TestDeviceRadixSort);
-
+		controlPanel->AddButton("Test", 0, 0, [&]() {
 			auto m = cuInstance.d_mesh.min - make_float3(0.001f, 0.001f, 0.001f);
 			auto M = cuInstance.d_mesh.max + make_float3(0.001f, 0.001f, 0.001f);
 
-			vector<float3> positions(cuInstance.d_mesh.numberOfPoints);
-			CUDA_COPY_D2H(positions.data(), cuInstance.d_mesh.positions, sizeof(float3)* cuInstance.d_mesh.numberOfPoints);
+			auto n = cuInstance.d_mesh.numberOfFaces * 2 - 1;
+			vector<LBVHNode> nodes(n);
+			CUDA_COPY_D2H(nodes.data(), cuInstance.d_mesh.bvh.nodes, sizeof(LBVHNode) * n);
 			CUDA_SYNC();
 
-			vector<uint64_t> mortonCodes;
-			mortonCodes.reserve(positions.size());
+			int maxDepth = 32;
+			function<void(LBVHNode*, int)> draw_box;
+			draw_box = [&](LBVHNode* node, int depth) {
+				if (maxDepth < depth) maxDepth = depth;
 
-			for (const auto& p : positions)
+				auto aabbMin = glm::vec3(XYZ(node->aabb.min));
+				auto aabbMax = glm::vec3(XYZ(node->aabb.max));
+				auto center = (aabbMin + aabbMax) * 0.5f;
+				auto len = length(aabbMax - aabbMin);
+				auto code = MortonCode::FromPosition(make_float3(XYZ(center)), m, M);
+				auto cellSize = MortonCode::GetCellSize(code, m, M, depth);
+				cellSize = std::fmaxf(cellSize, 0.1f);
+				string tag = "LBVH_" + std::to_string(depth);
+
+				auto boxColor = Color::Lerp(Color::blue(), Color::red(), (float)depth / (float)maxDepth);
+
+				if (0.05f > length(aabbMax - aabbMin))
+				{
+					VD::AddWiredBox(tag, glm::vec3(XYZ(center)), glm::vec3(0.05f, 0.05f, 0.05f), boxColor);
+				}
+				else
+				{
+					VD::AddWiredBox(tag, { {aabbMin}, {aabbMax} }, boxColor);
+				}
+
+				if (UINT32_MAX != node->leftNodeIndex)
+					draw_box(&nodes[node->leftNodeIndex], depth + 1);
+				if (UINT32_MAX != node->rightNodeIndex)
+					draw_box(&nodes[node->rightNodeIndex], depth + 1);
+				};
+			LBVHNode* root = &nodes[0];
+			draw_box(root, 0);
+
+			for (size_t i = 0; i < maxDepth; i++)
 			{
-				const uint64_t code = MortonCode::FromPosition(p, m, M);
-				mortonCodes.push_back(code);
+				string name = "LBVH_" + std::to_string(i);
+				VD::AddToSelectionList(name);
 			}
-
 			});
 	}
 #pragma endregion

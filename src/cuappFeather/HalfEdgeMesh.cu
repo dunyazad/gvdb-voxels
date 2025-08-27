@@ -747,37 +747,30 @@ void DeviceHalfEdgeMesh::Initialize(unsigned int numberOfPoints, unsigned int nu
 
     min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
     max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+    CUDA_MALLOC(&mortonKeys, sizeof(MortonKey) * numberOfFaces);
 }
 
 void DeviceHalfEdgeMesh::Terminate()
 {
-    if (positions) CUDA_FREE(positions);
-    if (normals) CUDA_FREE(normals);
-    if (colors) CUDA_FREE(colors);
-    if (faces) CUDA_FREE(faces);
-    if (halfEdges) CUDA_FREE(halfEdges);
-    if (halfEdgeFaces) CUDA_FREE(halfEdgeFaces);
-    if (vertexToHalfEdge) CUDA_FREE(vertexToHalfEdge);
+    CUDA_SAFE_FREE(positions);
+    CUDA_SAFE_FREE(normals);
+    CUDA_SAFE_FREE(colors);
+    CUDA_SAFE_FREE(faces);
+    CUDA_SAFE_FREE(halfEdges);
+    CUDA_SAFE_FREE(halfEdgeFaces);
+    CUDA_SAFE_FREE(vertexToHalfEdge);
+    CUDA_SAFE_FREE(mortonKeys);
 
-    positions = nullptr;
-    normals = nullptr;
-    colors = nullptr;
-    faces = nullptr;
-    halfEdges = nullptr;
-    halfEdgeFaces = nullptr;
-    vertexToHalfEdge = nullptr;
+    CUDA_SAFE_FREE(faceNodes);
+
+    faceNodeHashMap.Terminate();
+
     numberOfPoints = 0;
     numberOfFaces = 0;
 
     min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
     max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
-
-    if (nullptr != faceNodes)
-    {
-        CUDA_FREE(faceNodes);
-
-        faceNodeHashMap.Terminate();
-    }
 }
 
 void DeviceHalfEdgeMesh::CopyFromHost(const HostHalfEdgeMesh& hostMesh)
@@ -839,11 +832,6 @@ void DeviceHalfEdgeMesh::RecalcAABB()
 void DeviceHalfEdgeMesh::UpdateBVH()
 {
     bvh.Terminate();
-
-    if (nullptr == mortonKeys)
-    {
-        CUDA_MALLOC(&mortonKeys, sizeof(MortonKey) * numberOfFaces);
-    }
 
     CUDA_TS(InitializeBVH);
     bvh.Initialize(positions, faces, min, max, numberOfFaces);

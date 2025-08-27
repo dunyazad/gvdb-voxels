@@ -119,7 +119,7 @@ typedef double f64;
 #endif
 
 #ifndef CUDA_SAFE_FREE
-#define CUDA_SAFE_FREE(ptr) cudaFree(ptr);
+#define CUDA_SAFE_FREE(ptr) cudaFree(ptr); ptr = nullptr;
 #endif
 
 #ifndef CUDA_MEMSET

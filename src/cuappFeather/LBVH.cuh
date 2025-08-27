@@ -11,12 +11,11 @@ struct MortonKey
     uint64_t code;
     unsigned int index; // 원래 객체 인덱스
 
-    bool operator<(const MortonKey& other) const
+    __host__ __device__ bool operator<(const MortonKey& other) const
     {
-        if (code == other.code)
-            return index < other.index;
-        else
-            return code < other.code;
+        if (code < other.code) return true;
+        if (code > other.code) return false;
+        return index < other.index;
     }
 };
 
@@ -25,6 +24,7 @@ struct LBVHNode
     unsigned int parentNodeIndex = UINT32_MAX;
     unsigned int leftNodeIndex = UINT32_MAX;
     unsigned int rightNodeIndex = UINT32_MAX;
+	unsigned pending = 2;
 
     cuAABB aabb = { make_float3(FLT_MAX,  FLT_MAX,  FLT_MAX),
                     make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX) };
@@ -548,8 +548,19 @@ __global__ void Kernel_DeviceLBVH_InitializeLeafNodes(
     MortonKey* mortonKeys,
     unsigned int numberOfMortonKeys,
     LBVHNode* nodes,
-    const float3& aabbMin,
-    const float3& aabbMax);
+    float3 aabbMin,
+    float3 aabbMax);
+
+__global__ void Kernel_DeviceLBVH_InitializeInternalNodes(
+    MortonKey* mortonKeys,
+    unsigned int numberOfMortonKeys,
+	LBVHNode* nodes);
+
+//__global__ void Kernel_DeviceLBVH_RefitAABB(LBVHNode* nodes, unsigned numberOfMortonKeys);
+
+__global__ void Kernel_DeviceLBVH_RefitAABB(
+    LBVHNode* nodes,
+    unsigned numberOfLeaves);
 
 struct DeviceLBVH
 {
@@ -558,157 +569,49 @@ struct DeviceLBVH
     MortonKey* mortonKeys = nullptr;
     unsigned int numberOfMortonKeys = 0;
 
-    void Initialize(float3* positions,
+    void Initialize(
+        float3* positions,
         uint3* faces,
-        float3 aabbMin,
-        float3 aabbMax,
+        const float3& aabbMin,
+        const float3& aabbMax,
         unsigned int numberOfFaces);
 
-    void Initialize(const std::vector<MortonKey>& mortonKeys, float3 aabbMin, float3 aabbMax)
-    {
-        unsigned int n = (unsigned int)mortonKeys.size();
-        allocatedNodes = 2 * n - 1;
-        nodes = new LBVHNode[allocatedNodes];
+    void Terminate();
 
-        // Leaf nodes: [n-1, 2n-2]
-        for (unsigned int i = 0; i < n; i++)
-        {
-            InitializeLeafNodes(
-                n - 1 + i,
-                mortonKeys[i],
-                nodes,
-                aabbMin,
-                aabbMax
-            );
-        }
-
-        //unsigned root = FindRoot(nodes, n);
-
-        // Internal nodes: [0, n-2]
-        for (unsigned int i = 0; i < n - 1; i++)
-        {
-            InitializeInternalNodes(
-                i,
-                mortonKeys.data(),
-                n,
-                nodes
-            );
-        }
-
-        //for (unsigned i = 0; i < n - 1; i++) {
-        //    if (nodes[i].parentNodeIndex == UINT32_MAX) {
-        //        printf("Candidate root: %u\n", i);
-        //    }
-        //}
-
-        RefitAABB(nodes, n);
-    }
-
-    void Terminate()
-    {
-        CUDA_SAFE_FREE(nodes);
-    }
-
-    static void InitializeLeafNodes(
-        unsigned int leafNodeIndex,
-        const MortonKey& mortonKey,
-        LBVHNode* nodes,
-        const float3& aabbMin,
-        const float3& aabbMax)
-    {
-        LBVHNode& node = nodes[leafNodeIndex];
-
-        node.parentNodeIndex = UINT32_MAX;
-        node.leftNodeIndex = UINT32_MAX;
-        node.rightNodeIndex = UINT32_MAX;
-
-        node.aabb = MortonCode::CodeToAABB(
-            mortonKey.code,
-            aabbMin,
-            aabbMax,
-            MortonCode::GetMaxDepth()
-        );
-    }
-
-    static void InitializeInternalNodes(
-        unsigned int internalIndex,
-        const MortonKey* mortonKeys,
-        unsigned int numberOfMortonCodes,
-        LBVHNode* nodes)
-    {
-        // 내부 노드 마커
-        //nodes[internalIndex].objectIndex = 0xFFFFFFFF;
-
-        // 1) 범위 찾기 (determine_range 대응)
-        unsigned int first, last;
-        FindRange(mortonKeys, numberOfMortonCodes, internalIndex, first, last);
-
-        // 2) split 찾기 (find_split 대응)
-        unsigned int split = FindSplit(mortonKeys, first, last);
-
-        // 3) 자식 인덱스 계산
-        unsigned int leftIndex = split;
-        unsigned int rightIndex = split + 1;
-
-        if (std::min(first, last) == split)
-        {
-            leftIndex += numberOfMortonCodes - 1;
-        }
-        if (std::max(first, last) == split + 1)
-        {
-            rightIndex += numberOfMortonCodes - 1;
-        }
-
-        // 4) 부모-자식 연결
-        nodes[internalIndex].leftNodeIndex = leftIndex;
-        nodes[internalIndex].rightNodeIndex = rightIndex;
-
-        if (UINT32_MAX != nodes[leftIndex].parentNodeIndex)
-        {
-            printf("Error: left child %u already has parent %u (new parent %u)\n",
-                leftIndex, nodes[leftIndex].parentNodeIndex, internalIndex);
-
-            return;
-        }
-        else
-        {
-            nodes[leftIndex].parentNodeIndex = internalIndex;
-        }
-        if (UINT32_MAX != nodes[rightIndex].parentNodeIndex)
-        {
-            printf("Error: right child %u already has parent %u (new parent %u)\n",
-                rightIndex, nodes[rightIndex].parentNodeIndex, internalIndex);
-
-            return;
-        }
-        else
-        {
-            nodes[rightIndex].parentNodeIndex = internalIndex;
-        }
-    }
-
-    static unsigned int CountLeadingZeros64(uint64_t x)
+    __host__ __device__ static unsigned int CountLeadingZeros64(uint64_t x)
     {
         if (x == 0) return 64;
-#if defined(_MSC_VER)
+
+#ifdef __CUDA_ARCH__
+        unsigned int hi = (unsigned int)(x >> 32);
+        if (hi) {
+            return __clz(hi);
+        }
+        else {
+            unsigned int lo = (unsigned int)x;
+            return 32 + __clz(lo);
+        }
+#else
+#  if defined(_MSC_VER)
         unsigned long index;
         _BitScanReverse64(&index, x);
         return 63 - index;
-#else
+#  else
         return __builtin_clzll(x);
+#  endif
 #endif
     }
 
-    static unsigned int CommonPrefixLength(const MortonKey& a, const MortonKey& b)
+    __host__ __device__ static unsigned int CommonPrefixLength(const MortonKey& a, const MortonKey& b)
     {
         if (a.code == b.code) {
-            // 코드가 같으면 index 비교로 유일성 확보
-            return 64 + (a.index == b.index ? 32 : CountLeadingZeros64((uint64_t)(a.index ^ b.index)));
+            uint64_t diff = (uint64_t)(a.index ^ b.index);
+            return 64 + (diff ? CountLeadingZeros64(diff) : 0);
         }
         return CountLeadingZeros64(a.code ^ b.code);
     }
 
-    static void FindRange(
+    __host__ __device__ static void FindRange(
         const MortonKey* mortonKeys,
         unsigned int numCodes,
         unsigned int index,
@@ -776,47 +679,43 @@ struct DeviceLBVH
         if (direction < 0)
         {
             // idx < jdx 보장
-            std::swap(index, jdx);
+			auto tmp = index;
+			index = jdx;
+			jdx = tmp;
         }
 
         first = index;
         last = jdx;
     }
 
-    static unsigned int FindSplit(
-        const MortonKey* mortonKeys,
+    __host__ __device__ static unsigned int FindSplit(const MortonKey* mortonKeys,
         unsigned int first,
         unsigned int last)
     {
+        if (first == last) return first;
+
         const MortonKey& firstKey = mortonKeys[first];
         const MortonKey& lastKey = mortonKeys[last];
 
-        //// 모든 코드가 동일한 경우 중앙값 반환
-        //if (firstKey == lastKey)
-        //{
-        //    return (first + last) >> 1;
-        //}
+        if (firstKey.code == lastKey.code) {
+            return (first + last) >> 1;
+        }
 
-        const int delta_node = CommonPrefixLength(firstKey, lastKey);
+        int delta_node = CommonPrefixLength(firstKey, lastKey);
 
-        // binary search...
-        int split = first;
-        int stride = last - first;
-        do
-        {
-            stride = (stride + 1) >> 1;
-            const int middle = split + stride;
-            if (middle < (int)last)
-            {
-                const int delta = CommonPrefixLength(firstKey, mortonKeys[middle]);
-                if (delta > delta_node)
-                {
-                    split = middle;
-                }
+        unsigned int lo = first;
+        unsigned int hi = last;
+        while (lo + 1 < hi) {
+            unsigned int mid = (lo + hi) >> 1;
+            int delta = CommonPrefixLength(firstKey, mortonKeys[mid]);
+            if (delta > delta_node) {
+                lo = mid;
             }
-        } while (stride > 1);
-
-        return split;
+            else {
+                hi = mid;
+            }
+        }
+        return lo;
     }
 
     static __forceinline__ unsigned FindRootInternal(const LBVHNode* nodes, unsigned n)
@@ -830,179 +729,82 @@ struct DeviceLBVH
         return root; // 반드시 하나여야 함(Validate에서 확인 가능)
     }
 
-    static void RefitAABB(LBVHNode* nodes, unsigned numberOfMortonCodes)
+    __host__ __device__ static void BruteForceRange(
+        const MortonKey* mortonKeys,
+        unsigned int numCodes,
+        unsigned int index,
+        unsigned int& first,
+        unsigned int& last)
     {
-        const unsigned n = numberOfMortonCodes;
-        const unsigned leafBegin = n - 1;
-        const unsigned leafEnd = 2 * n - 2;
+        // 루트 처리
+        if (index == 0) {
+            first = 0;
+            last = numCodes - 1;
+            return;
+        }
 
-        unsigned root = FindRootInternal(nodes, n);
-        if (root == UINT32_MAX) return; // 안전장치
+        const MortonKey& key = mortonKeys[index];
 
-        // 비재귀 post-order
-        struct Frame { unsigned idx; bool expanded; };
-        std::vector<Frame> stack;
-        stack.reserve(n);
-        stack.push_back({ root, false });
+        // 기준 좌우 공통 prefix
+        const int L_delta = CommonPrefixLength(key, mortonKeys[index - 1]);
+        const int R_delta = CommonPrefixLength(key, mortonKeys[index + 1]);
+        const int direction = (R_delta > L_delta) ? 1 : -1;
 
-        while (!stack.empty())
-        {
-            auto [idx, expanded] = stack.back();
-            stack.pop_back();
+        const int delta_min = min(L_delta, R_delta);
 
-            const bool isLeaf = (idx >= leafBegin && idx <= leafEnd);
-            if (isLeaf) continue;
+        // ------------------------------------
+        // 브루트포스 : 방향으로 쭉 나가면서 delta 체크
+        // ------------------------------------
+        int j = index;
+        while (true) {
+            int next = j + direction;
+            if (next < 0 || next >= (int)numCodes) break;
 
-            if (!expanded)
-            {
-                // 다시 나 자신을 'expanded=true'로 푸시하고, 자식들을 먼저 처리
-                stack.push_back({ idx, true });
-                stack.push_back({ nodes[idx].rightNodeIndex, false });
-                stack.push_back({ nodes[idx].leftNodeIndex,  false });
-            }
-            else
-            {
-                // 양쪽 자식이 처리되었으므로 합치기
-                const LBVHNode& L = nodes[nodes[idx].leftNodeIndex];
-                const LBVHNode& R = nodes[nodes[idx].rightNodeIndex];
-                nodes[idx].aabb = cuAABB::merge(L.aabb, R.aabb);
-            }
+            int delta = CommonPrefixLength(key, mortonKeys[next]);
+            if (delta <= delta_min) break;  // 더 이상 같은 range 아님
+
+            j = next;
+        }
+
+        if (direction > 0) {
+            first = index;
+            last = j;
+        }
+        else {
+            first = j;
+            last = index;
         }
     }
 
-    static bool ValidateBVH(const LBVHNode* nodes,
-        unsigned int numberOfMortonCodes)
+    __host__ __device__ static unsigned int FindSplitBruteForce(
+        const MortonKey* mortonKeys,
+        unsigned int first,
+        unsigned int last)
     {
-        unsigned int nodeCount = 2 * numberOfMortonCodes - 1;
-        unsigned int rootIndex = 0; // CPU 버전은 0번이 root
+        if (first == last) return first; // degenerate
 
-        // 모든 노드가 방문되었는지 체크
-        std::vector<bool> visited(nodeCount, false);
+        const MortonKey& firstKey = mortonKeys[first];
+        const MortonKey& lastKey = mortonKeys[last];
 
-        // BFS/DFS 로 탐색
-        std::stack<unsigned int> stack;
-        stack.push(rootIndex);
-        visited[rootIndex] = true;
+        // 모든 코드가 동일하다면 그냥 중앙값
+        if (firstKey.code == lastKey.code) {
+            return (first + last) >> 1;
+        }
 
-        while (!stack.empty())
+        const int delta_node = CommonPrefixLength(firstKey, lastKey);
+
+        // brute force: first+1 ~ last-1 사이에서 검사
+        unsigned int split = first;
+        for (unsigned int i = first + 1; i < last; i++)
         {
-            unsigned int idx = stack.top();
-            stack.pop();
-            const LBVHNode& node = nodes[idx];
-
-            // root 의 parent 는 반드시 UINT32_MAX
-            if (idx == rootIndex)
-            {
-                if (node.parentNodeIndex != UINT32_MAX)
-                {
-                    printf("Error: root node %u should have no parent (got %u)!\n",
-                        idx, node.parentNodeIndex);
-                    return false;
-                }
-            }
+            int delta = CommonPrefixLength(firstKey, mortonKeys[i]);
+            if (delta > delta_node)
+                split = i;
             else
-            {
-                // parent 가 유효한 범위 안에 있어야 함
-                if (node.parentNodeIndex >= nodeCount)
-                {
-                    printf("Error: node %u has invalid parent %u!\n",
-                        idx, node.parentNodeIndex);
-                    return false;
-                }
-                // 부모-자식 연결 확인
-                const LBVHNode& parent = nodes[node.parentNodeIndex];
-                if (parent.leftNodeIndex != idx && parent.rightNodeIndex != idx)
-                {
-                    printf("Error: node %u is not listed as a child of its parent %u!\n",
-                        idx, node.parentNodeIndex);
-                    return false;
-                }
-            }
-
-            // 왼쪽 자식
-            if (node.leftNodeIndex != UINT32_MAX)
-            {
-                if (nodes[node.leftNodeIndex].parentNodeIndex != idx)
-                {
-                    printf("Error: node %u left child %u has wrong parent %u!\n",
-                        idx, node.leftNodeIndex,
-                        nodes[node.leftNodeIndex].parentNodeIndex);
-                    return false;
-                }
-                if (!visited[node.leftNodeIndex])
-                {
-                    visited[node.leftNodeIndex] = true;
-                    stack.push(node.leftNodeIndex);
-                }
-            }
-
-            // 오른쪽 자식
-            if (node.rightNodeIndex != UINT32_MAX)
-            {
-                if (nodes[node.rightNodeIndex].parentNodeIndex != idx)
-                {
-                    printf("Error: node %u right child %u has wrong parent %u!\n",
-                        idx, node.rightNodeIndex,
-                        nodes[node.rightNodeIndex].parentNodeIndex);
-                    return false;
-                }
-                if (!visited[node.rightNodeIndex])
-                {
-                    visited[node.rightNodeIndex] = true;
-                    stack.push(node.rightNodeIndex);
-                }
-            }
+                break; // prefix 길이가 더 이상 유지되지 않으면 멈춤
         }
 
-        // 방문되지 않은 노드 체크 (Disconnected 여부)
-        for (unsigned int i = 0; i < nodeCount; i++)
-        {
-            if (!visited[i])
-            {
-                printf("Error: node %u is disconnected from root!\n", i);
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    static bool ExtraValidate(const LBVHNode* nodes, unsigned n)
-    {
-        const unsigned total = 2u * n - 1u;
-        const unsigned leafBegin = n - 1;
-
-        // 루트 개수 체크
-        unsigned root = FindRootInternal(nodes, n);
-        if (root == UINT32_MAX) { printf("Error: no root found!\n"); return false; }
-
-        // DFS로 연결성/사이클 체크
-        std::vector<char> visited(total, 0);
-        std::vector<unsigned> st; st.reserve(n);
-        st.push_back(root);
-
-        while (!st.empty())
-        {
-            unsigned u = st.back(); st.pop_back();
-            if (visited[u]) continue;
-            visited[u] = 1;
-
-            const bool isLeaf = (u >= leafBegin);
-            if (!isLeaf)
-            {
-                unsigned L = nodes[u].leftNodeIndex;
-                unsigned R = nodes[u].rightNodeIndex;
-                if (L >= total || R >= total) { printf("Error: child index OOB\n"); return false; }
-                st.push_back(L); st.push_back(R);
-            }
-        }
-
-        // 모든 노드가 루트에서 도달 가능한가?
-        for (unsigned i = 0; i < total; ++i)
-        {
-            if (!visited[i]) { printf("Error: node %u is disconnected from root!\n", i); return false; }
-        }
-        return true;
+        return split;
     }
 
     int NearestNeighbor(const float3& query, const std::vector<MortonKey>& mortonKeys, const std::vector<float3>& points, float3& nearestPosition)
