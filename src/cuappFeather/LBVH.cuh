@@ -9,7 +9,7 @@
 struct MortonKey
 {
     uint64_t code;
-    unsigned int index; // 원래 객체 인덱스
+    unsigned int index;
 
     __host__ __device__ bool operator<(const MortonKey& other) const
     {
@@ -53,8 +53,6 @@ struct HostLBVH
             );
         }
 
-        //unsigned root = FindRoot(nodes, n);
-
         // Internal nodes: [0, n-2]
         for (unsigned int i = 0; i < n - 1; i++)
         {
@@ -65,12 +63,6 @@ struct HostLBVH
                 nodes
             );
         }
-
-        //for (unsigned i = 0; i < n - 1; i++) {
-        //    if (nodes[i].parentNodeIndex == UINT32_MAX) {
-        //        printf("Candidate root: %u\n", i);
-        //    }
-        //}
 
         RefitAABB(nodes, n);
     }
@@ -111,17 +103,11 @@ struct HostLBVH
         unsigned int numberOfMortonCodes,
         LBVHNode* nodes)
     {
-        // 내부 노드 마커
-        //nodes[internalIndex].objectIndex = 0xFFFFFFFF;
-
-        // 1) 범위 찾기 (determine_range 대응)
         unsigned int first, last;
         FindRange(mortonKeys, numberOfMortonCodes, internalIndex, first, last);
 
-        // 2) split 찾기 (find_split 대응)
         unsigned int split = FindSplit(mortonKeys, first, last);
 
-        // 3) 자식 인덱스 계산
         unsigned int leftIndex = split;
         unsigned int rightIndex = split + 1;
 
@@ -134,7 +120,6 @@ struct HostLBVH
             rightIndex += numberOfMortonCodes - 1;
         }
 
-        // 4) 부모-자식 연결
         nodes[internalIndex].leftNodeIndex = leftIndex;
         nodes[internalIndex].rightNodeIndex = rightIndex;
 
@@ -177,7 +162,6 @@ struct HostLBVH
     static unsigned int CommonPrefixLength(const MortonKey& a, const MortonKey& b)
     {
         if (a.code == b.code) {
-            // 코드가 같으면 index 비교로 유일성 확보
             return 64 + (a.index == b.index ? 32 : CountLeadingZeros64((uint64_t)(a.index ^ b.index)));
         }
         return CountLeadingZeros64(a.code ^ b.code);
@@ -192,24 +176,19 @@ struct HostLBVH
     {
         if (index == 0)
         {
-            // 루트는 전체 범위
             first = 0;
             last = numCodes - 1;
             return;
         }
 
-        // 기준 코드
         const MortonKey& key = mortonKeys[index];
 
-        // 좌/우 prefix 길이
         const int L_delta = CommonPrefixLength(key, mortonKeys[index - 1]);
         const int R_delta = CommonPrefixLength(key, mortonKeys[index + 1]);
         const int direction = (R_delta > L_delta) ? 1 : -1;
 
-        // 최소 공통 prefix
         const int delta_min = std::min(L_delta, R_delta);
 
-        // 지수적 확장
         int l_max = 2;
         int delta = -1;
         int j = index + direction * l_max;
@@ -228,7 +207,6 @@ struct HostLBVH
             }
         }
 
-        // 이진 탐색
         int l = 0;
         int t = l_max >> 1;
         while (t > 0)
@@ -250,7 +228,6 @@ struct HostLBVH
 
         if (direction < 0)
         {
-            // idx < jdx 보장
             std::swap(index, jdx);
         }
 
@@ -266,15 +243,13 @@ struct HostLBVH
         const MortonKey& firstKey = mortonKeys[first];
         const MortonKey& lastKey = mortonKeys[last];
 
-        //// 모든 코드가 동일한 경우 중앙값 반환
-        //if (firstKey == lastKey)
-        //{
-        //    return (first + last) >> 1;
-        //}
+        if (firstKey.code == lastKey.code)
+        {
+            return (first + last) >> 1;
+        }
 
         const int delta_node = CommonPrefixLength(firstKey, lastKey);
 
-        // binary search...
         int split = first;
         int stride = last - first;
         do
@@ -302,7 +277,7 @@ struct HostLBVH
         {
             if (nodes[i].parentNodeIndex == UINT32_MAX) { root = i; break; }
         }
-        return root; // 반드시 하나여야 함(Validate에서 확인 가능)
+        return root;
     }
 
     static void RefitAABB(LBVHNode* nodes, unsigned numberOfMortonCodes)
@@ -312,9 +287,8 @@ struct HostLBVH
         const unsigned leafEnd = 2 * n - 2;
 
         unsigned root = FindRootInternal(nodes, n);
-        if (root == UINT32_MAX) return; // 안전장치
+        if (root == UINT32_MAX) return;
 
-        // 비재귀 post-order
         struct Frame { unsigned idx; bool expanded; };
         std::vector<Frame> stack;
         stack.reserve(n);
@@ -349,12 +323,10 @@ struct HostLBVH
         unsigned int numberOfMortonCodes)
     {
         unsigned int nodeCount = 2 * numberOfMortonCodes - 1;
-        unsigned int rootIndex = 0; // CPU 버전은 0번이 root
+        unsigned int rootIndex = 0;
 
-        // 모든 노드가 방문되었는지 체크
         std::vector<bool> visited(nodeCount, false);
 
-        // BFS/DFS 로 탐색
         std::stack<unsigned int> stack;
         stack.push(rootIndex);
         visited[rootIndex] = true;
@@ -365,7 +337,6 @@ struct HostLBVH
             stack.pop();
             const LBVHNode& node = nodes[idx];
 
-            // root 의 parent 는 반드시 UINT32_MAX
             if (idx == rootIndex)
             {
                 if (node.parentNodeIndex != UINT32_MAX)
@@ -377,14 +348,12 @@ struct HostLBVH
             }
             else
             {
-                // parent 가 유효한 범위 안에 있어야 함
                 if (node.parentNodeIndex >= nodeCount)
                 {
                     printf("Error: node %u has invalid parent %u!\n",
                         idx, node.parentNodeIndex);
                     return false;
                 }
-                // 부모-자식 연결 확인
                 const LBVHNode& parent = nodes[node.parentNodeIndex];
                 if (parent.leftNodeIndex != idx && parent.rightNodeIndex != idx)
                 {
@@ -394,7 +363,6 @@ struct HostLBVH
                 }
             }
 
-            // 왼쪽 자식
             if (node.leftNodeIndex != UINT32_MAX)
             {
                 if (nodes[node.leftNodeIndex].parentNodeIndex != idx)
@@ -411,7 +379,6 @@ struct HostLBVH
                 }
             }
 
-            // 오른쪽 자식
             if (node.rightNodeIndex != UINT32_MAX)
             {
                 if (nodes[node.rightNodeIndex].parentNodeIndex != idx)
@@ -429,7 +396,6 @@ struct HostLBVH
             }
         }
 
-        // 방문되지 않은 노드 체크 (Disconnected 여부)
         for (unsigned int i = 0; i < nodeCount; i++)
         {
             if (!visited[i])
@@ -447,11 +413,9 @@ struct HostLBVH
         const unsigned total = 2u * n - 1u;
         const unsigned leafBegin = n - 1;
 
-        // 루트 개수 체크
         unsigned root = FindRootInternal(nodes, n);
         if (root == UINT32_MAX) { printf("Error: no root found!\n"); return false; }
 
-        // DFS로 연결성/사이클 체크
         std::vector<char> visited(total, 0);
         std::vector<unsigned> st; st.reserve(n);
         st.push_back(root);
@@ -472,7 +436,6 @@ struct HostLBVH
             }
         }
 
-        // 모든 노드가 루트에서 도달 가능한가?
         for (unsigned i = 0; i < total; ++i)
         {
             if (!visited[i]) { printf("Error: node %u is disconnected from root!\n", i); return false; }
@@ -508,7 +471,6 @@ struct HostLBVH
                 unsigned leafIdx = idx - (n - 1);
                 const MortonKey& mk = mortonKeys[leafIdx];
 
-                // MortonKey.index = 원래 객체 인덱스
                 float3 objPos = points[mk.index];
 
                 float dist2 = length2(query - objPos);
@@ -556,7 +518,9 @@ __global__ void Kernel_DeviceLBVH_InitializeInternalNodes(
     unsigned int numberOfMortonKeys,
 	LBVHNode* nodes);
 
-//__global__ void Kernel_DeviceLBVH_RefitAABB(LBVHNode* nodes, unsigned numberOfMortonKeys);
+__global__ void Kernel_DeviceLBVH_SetParentNodes(
+    LBVHNode* nodes,
+    unsigned int numberOfMortonKeys);
 
 __global__ void Kernel_DeviceLBVH_RefitAABB(
     LBVHNode* nodes,
@@ -605,9 +569,9 @@ struct DeviceLBVH
     __host__ __device__ static unsigned int CommonPrefixLength(const MortonKey& a, const MortonKey& b)
     {
         if (a.code == b.code) {
-            uint64_t diff = (uint64_t)(a.index ^ b.index);
-            return 64 + (diff ? CountLeadingZeros64(diff) : 0);
+            return 64 + CountLeadingZeros64((uint64_t)(a.index ^ b.index));
         }
+
         return CountLeadingZeros64(a.code ^ b.code);
     }
 
@@ -618,104 +582,75 @@ struct DeviceLBVH
         unsigned int& first,
         unsigned int& last)
     {
-        if (index == 0)
-        {
-            // 루트는 전체 범위
+        if (index == 0) {
             first = 0;
             last = numCodes - 1;
             return;
         }
 
-        // 기준 코드
         const MortonKey& key = mortonKeys[index];
+        int L_delta = CommonPrefixLength(key, mortonKeys[index - 1]);
+        int R_delta = CommonPrefixLength(key, mortonKeys[index + 1]);
+        int direction = (R_delta > L_delta) ? 1 : -1;
+        int delta_min = (L_delta < R_delta ? L_delta : R_delta);
 
-        // 좌/우 prefix 길이
-        const int L_delta = CommonPrefixLength(key, mortonKeys[index - 1]);
-        const int R_delta = CommonPrefixLength(key, mortonKeys[index + 1]);
-        const int direction = (R_delta > L_delta) ? 1 : -1;
-
-        // 최소 공통 prefix
-        const int delta_min = std::min(L_delta, R_delta);
-
-        // 지수적 확장
         int l_max = 2;
-        int delta = -1;
         int j = index + direction * l_max;
-        if (0 <= j && j < (int)numCodes)
-        {
-            delta = CommonPrefixLength(key, mortonKeys[j]);
-        }
-        while (delta > delta_min)
-        {
+        int delta = -1;
+        if (j >= 0 && j < (int)numCodes) delta = CommonPrefixLength(key, mortonKeys[j]);
+
+        while (delta > delta_min) {
             l_max <<= 1;
             j = index + direction * l_max;
             delta = -1;
-            if (0 <= j && j < (int)numCodes)
-            {
-                delta = CommonPrefixLength(key, mortonKeys[j]);
-            }
+            if (j >= 0 && j < (int)numCodes) delta = CommonPrefixLength(key, mortonKeys[j]);
         }
 
-        // 이진 탐색
         int l = 0;
         int t = l_max >> 1;
-        while (t > 0)
-        {
+        while (t > 0) {
             j = index + (l + t) * direction;
             delta = -1;
-            if (0 <= j && j < (int)numCodes)
-            {
-                delta = CommonPrefixLength(key, mortonKeys[j]);
-            }
-            if (delta > delta_min)
-            {
-                l += t;
-            }
+            if (j >= 0 && j < (int)numCodes) delta = CommonPrefixLength(key, mortonKeys[j]);
+            if (delta > delta_min) l += t;
             t >>= 1;
         }
 
         unsigned int jdx = index + l * direction;
-
-        if (direction < 0)
-        {
-            // idx < jdx 보장
-			auto tmp = index;
-			index = jdx;
-			jdx = tmp;
+        if (direction < 0) {
+            unsigned int tmp = index;
+            index = jdx;
+            jdx = tmp;
         }
 
         first = index;
         last = jdx;
     }
 
-    __host__ __device__ static unsigned int FindSplit(const MortonKey* mortonKeys,
+    __host__ __device__ static unsigned int FindSplit(
+        const MortonKey* mortonKeys,
         unsigned int first,
         unsigned int last)
     {
-        if (first == last) return first;
-
         const MortonKey& firstKey = mortonKeys[first];
         const MortonKey& lastKey = mortonKeys[last];
 
-        if (firstKey.code == lastKey.code) {
-            return (first + last) >> 1;
-        }
+        const int delta_node = CommonPrefixLength(firstKey, lastKey);
 
-        int delta_node = CommonPrefixLength(firstKey, lastKey);
+        int split = first;
+        int stride = last - first;
+        do {
+            stride = (stride + 1) >> 1;
+            const int middle = split + stride;
+            if (middle < (int)last) {
+                const int delta = CommonPrefixLength(firstKey, mortonKeys[middle]);
+                if (delta > delta_node) {
+                    split = middle;
+                }
+            }
+        } while (stride > 1);
 
-        unsigned int lo = first;
-        unsigned int hi = last;
-        while (lo + 1 < hi) {
-            unsigned int mid = (lo + hi) >> 1;
-            int delta = CommonPrefixLength(firstKey, mortonKeys[mid]);
-            if (delta > delta_node) {
-                lo = mid;
-            }
-            else {
-                hi = mid;
-            }
-        }
-        return lo;
+        return split;
     }
 
     static __forceinline__ unsigned FindRootInternal(const LBVHNode* nodes, unsigned n)
@@ -726,7 +661,7 @@ struct DeviceLBVH
         {
             if (nodes[i].parentNodeIndex == UINT32_MAX) { root = i; break; }
         }
-        return root; // 반드시 하나여야 함(Validate에서 확인 가능)
+        return root;
     }
 
     __host__ __device__ static void BruteForceRange(
@@ -736,7 +671,6 @@ struct DeviceLBVH
         unsigned int& first,
         unsigned int& last)
     {
-        // 루트 처리
         if (index == 0) {
             first = 0;
             last = numCodes - 1;
@@ -745,23 +679,19 @@ struct DeviceLBVH
 
         const MortonKey& key = mortonKeys[index];
 
-        // 기준 좌우 공통 prefix
         const int L_delta = CommonPrefixLength(key, mortonKeys[index - 1]);
         const int R_delta = CommonPrefixLength(key, mortonKeys[index + 1]);
         const int direction = (R_delta > L_delta) ? 1 : -1;
 
         const int delta_min = min(L_delta, R_delta);
 
-        // ------------------------------------
-        // 브루트포스 : 방향으로 쭉 나가면서 delta 체크
-        // ------------------------------------
         int j = index;
         while (true) {
             int next = j + direction;
             if (next < 0 || next >= (int)numCodes) break;
 
             int delta = CommonPrefixLength(key, mortonKeys[next]);
-            if (delta <= delta_min) break;  // 더 이상 같은 range 아님
+            if (delta <= delta_min) break;
 
             j = next;
         }
@@ -786,14 +716,12 @@ struct DeviceLBVH
         const MortonKey& firstKey = mortonKeys[first];
         const MortonKey& lastKey = mortonKeys[last];
 
-        // 모든 코드가 동일하다면 그냥 중앙값
         if (firstKey.code == lastKey.code) {
             return (first + last) >> 1;
         }
 
         const int delta_node = CommonPrefixLength(firstKey, lastKey);
 
-        // brute force: first+1 ~ last-1 사이에서 검사
         unsigned int split = first;
         for (unsigned int i = first + 1; i < last; i++)
         {
@@ -801,7 +729,7 @@ struct DeviceLBVH
             if (delta > delta_node)
                 split = i;
             else
-                break; // prefix 길이가 더 이상 유지되지 않으면 멈춤
+                break;
         }
 
         return split;
@@ -835,7 +763,6 @@ struct DeviceLBVH
                 unsigned leafIdx = idx - (n - 1);
                 const MortonKey& mk = mortonKeys[leafIdx];
 
-                // MortonKey.index = 원래 객체 인덱스
                 float3 objPos = points[mk.index];
 
                 float dist2 = length2(query - objPos);

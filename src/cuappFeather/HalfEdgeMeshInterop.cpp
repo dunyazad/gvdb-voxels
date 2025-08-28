@@ -23,11 +23,31 @@ void HalfEdgeMeshInterop::Initialize(Renderable* renderable)
     numIndices = renderable->GetIndices().size();
 
     // VBO 등록
-    cudaGraphicsGLRegisterBuffer(&cudaVboPos, vboPos, cudaGraphicsRegisterFlagsNone);
-    cudaGraphicsGLRegisterBuffer(&cudaVboNormal, vboNormal, cudaGraphicsRegisterFlagsNone);
-    cudaGraphicsGLRegisterBuffer(&cudaVboColor, vboColor, cudaGraphicsRegisterFlagsNone);
+    cudaError_t err;
+    err = cudaGraphicsGLRegisterBuffer(&cudaVboPos, vboPos, cudaGraphicsRegisterFlagsNone);
+    if (err != cudaSuccess) {
+        std::cerr << "cudaGraphicsGLRegisterBuffer (vboPos) failed: "
+            << cudaGetErrorString(err) << std::endl;
+    }
+
+    err = cudaGraphicsGLRegisterBuffer(&cudaVboNormal, vboNormal, cudaGraphicsRegisterFlagsNone);
+    if (err != cudaSuccess) {
+        std::cerr << "cudaGraphicsGLRegisterBuffer (vboPos) failed: "
+            << cudaGetErrorString(err) << std::endl;
+    }
+
+    err = cudaGraphicsGLRegisterBuffer(&cudaVboColor, vboColor, cudaGraphicsRegisterFlagsNone);
+    if (err != cudaSuccess) {
+        std::cerr << "cudaGraphicsGLRegisterBuffer (vboPos) failed: "
+            << cudaGetErrorString(err) << std::endl;
+    }
+
     // EBO 등록
-    cudaGraphicsGLRegisterBuffer(&cudaEbo, ebo, cudaGraphicsRegisterFlagsNone);
+    err = cudaGraphicsGLRegisterBuffer(&cudaEbo, ebo, cudaGraphicsRegisterFlagsNone);
+    if (err != cudaSuccess) {
+        std::cerr << "cudaGraphicsGLRegisterBuffer (vboPos) failed: "
+            << cudaGetErrorString(err) << std::endl;
+    }
 }
 
 void HalfEdgeMeshInterop::Terminate()

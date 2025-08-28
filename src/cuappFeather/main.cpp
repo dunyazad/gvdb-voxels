@@ -1853,10 +1853,39 @@ int main(int argc, char** argv)
 			auto m = cuInstance.d_mesh.min - make_float3(0.001f, 0.001f, 0.001f);
 			auto M = cuInstance.d_mesh.max + make_float3(0.001f, 0.001f, 0.001f);
 
+			DeviceLBVH bvh;
+			bvh.Initialize(
+				cuInstance.d_mesh.positions,
+				cuInstance.d_mesh.faces, 
+				m, M,
+				cuInstance.d_mesh.numberOfFaces);
+
+
 			auto n = cuInstance.d_mesh.numberOfFaces * 2 - 1;
 			vector<LBVHNode> nodes(n);
-			CUDA_COPY_D2H(nodes.data(), cuInstance.d_mesh.bvh.nodes, sizeof(LBVHNode) * n);
+			CUDA_COPY_D2H(nodes.data(), bvh.nodes, sizeof(LBVHNode) * n);
 			CUDA_SYNC();
+
+
+
+
+
+			for (int i = 0; i < cuInstance.d_mesh.numberOfFaces - 1; i++) {
+				if (nodes[i].pending != 0) {
+					printf("Node %d still has pending=%d (left=%u, right=%u)\n",
+						i, nodes[i].pending,
+						nodes[i].leftNodeIndex,
+						nodes[i].rightNodeIndex);
+				}
+			}
+
+
+
+
+
+
+
+
 
 			int maxDepth = 32;
 			function<void(LBVHNode*, int)> draw_box;
@@ -1891,11 +1920,19 @@ int main(int argc, char** argv)
 			LBVHNode* root = &nodes[0];
 			draw_box(root, 0);
 
+
+			VD::ClearSelectionList();
 			for (size_t i = 0; i < maxDepth; i++)
 			{
 				string name = "LBVH_" + std::to_string(i);
 				VD::AddToSelectionList(name);
 			}
+
+			bvh.Terminate();
+			});
+
+		controlPanel->AddButton("Test - Host vs Device", 0, 0, [&]() {
+			DoTest();
 			});
 	}
 #pragma endregion

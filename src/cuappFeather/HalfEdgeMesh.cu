@@ -827,6 +827,9 @@ void DeviceHalfEdgeMesh::RecalcAABB()
     CUDA_COPY_D2H(&max, d_max, sizeof(float3));
 
     CUDA_SYNC();
+
+	CUDA_SAFE_FREE(d_min);
+    CUDA_SAFE_FREE(d_max);
 }
 
 void DeviceHalfEdgeMesh::UpdateBVH()
