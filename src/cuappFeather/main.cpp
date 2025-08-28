@@ -1930,10 +1930,6 @@ int main(int argc, char** argv)
 
 			bvh.Terminate();
 			});
-
-		controlPanel->AddButton("Test - Host vs Device", 0, 0, [&]() {
-			DoTest();
-			});
 	}
 #pragma endregion
 
