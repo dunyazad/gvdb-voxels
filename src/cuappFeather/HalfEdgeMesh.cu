@@ -669,6 +669,15 @@ __global__ void Kernel_DeviceHalfEdgeMesh_GetFaceCurvatures(
     const HalfEdge* halfEdges,
     unsigned int numberOfFaces,
     float* outCurvatures);
+
+__global__ void Kernel_DeviceHalfEdgeMesh_FindDegenerateFaces(
+    const float3* positions,
+	const HalfEdge* halfEdges,
+    const uint3* faces,
+    unsigned int numberOfFaces,
+    float areaThreshold,
+    unsigned int* outIndices,
+    unsigned int* outCount);
 #pragma endregion
 
 #pragma region DeviceHalfEdgeMesh
@@ -1566,6 +1575,18 @@ vector<float> DeviceHalfEdgeMesh::GetFaceCurvatures()
     CUDA_FREE(d_curvatures);
 
     return h_curvatures;
+}
+
+void DeviceHalfEdgeMesh::FindDegenerateFaces(vector<unsigned int>& outFaceIndices) const
+{
+	unsigned int* d_degenerateFaceIndices = nullptr;
+	unsigned int* d_degenerateCount = nullptr;
+	CUDA_MALLOC(&d_degenerateFaceIndices, sizeof(unsigned int) * numberOfFaces);
+	CUDA_MALLOC(&d_degenerateCount, sizeof(unsigned int));
+	CUDA_MEMSET(d_degenerateCount, 0, sizeof(unsigned int));
+    LaunchKernel(Kernel_DeviceHalfEdgeMesh_FindDegenerateFaces, numberOfFaces,
+		positions, halfEdges, faces, numberOfFaces, 0.0001f,
+		d_degenerateFaceIndices, d_degenerateCount);
 }
 #pragma endregion
 
@@ -2549,5 +2570,47 @@ __global__ void Kernel_DeviceHalfEdgeMesh_GetFaceCurvatures(
         ++count;
     }
     outCurvatures[f] = (count > 0) ? (sumAngles / count) : 0.0f;
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_FindDegenerateFaces(
+    const float3* positions,
+    const HalfEdge* halfEdges,
+    const uint3* faces,
+    unsigned int numberOfFaces,
+    float areaThreshold,
+    unsigned int* outIndices,
+    unsigned int* outCount)
+{
+    unsigned int f = blockIdx.x * blockDim.x + threadIdx.x;
+    if (f >= numberOfFaces) return;
+    const uint3 tri = faces[f];
+    float3 v0 = positions[tri.x];
+    float3 v1 = positions[tri.y];
+    float3 v2 = positions[tri.z];
+    float area = length(cross(v1 - v0, v2 - v0)) * 0.5f;
+    if (area < areaThreshold)
+    {
+        unsigned int idx = atomicAdd(outCount, 1);
+        outIndices[idx] = f;
+    }
+
+	unsigned int _outFaces[64];
+	unsigned int _outCount = 0;
+	DeviceHalfEdgeMesh::GetOneRingFaces_Device(f, halfEdges, numberOfFaces, _outFaces, _outCount);
+
+    for (unsigned int i = 0; i < _outCount; ++i)
+    {
+        unsigned int nf = _outFaces[i];
+        const uint3 ntri = faces[nf];
+        float3 nv0 = positions[ntri.x];
+        float3 nv1 = positions[ntri.y];
+        float3 nv2 = positions[ntri.z];
+        float narea = length(cross(nv1 - nv0, nv2 - nv0)) * 0.5f;
+        if (narea < areaThreshold)
+        {
+            unsigned int nidx = atomicAdd(outCount, 1);
+            outIndices[nidx] = nf;
+        }
+	}
 }
 #pragma endregion

@@ -147,6 +147,8 @@ struct DeviceHalfEdgeMesh
 
     vector<float> GetFaceCurvatures();
 
+	void FindDegenerateFaces(vector<unsigned int>& outFaceIndices) const;
+
     __host__ __device__ static uint64_t PackEdge(unsigned int v0, unsigned int v1);
     __device__ static bool HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value);
     __device__ static bool HashMapFind(const HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int* outValue);

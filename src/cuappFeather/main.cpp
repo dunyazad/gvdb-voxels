@@ -1605,251 +1605,6 @@ int main(int argc, char** argv)
 			});
 
 		controlPanel->AddButton("Find NN using BVH - Device", 0, 0, [&]() {
-			TS(TestDeviceRadixSort);
-
-			auto m = cuInstance.d_mesh.min - make_float3(0.001f, 0.001f, 0.001f);
-			auto M = cuInstance.d_mesh.max + make_float3(0.001f, 0.001f, 0.001f);
-
-			vector<float3> positions(cuInstance.d_mesh.numberOfPoints);
-			CUDA_COPY_D2H(positions.data(), cuInstance.d_mesh.positions, sizeof(float3) * cuInstance.d_mesh.numberOfPoints);
-			CUDA_SYNC();
-
-			vector<uint3> faces(cuInstance.d_mesh.numberOfFaces);
-			CUDA_COPY_D2H(faces.data(), cuInstance.d_mesh.faces, sizeof(uint3) * cuInstance.d_mesh.numberOfFaces);
-			CUDA_SYNC();
-
-			vector<float3> centerPositions(cuInstance.d_mesh.numberOfFaces);
-
-			vector<MortonKey> mortonKeys;
-			mortonKeys.resize(cuInstance.d_mesh.numberOfFaces);
-
-			unsigned int maxCount = 0;
-			uint64_t maxCode = 0;
-			map<uint64_t, vector<unsigned int>> counts;
-			for (size_t i = 0; i < cuInstance.d_mesh.numberOfFaces; i++)
-			{
-				auto& face = faces[i];
-				auto i0 = face.x;
-				auto i1 = face.y;
-				auto i2 = face.z;
-				auto p0 = positions[i0];
-				auto p1 = positions[i1];
-				auto p2 = positions[i2];
-				auto center = (p0 + p1 + p2) / 3.0f;
-				centerPositions[i] = center;
-				auto code = MortonCode::FromPosition(center, m, M);
-				mortonKeys[i].code = code;
-				mortonKeys[i].index = (unsigned int)i;
-
-				counts[code].push_back(i);
-
-				if (counts[code].size() > maxCount)
-				{
-					maxCount = counts[code].size();
-					maxCode = code;
-				}
-			}
-
-			//printf("========= Max Count : %d ==========\n", maxCount);
-			//for (size_t i = 0; i < counts[maxCode].size(); i++)
-			//{
-			//	auto index = counts[maxCode][i];
-			//	auto& p = positions[index];
-			//	printf("postion : %f, %f, %f\n", XYZ(p));
-
-			//	if (i == 0)
-			//	{
-			//		auto entity = Feather.GetEntityByName("Camera");
-			//		auto camera = Feather.GetComponent<PerspectiveCamera>(entity);
-			//		auto manipulator = Feather.GetComponent<CameraManipulatorTrackball>(entity);
-
-			//		auto eye = camera->GetEye();
-			//		auto target = camera->GetTarget();
-			//		auto direction = glm::normalize(target - eye);
-
-			//		camera->SetTarget({ XYZ(p) });
-			//		camera->SetEye(glm::vec3(XYZ(p)) + (-direction) * manipulator->GetRadius());
-			//	}
-			//}
-
-			sort(mortonKeys.begin(), mortonKeys.end());
-
-			vector<float3> inputPositions;
-			//inputPositions.push_back((cuInstance.h_mesh.min + cuInstance.h_mesh.max) * 0.5f);
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.min.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.min.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.min.y, cuInstance.h_mesh.max.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.min.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
-			//inputPositions.push_back(make_float3(cuInstance.h_mesh.max.x, cuInstance.h_mesh.max.y, cuInstance.h_mesh.max.z));
-			for (size_t i = 0; i < cuInstance.h_mesh.numberOfPoints; i++)
-			{
-				inputPositions.push_back(cuInstance.h_mesh.positions[i]);
-			}
-
-			{
-				//sort(mortonKeys.begin(), mortonKeys.end());
-
-				TS(BVH_INIT);
-				DeviceLBVH bvh;
-				//bvh.Initialize(mortonKeys, m, M);
-				TE(BVH_INIT);
-
-				//{
-				//	uint64_t temp[30];
-				//	for (size_t i = 0; i < 30; i++)
-				//	{
-				//		printf("%llu\n", mortonCodes[i]);
-				//		temp[i] = mortonCodes[i];
-				//	}
-
-				//	unsigned int rangeStart = 0, rangeEnd = 0;
-				//	LBVH::FindRange(temp, 30, 0, rangeStart, rangeEnd);
-				//	printf("FindRange(0) : [%u, %u]\n", rangeStart, rangeEnd);
-				//}
-
-//InitialzeNodes Validation			
-#if 0
-				{
-					auto n = mortonCodes.size();
-
-					for (size_t i = 0; i < n; i++)
-					{
-						auto index = n - 1 + i;
-						auto& node = bvh.nodes[index];
-						auto coe = mortonCodes[i];
-
-						auto m = glm::vec3(XYZ(node.aabb.min));
-						auto M = glm::vec3(XYZ(node.aabb.max));
-						auto center = (m + M) * 0.5f;
-						VD::AddBox("temp", center, { 0.05f, 0.05f, 0.05f }, Color::red());
-						//VD::AddBox("temp", { m, M }, Color::red());
-					}
-				}
-#endif
-
-				//FindRange Validation
-#if 0
-				{
-					for (unsigned int i = 0; i < mortonCodes.size(); ++i) {
-						unsigned int rs1, re1, rs2, re2;
-
-						LBVH::FindRange(mortonCodes.data(), (unsigned int)mortonCodes.size(), i, rs1, re1);
-						LBVH::BruteForceRange(mortonCodes.data(), (unsigned int)mortonCodes.size(), i, rs2, re2);
-
-						if (rs1 != rs2 || re1 != re2) {
-							printf("[Mismatch] node=%u  FindRange=[%u,%u]  BruteForce=[%u,%u]\n",
-								i, rs1, re1, rs2, re2);
-						}
-						else {
-							printf("[OK] node=%u  Range=[%u,%u]\n", i, rs1, re1);
-						}
-					}
-				}
-#endif
-
-				// FindSplit Validation
-#if 0
-				{
-					auto N = mortonCodes.size();
-
-					for (unsigned int first = 0; first < N - 1; first++) {
-						unsigned int maxLast = (first + 10 < N) ? first + 10 : N;
-						for (unsigned int last = first + 1; last < maxLast; last++) {
-							unsigned int ref = LBVH::FindSplitBruteForce(mortonCodes.data(), first, last);
-							unsigned int test = LBVH::FindSplit(mortonCodes.data(), first, last);
-
-							if (ref != test) {
-								std::cout << "[Mismatch] range=[" << first << "," << last << "] "
-									<< "FindSplit=" << test << " BruteForce=" << ref << "\n";
-							}
-							else
-							{
-								printf("ok\n");
-							}
-						}
-					}
-				}
-#endif
-
-				{
-					int maxDepth = 32;
-					function<void(LBVHNode*, int)> draw_box;
-					draw_box = [&](LBVHNode* node, int depth) {
-						if (maxDepth < depth) maxDepth = depth;
-
-						auto aabbMin = glm::vec3(XYZ(node->aabb.min));
-						auto aabbMax = glm::vec3(XYZ(node->aabb.max));
-						auto center = (aabbMin + aabbMax) * 0.5f;
-						auto code = MortonCode::FromPosition(make_float3(XYZ(center)), m, M);
-						auto cellSize = MortonCode::GetCellSize(code, m, M, depth);
-						cellSize = std::fmaxf(cellSize, 0.1f);
-						string tag = "LBVH_" + std::to_string(depth);
-
-						auto boxColor = Color::Lerp(Color::blue(), Color::red(), (float)depth / (float)maxDepth);
-
-						if (0.05f > length(aabbMax - aabbMin))
-						{
-							VD::AddWiredBox(tag, glm::vec3(XYZ(center)), glm::vec3(0.05f, 0.05f, 0.05f), boxColor);
-						}
-						else
-						{
-							VD::AddWiredBox(tag, { {aabbMin}, {aabbMax} }, boxColor);
-						}
-
-						if (UINT32_MAX != node->leftNodeIndex)
-							draw_box(&bvh.nodes[node->leftNodeIndex], depth + 1);
-						if (UINT32_MAX != node->rightNodeIndex)
-							draw_box(&bvh.nodes[node->rightNodeIndex], depth + 1);
-						};
-					LBVHNode* root = &bvh.nodes[0];
-					draw_box(root, 0);
-
-					for (size_t i = 0; i < maxDepth; i++)
-					{
-						string name = "LBVH_" + std::to_string(i);
-						VD::AddToSelectionList(name);
-					}
-				}
-
-				{
-					TS(NN);
-
-					for (size_t i = 0; i < inputPositions.size(); i++)
-						//for (size_t i = 0; i < 1000; i++)
-					{
-						auto& q = inputPositions[i];
-						float3 np;
-						auto ni = bvh.NearestNeighbor(q, mortonKeys, centerPositions, np);
-						if (ni >= 0)
-						{
-							//auto& key = mortonKeys[ni];
-							//auto& n = positions[key.index];
-							//auto& n = positions[ni];
-							//VD::AddLine("NN Morton BVH", { XYZ(q) }, { XYZ(np) }, Color::red());
-
-							auto& f = faces[ni];
-							auto& v0 = positions[f.x];
-							auto& v1 = positions[f.y];
-							auto& v2 = positions[f.z];
-
-							auto& cp = ClosestPointOnTriangle(q, v0, v1, v2);
-
-							VD::AddLine("NN Morton BVH", { XYZ(q) }, { XYZ(cp) }, Color::red());
-							VD::AddWiredBox("NN Morton BVH - input", { XYZ(q) }, glm::vec3(0.01f, 0.01f, 0.01f), Color::yellow());
-						}
-					}
-
-					TE(NN);
-				}
-
-				bvh.Terminate();
-			}
-			});
-
-		controlPanel->AddButton("Test", 0, 0, [&]() {
 			auto m = cuInstance.d_mesh.min - make_float3(0.001f, 0.001f, 0.001f);
 			auto M = cuInstance.d_mesh.max + make_float3(0.001f, 0.001f, 0.001f);
 
@@ -1928,7 +1683,104 @@ int main(int argc, char** argv)
 				VD::AddToSelectionList(name);
 			}
 
+
+
+			{
+
+				auto inputPositions = cuInstance.h_mesh.positions;
+				unsigned int numberOfQueries = cuInstance.h_mesh.numberOfPoints;
+
+				//numberOfQueries = 1;
+
+				float3* d_inputPositions = nullptr;
+				unsigned int* d_nnIndices = nullptr;
+				float3* d_nnPositions = nullptr;
+
+				CUDA_MALLOC(&d_inputPositions, sizeof(float3) * numberOfQueries);
+				CUDA_COPY_H2D(d_inputPositions, inputPositions, sizeof(float3) * numberOfQueries);
+
+				CUDA_MALLOC(&d_nnIndices, sizeof(unsigned int) * numberOfQueries);
+				CUDA_MALLOC(&d_nnPositions, sizeof(float3) * numberOfQueries);
+
+				CUDA_SYNC();
+
+				TS(NN);
+
+				bvh.NearestNeighbor(
+					d_inputPositions,
+					numberOfQueries,
+					cuInstance.d_mesh.positions,
+					d_nnIndices,
+					d_nnPositions);
+
+				CUDA_SYNC();
+
+				TE(NN);
+			}
+
 			bvh.Terminate();
+			});
+
+		controlPanel->AddButton("Validate - Bottom Up", 0, 0, [&]() {
+			auto m = cuInstance.d_mesh.min - make_float3(0.001f, 0.001f, 0.001f);
+			auto M = cuInstance.d_mesh.max + make_float3(0.001f, 0.001f, 0.001f);
+
+			DeviceLBVH bvh;
+			bvh.Initialize(
+				cuInstance.d_mesh.positions,
+				cuInstance.d_mesh.faces,
+				m, M,
+				cuInstance.d_mesh.numberOfFaces);
+
+			bvh.ValidateHierarchy();
+
+			auto n = cuInstance.d_mesh.numberOfFaces * 2 - 1;
+			vector<LBVHNode> nodes(n);
+			CUDA_COPY_D2H(nodes.data(), bvh.nodes, sizeof(LBVHNode)* n);
+			CUDA_SYNC();
+
+
+
+
+
+			for (int i = 0; i < cuInstance.d_mesh.numberOfFaces - 1; i++) {
+				if (nodes[i].pending != 0) {
+					printf("Node %d still has pending=%d (left=%u, right=%u)\n",
+						i, nodes[i].pending,
+						nodes[i].leftNodeIndex,
+						nodes[i].rightNodeIndex);
+				}
+			}
+
+			set<LBVHNode*> temp;
+
+			function<void(LBVHNode*, int)> traverse;
+			traverse = [&](LBVHNode* node, int depth) {
+				if(temp.find(node) != temp.end())
+				{
+					printf("Node %p already visited!\n", node);
+					return;
+				}
+				temp.insert(node);
+				//printf("Node %p at depth %d\n", node, depth);					
+				if (UINT32_MAX != node->leftNodeIndex)
+					traverse(&nodes[node->leftNodeIndex], depth + 1);
+				if (UINT32_MAX != node->rightNodeIndex)
+					traverse(&nodes[node->rightNodeIndex], depth + 1);
+
+/*				if(UINT32_MAX == node->leftNodeIndex && UINT32_MAX == node->rightNodeIndex)
+					printf("Node %d at depth %d is leaf.\n", node, depth);*/
+				};
+			LBVHNode* root = &nodes[0];
+			traverse(root, 0);
+
+
+			bvh.Terminate();
+			});
+
+		controlPanel->AddButton("Find Degenerate Faces", 0, 0, [&]() {
+			vector<unsigned int> degenerateFaces;
+			cuInstance.d_mesh.FindDegenerateFaces(degenerateFaces);
 			});
 	}
 #pragma endregion
