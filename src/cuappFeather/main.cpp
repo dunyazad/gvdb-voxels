@@ -345,7 +345,7 @@ int main(int argc, char** argv)
 
 		controlPanel->AddButton("Dump", 0, 0, [&]() {
 			vector<float3> resultPositions;
-			vector<unsigned int> resultTags;
+			vector<uint64_t> resultTags;
 			marginLineFinder.Dump(resultPositions, resultTags);
 
 			auto colors = Color::GetContrastingColors(15);
@@ -398,27 +398,43 @@ int main(int argc, char** argv)
 			});
 
 		controlPanel->AddButton("Clustering", 0, 0, [&]() {
-			marginLineFinder.ClusterPoints(1);
-
 			std::vector<float3> clustered_points;
 			std::vector<uint64_t> cluster_ids;
-			marginLineFinder.DumpClusters(clustered_points, cluster_ids);
+			std::vector<uint64_t> cluster_counts;
+			marginLineFinder.Clustering(clustered_points, cluster_ids, cluster_counts);
 
-			// 4. (선택) 결과를 후처리하여 클러스터별로 그룹화
-			std::map<uint64_t, std::vector<float3>> clusters;
+			// 2. 결과를 그룹화 (std::unordered_map 사용으로 성능 향상)
+			std::unordered_map<uint64_t, std::vector<pair<float3, uint64_t>>> clusters;
 			for (size_t i = 0; i < clustered_points.size(); ++i)
 			{
-				clusters[cluster_ids[i]].push_back(clustered_points[i]);
+				//printf("count : %d\n", cluster_counts[i]);
+
+				clusters[cluster_ids[i]].push_back(make_pair(clustered_points[i], cluster_counts[i]));
 			}
 
-			auto colors = Color::GetContrastingColors(clusters.size() + 1);
-			for (size_t i = 0; i < clusters.size(); i++)
+			if (clusters.empty()) return;
+
+			// 3. 색상 생성
+			auto colors = Color::GetContrastingColors(clusters.size());
+
+			// 4. 시각화 (올바른 순회 방식 및 일관된 색상 할당)
+			for (auto const& [cluster_id, points] : clusters)
 			{
-				auto& cluster = clusters[i];
-				auto color = colors[i % colors.size()];
-				for (auto& p : cluster)
+				// 클러스터 ID의 해시 값을 기반으로 일관된 색상 할당
+				// 이렇게 하면 실행할 때마다 같은 ID의 클러스터는 같은 색상을 가짐
+				size_t hash_val = std::hash<uint64_t>{}(cluster_id);
+				auto color = colors[hash_val % colors.size()];
+
+				for (auto const& pair : points)
 				{
-					VD::AddBox("ClusteredPoints", glm::vec3(XYZ(p)), glm::vec3(0.1f, 0.1f, 0.1f), color);
+					if (pair.second < 5)
+					{
+						VD::AddWiredBox("ClusteredPoints_Filtered", glm::vec3(XYZ(pair.first)), glm::vec3(1.0f, 1.0f, 1.0f), Color::black());
+					}
+					else
+					{
+						VD::AddBox("ClusteredPoints", glm::vec3(XYZ(pair.first)), glm::vec3(0.1f, 0.1f, 0.1f), color);
+					}
 				}
 			}
 			});

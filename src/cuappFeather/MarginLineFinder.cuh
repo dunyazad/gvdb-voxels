@@ -6,7 +6,8 @@
 
 struct MarginLineFinder
 {
-	HashMap<uint64_t, unsigned char> pointMap;
+	HashMap<uint64_t, uint64_t> pointMap;
+	HashMap<uint64_t, uint64_t> countMap;
 
 	void Initialize(float voxelSize, size_t capacity, uint8_t maxProbe = 64);
 
@@ -14,17 +15,20 @@ struct MarginLineFinder
 
 	void Clear();
 
-	void InsertPoints(const std::vector<float3>& points, unsigned char tag);
-	void InsertPoints(const float3* d_points, int numberOfPoints, unsigned char tag);
+	void InsertPoints(const std::vector<float3>& points, uint64_t tag);
+	void InsertPoints(const float3* d_points, int numberOfPoints, uint64_t tag);
 
-	void Dump(std::vector<float3>& resultPositions, std::vector<unsigned int>& resultTags);
-	void Dump(float3* d_resultPositions, unsigned int* d_resultTags, unsigned int* d_numberofResultPositions);
+	void Dump(std::vector<float3>& resultPositions, std::vector<uint64_t>& resultTags);
+	void Dump(float3* d_resultPositions, uint64_t* d_resultTags, unsigned int* d_numberofResultPositions);
 
 	void FindMarginLinePoints(std::vector<float3>& result);
 	void FindMarginLinePoints(float3* d_resultPoints, unsigned int* d_numberofResultPoints);
 
 	void MarginLineNoiseRemoval(std::vector<float3>& result);
 	void MarginLineNoiseRemoval(float3* d_resultPoints, unsigned int* d_numberofResultPoints);
+
+	void Clustering(std::vector<float3>& resultPositions, std::vector<uint64_t>& resultTags, std::vector<uint64_t>& resultTagCounts);
+	void Clustering(float3* d_resultPositions, uint64_t* d_resultTags, uint64_t* d_resultTagCounts, unsigned int* d_numberofResultPositions);
 
 	float voxelSize = 0.1f;
 
@@ -90,4 +94,7 @@ struct MarginLineFinder
 		if (iz & 0x100000) iz |= 0xFFE00000;
 		return make_int3(ix, iy, iz);
 	}
+
+	__device__ static inline uint64_t FindRootVoxel(HashMapInfo<uint64_t, uint64_t> info, uint64_t key);
+	__device__ static inline void UnionVoxel(HashMapInfo<uint64_t, uint64_t> info, uint64_t a, uint64_t b);
 };

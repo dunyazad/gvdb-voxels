@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cuda_runtime.h>
 #include <cuda_common.cuh>
 #include <stdint.h>
 #include <stddef.h>
@@ -41,13 +42,13 @@ struct HashMap
 {
     HashMapInfo<Key, Value> info;
 
-    void Initialize(size_t capacity = 1024 * 1024 * 1024, uint8_t maxProbe = 64)
+    void Initialize(size_t capacity = 1024 * 1024 * 1024, uint8_t maxProbe = 64, int value = 0xFF)
     {
         info.capacity = capacity;
         info.maxProbe = maxProbe;
 
         CUDA_CHECK(CUDA_MALLOC(&info.entries, sizeof(HashMapEntry<Key, Value>) * info.capacity));
-        CUDA_CHECK(CUDA_MEMSET(info.entries, 0xFF, sizeof(HashMapEntry<Key, Value>) * info.capacity));
+        CUDA_CHECK(CUDA_MEMSET(info.entries, value, sizeof(HashMapEntry<Key, Value>) * info.capacity));
 
         CUDA_CHECK(CUDA_MALLOC(&info.numberOfEntries, sizeof(unsigned int)));
         CUDA_CHECK(CUDA_MEMSET(info.numberOfEntries, 0, sizeof(unsigned int)));
