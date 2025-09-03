@@ -16,6 +16,7 @@
     <CudaCompile Include="cuBQL\builder\cuda\instantiate_builders.cu">
       <Filter>cuBQL\builder\cuda</Filter>
     </CudaCompile>
+    <CudaCompile Include="MarginLineFinder.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\External\glad\src\glad.c" />
@@ -174,6 +175,7 @@
     <ClInclude Include="cuBQL\queries\common\knn.h">
       <Filter>cuBQL\queries\common</Filter>
     </ClInclude>
+    <ClInclude Include="MarginLineFinder.cuh" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HashMap.hpp" />

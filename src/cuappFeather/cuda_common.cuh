@@ -85,6 +85,16 @@ typedef double f64;
 #define f64_min (DBL_MIN)
 #endif
 
+#define CUDA_CHECK(call) \
+    do { \
+        cudaError_t err = call; \
+        if (err != cudaSuccess) \
+        { \
+            printf("CUDA error %s (%d): %s:%d\n", cudaGetErrorString(err), err, __FILE__, __LINE__); \
+            assert(false); \
+        } \
+    } while (0)
+
 #ifndef LaunchKernel
 #define LaunchKernel_256(KERNEL, NOE, ...) { nvtxRangePushA(#KERNEL); auto NOT = 256; auto NOB = (NOE + NOT - 1) / NOT; KERNEL<<<NOB, NOT>>>(__VA_ARGS__); nvtxRangePop(); }
 #define LaunchKernel_512(KERNEL, NOE, ...) { nvtxRangePushA(#KERNEL); auto NOT = 512; auto NOB = (NOE + NOT - 1) / NOT; KERNEL<<<NOB, NOT>>>(__VA_ARGS__); nvtxRangePop(); }
@@ -120,7 +130,7 @@ typedef double f64;
 #endif
 
 #ifndef CUDA_SAFE_FREE
-#define CUDA_SAFE_FREE(ptr) { if(ptr) { cudaFree(ptr); ptr = nullptr; } }
+#define CUDA_SAFE_FREE(ptr) { if(ptr) { CUDA_CHECK(cudaFree(ptr)); ptr = nullptr; } }
 //#define CUDA_SAFE_FREE(ptr) \
 //    do { \
 //        if (ptr) { \
@@ -154,15 +164,7 @@ typedef double f64;
 #define CUDA_SYNC() cudaDeviceSynchronize();
 #endif
 
-#define CUDA_CHECK(call) \
-    do { \
-        cudaError_t err = call; \
-        if (err != cudaSuccess) \
-        { \
-            printf("CUDA error %s (%d): %s:%d\n", cudaGetErrorString(err), err, __FILE__, __LINE__); \
-            assert(false); \
-        } \
-    } while (0)
+
 
 #ifndef RAW_PTR
 #define RAW_PTR(x) (thrust::raw_pointer_cast((x).data()))

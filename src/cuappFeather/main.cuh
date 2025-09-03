@@ -21,6 +21,7 @@
 #include <ThrustHalfEdgeMesh.cuh>
 #include <Octree.cuh>
 #include <LBVH.cuh>
+#include <MarginLineFinder.cuh>
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
