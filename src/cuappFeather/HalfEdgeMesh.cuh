@@ -3,7 +3,10 @@
 #include <cuda_common.cuh>
 #include <HashMap.hpp>
 #include <VoxelKey.hpp>
-#include <LBVH.cuh>
+//#include <LBVH.cuh>
+
+#include "cuBQL/bvh.h"
+#include "cuBQL/queries/triangleData/closestPointOnAnyTriangle.h"
 
 struct HalfEdge
 {
@@ -102,8 +105,12 @@ struct DeviceHalfEdgeMesh
     HashMap<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap;
     FaceNode* faceNodes = nullptr;
 
-    DeviceLBVH bvh;
-    MortonKey* mortonKeys = nullptr;
+    //DeviceLBVH bvh;
+    //MortonKey* mortonKeys = nullptr;
+
+    cuBQL::bvh3f bvh;
+    cuBQL::Triangle* triangles = nullptr;
+    cuBQL::box3f* boxes = nullptr;
 
     DeviceHalfEdgeMesh();
     DeviceHalfEdgeMesh(const HostHalfEdgeMesh& other);
@@ -148,6 +155,8 @@ struct DeviceHalfEdgeMesh
     vector<float> GetFaceCurvatures();
 
 	void FindDegenerateFaces(vector<unsigned int>& outFaceIndices) const;
+
+	std::vector<float3> GetNearestPoints(const std::vector<float3>& queries);
 
     __host__ __device__ static uint64_t PackEdge(unsigned int v0, unsigned int v1);
     __device__ static bool HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value);

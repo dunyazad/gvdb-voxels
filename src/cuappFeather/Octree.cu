@@ -469,6 +469,10 @@ void DeviceOctree::Initialize(
     this->aabbMax = bbMax;
     this->unitLength = unitLength;
 
+	CUDA_MALLOC(&this->positions, sizeof(float3) * numberOfPoints);
+	CUDA_COPY_H2D(this->positions, positions, sizeof(float3) * numberOfPoints);
+	this->numberOfPositions = numberOfPoints;
+
     octreeKeys.Initialize(static_cast<size_t>(numberOfPoints) * 64u, 64u);
 
     LaunchKernel(Kernel_DeviceOctree_BuildOctreeNodeKeys, numberOfPoints,
@@ -528,11 +532,11 @@ void DeviceOctree::Initialize(
 
 void DeviceOctree::Terminate()
 {
-    CUDA_FREE(nodes);
-    nodes = nullptr;
+    CUDA_SAFE_FREE(nodes);
+    CUDA_SAFE_FREE(d_numberOfNodes);
 
-    CUDA_FREE(d_numberOfNodes);
-    d_numberOfNodes = nullptr;
+	CUDA_SAFE_FREE(positions);
+    CUDA_SAFE_FREE(rootIndex);
 
     allocatedNodes = 0;
     numberOfNodes = 0;
@@ -573,6 +577,7 @@ void DeviceOctree::NN_H(
     LaunchKernel(Kernel_DeviceOctree_NN_Batch, numberOfQueries,
         nodes,
         rootIndex,
+        positions,
         d_queries,
         numberOfQueries,
         d_outNearestIndex,
@@ -607,6 +612,7 @@ void DeviceOctree::NN_D(
     LaunchKernel(Kernel_DeviceOctree_NN_Batch, numberOfQueries,
         nodes,
         rootIndex,
+        positions,
         d_queries,
         numberOfQueries,
         d_outNearestIndex,
@@ -798,18 +804,58 @@ __device__ unsigned int DeviceOctree::DeviceOctree_NearestLeaf(
 __global__ void Kernel_DeviceOctree_NN_Batch(
     const OctreeNode* __restrict__ nodes,
     const unsigned int* __restrict__ rootIndex,
+    const float3* __restrict__ positions,
     const float3* __restrict__ queries,
     unsigned int numberOfQueries,
     unsigned int* __restrict__ outIndices,
     float* __restrict__ outD2)
 {
-    const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= numberOfQueries) return;
+    // 1. 현재 CUDA 스레드에 할당된 쿼리의 전역 인덱스를 계산합니다.
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    float bestD2;
-    unsigned int bestIdx =
-        DeviceOctree::DeviceOctree_NearestLeaf(queries[tid], nodes, rootIndex, &bestD2);
+    // 2. 인덱스가 전체 쿼리 수를 초과하는 경우, 초과 실행된 스레드는 즉시 종료합니다.
+    if (idx >= numberOfQueries)
+    {
+        return;
+    }
 
-    outIndices[tid] = bestIdx;
-    if(outD2) outD2[tid] = bestD2;
+    // 3. 이 스레드가 처리할 쿼리 포인트를 가져옵니다.
+    const float3 q = queries[idx];
+
+    // 4. Device-side Octree 순회 함수를 호출하여 가장 가까운 '리프 노드'를 찾습니다.
+    // 이 함수는 쿼리 지점에서 가장 가까운 AABB(축-정렬 경계 상자)를 가진 리프 노드를
+    // 효율적으로 찾아내어, 최근접 이웃의 강력한 후보를 제공합니다.
+    float distanceToLeafAABB; // 순회 과정에서 사용된 AABB까지의 거리 (참고용)
+    const unsigned int nearestLeafNodeIdx = DeviceOctree::DeviceOctree_NearestLeaf(q, nodes, rootIndex, &distanceToLeafAABB);
+
+    // 검색 결과가 유효하지 않은 경우(예: Octree가 비어있음)
+    if (nearestLeafNodeIdx == UINT32_MAX)
+    {
+        outIndices[idx] = UINT32_MAX;
+        if (outD2 != nullptr)
+        {
+            outD2[idx] = FLT_MAX;
+        }
+        return;
+    }
+
+    // 5. 찾은 리프 노드에 저장된 원본 포인트의 인덱스를 가져옵니다.
+    const unsigned int nearestPointIdx = nodes[nearestLeafNodeIdx].positionIndex;
+
+    // 6. 결과 배열에 찾은 포인트의 인덱스를 저장합니다.
+    outIndices[idx] = nearestPointIdx;
+
+    // 7. 사용자가 거리 정보도 요청한 경우 (outD2 포인터가 NULL이 아닐 때),
+    //    쿼리 포인트와 실제 포인트 간의 '정확한' 거리를 계산합니다.
+    if (outD2 != nullptr)
+    {
+        // 원본 positions 배열에서 최근접 포인트의 실제 좌표(float3)를 조회합니다.
+        const float3 nearestPoint = positions[nearestPointIdx];
+
+        // 쿼리 포인트와 최근접 포인트 간의 벡터를 계산합니다.
+        const float3 d = make_float3(q.x - nearestPoint.x, q.y - nearestPoint.y, q.z - nearestPoint.z);
+
+        // 벡터의 내적(dot product)을 통해 거리의 제곱을 계산하고 결과 배열에 저장합니다.
+        outD2[idx] = dot(d, d);
+    }
 }

@@ -3,6 +3,9 @@
 
 #include <set>
 
+#include "cuBQL/bvh.h"
+#include "cuBQL/queries/triangleData/closestPointOnAnyTriangle.h"
+
 #define MAX_FRONTIER (1 << 16)
 #define MAX_RESULT   (1 << 20)
 #define MAX_NEIGHBORS 64
@@ -757,7 +760,9 @@ void DeviceHalfEdgeMesh::Initialize(unsigned int numberOfPoints, unsigned int nu
     min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
     max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
 
-    CUDA_MALLOC(&mortonKeys, sizeof(MortonKey) * numberOfFaces);
+    //CUDA_MALLOC(&mortonKeys, sizeof(MortonKey) * numberOfFaces);
+
+    CUDA_MALLOC(&triangles, sizeof(cuBQL::Triangle) * numberOfFaces);
 }
 
 void DeviceHalfEdgeMesh::Terminate()
@@ -769,7 +774,11 @@ void DeviceHalfEdgeMesh::Terminate()
     CUDA_SAFE_FREE(halfEdges);
     CUDA_SAFE_FREE(halfEdgeFaces);
     CUDA_SAFE_FREE(vertexToHalfEdge);
-    CUDA_SAFE_FREE(mortonKeys);
+
+    //CUDA_SAFE_FREE(mortonKeys);
+
+    CUDA_SAFE_FREE(triangles);
+    CUDA_SAFE_FREE(boxes);
 
     CUDA_SAFE_FREE(faceNodes);
 
@@ -841,13 +850,78 @@ void DeviceHalfEdgeMesh::RecalcAABB()
     CUDA_SAFE_FREE(d_max);
 }
 
+
+__global__ void generateBoxes(cuBQL::box3f* boxForBuilder,
+    const cuBQL::Triangle* triangles,
+    int numTriangles)
+{
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tid >= numTriangles) return;
+
+    auto triangle = triangles[tid];
+    boxForBuilder[tid] = triangle.bounds();
+
+    //printf("Box %d: Min(%f, %f, %f) Max(%f, %f, %f)\n", tid,
+    //    boxForBuilder[tid].lower.x, boxForBuilder[tid].lower.y, boxForBuilder[tid].lower.z,
+    //    boxForBuilder[tid].upper.x, boxForBuilder[tid].upper.y, boxForBuilder[tid].upper.z);
+}
+
+__global__ void generateCentroids(
+    float3* positions,
+	uint3* faces,
+	unsigned int numberOfFaces,
+    cuBQL::Triangle* triangles)
+{
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tid >= numberOfFaces) return;
+
+	auto face = faces[tid];
+	triangles[tid].a = cuBQL::vec3f(XYZ(positions[face.x]));
+	triangles[tid].b = cuBQL::vec3f(XYZ(positions[face.y]));
+	triangles[tid].c = cuBQL::vec3f(XYZ(positions[face.z]));
+
+  //  printf("Triangle %d: A(%f, %f, %f) B(%f, %f, %f) C(%f, %f, %f)\n", tid,
+  //      triangles[tid].a.x, triangles[tid].a.y, triangles[tid].a.z,
+  //      triangles[tid].b.x, triangles[tid].b.y, triangles[tid].b.z,
+  // 	  triangles[tid].c.x, triangles[tid].c.y, triangles[tid].c.z);
+}
+
 void DeviceHalfEdgeMesh::UpdateBVH()
 {
-    bvh.Terminate();
+    //bvh.Terminate();
+
+    //CUDA_TS(InitializeBVH);
+    //bvh.Initialize(positions, faces, min, max, numberOfFaces);
+    //CUDA_TE(InitializeBVH);
+
+
+    //cuBQL::cuda::free(bvh);
+    CUDA_SAFE_FREE(triangles);
+    CUDA_MALLOC(&triangles, sizeof(cuBQL::Triangle) * numberOfFaces);
+
+    CUDA_SAFE_FREE(boxes);
+    CUDA_MALLOC(&boxes, numberOfFaces * sizeof(cuBQL::box3f));
+
+    //bvh = cuBQL::bvh3f();
 
     CUDA_TS(InitializeBVH);
-    bvh.Initialize(positions, faces, min, max, numberOfFaces);
+
+    LaunchKernel(generateCentroids, numberOfFaces,
+        positions, faces, numberOfFaces, triangles);
+
+    LaunchKernel(generateBoxes, numberOfFaces,
+		boxes, triangles, numberOfFaces);
+
+    cuBQL::gpuBuilder(bvh, boxes, numberOfFaces, cuBQL::BuildConfig());
+	CUDA_SYNC();
+
+    // free the boxes - we could actually re-use that memory below, but
+    // let's just do this cleanly here.
+
     CUDA_TE(InitializeBVH);
+
+    std::cout << "done building BVH over " << cuBQL::prettyNumber(numberOfFaces)
+        << " triangles" << std::endl;
 }
 
 void DeviceHalfEdgeMesh::BuildHalfEdges()
@@ -934,7 +1008,7 @@ void DeviceHalfEdgeMesh::RemoveIsolatedVertices()
     CUDA_FREE(vertexIndexMappingIndex);
 
     RecalcAABB();
-    UpdateBVH();
+    //UpdateBVH();
 }
 
 void DeviceHalfEdgeMesh::BuildFaceNodeHashMap()
@@ -1483,7 +1557,7 @@ void DeviceHalfEdgeMesh::LaplacianSmoothing(unsigned int iterations, float lambd
     CUDA_FREE(toFree);
 
     RecalcAABB();
-    UpdateBVH();
+    //UpdateBVH();
 }
 
 void DeviceHalfEdgeMesh::RadiusLaplacianSmoothing(float radius, unsigned int iterations, float lambda)
@@ -1513,7 +1587,7 @@ void DeviceHalfEdgeMesh::RadiusLaplacianSmoothing(float radius, unsigned int ite
     CUDA_FREE(toFree);
 
     RecalcAABB();
-    UpdateBVH();
+    //UpdateBVH();
 }
 
 void DeviceHalfEdgeMesh::GetAABBs(vector<cuAABB>& result, cuAABB& mMaabbs)
@@ -1587,6 +1661,59 @@ void DeviceHalfEdgeMesh::FindDegenerateFaces(vector<unsigned int>& outFaceIndice
     LaunchKernel(Kernel_DeviceHalfEdgeMesh_FindDegenerateFaces, numberOfFaces,
 		positions, halfEdges, faces, numberOfFaces, 0.0001f,
 		d_degenerateFaceIndices, d_degenerateCount);
+}
+
+__global__ void Kernel_DeviceHalfEdgeMesh_FindNearestPoints(
+    const cuBQL::Triangle* __restrict__ triangles,
+    cuBQL::bvh3f bvh,
+    const float3* __restrict__ queries,
+    float3* __restrict__ results,
+    size_t numberOfQueries)
+{
+    size_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= numberOfQueries) return;
+    auto& query = queries[index];
+
+	//printf("Thread %zu processing query point (%.3f, %.3f, %.3f)\n", index, query.x, query.y, query.z);
+
+    cuBQL::vec3f queryPoint(query.x, query.y, query.z);
+    cuBQL::triangles::CPAT cpat;
+    cpat.runQuery(triangles, bvh, queryPoint);
+    results[index].x = cpat.P.x;
+    results[index].y = cpat.P.y;
+    results[index].z = cpat.P.z;
+
+  //  printf("Query[%zu]: (%.3f, %.3f, %.3f) -> Nearest: (%.3f, %.3f, %.3f), dist=%.6f\n",
+  //      index, query.x, query.y, query.z,
+  //      results[index].x, results[index].y, results[index].z,
+		//cuBQL::length(cpat.P - queryPoint));
+}
+
+std::vector<float3> DeviceHalfEdgeMesh::GetNearestPoints(const std::vector<float3>& inputQueries)
+{
+	float3* d_queries = nullptr;
+	CUDA_MALLOC(&d_queries, sizeof(float3) * inputQueries.size());
+	CUDA_COPY_H2D(d_queries, inputQueries.data(), sizeof(float3) * inputQueries.size());
+
+	float3* d_results = nullptr;
+	CUDA_MALLOC(&d_results, sizeof(float3) * inputQueries.size());
+
+	CUDA_SYNC();
+	
+	LaunchKernel(Kernel_DeviceHalfEdgeMesh_FindNearestPoints, inputQueries.size(),
+		triangles, bvh, d_queries, d_results, inputQueries.size());
+
+    CUDA_SYNC();
+
+    std::vector<float3> h_results(inputQueries.size());
+    CUDA_COPY_D2H(h_results.data(), d_results, sizeof(float3) * inputQueries.size());
+
+    CUDA_SYNC();
+
+	CUDA_FREE(d_queries);
+	CUDA_FREE(d_results);
+
+	return h_results;
 }
 #pragma endregion
 

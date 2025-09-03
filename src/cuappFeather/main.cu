@@ -24,6 +24,9 @@
 
 #include <Serialization.hpp>
 
+#include "cuBQL/bvh.h"
+#include "cuBQL/queries/triangleData/closestPointOnAnyTriangle.h"
+
 CUDAInstance::CUDAInstance()
 {
 }
@@ -47,7 +50,7 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
 
     d_input = h_input;
 
-    vhm.Initialize(0.1f, d_input.numberOfPoints * 32, 32);
+    vhm.Initialize(0.3f, d_input.numberOfPoints * 32, 32);
 
     vhm.Occupy(d_input, 3);
 

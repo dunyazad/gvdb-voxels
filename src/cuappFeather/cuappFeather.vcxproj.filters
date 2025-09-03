@@ -13,11 +13,17 @@
     <CudaCompile Include="Octree.cu" />
     <CudaCompile Include="MortonCode.cu" />
     <CudaCompile Include="LBVH.cu" />
+    <CudaCompile Include="cuBQL\builder\cuda\instantiate_builders.cu">
+      <Filter>cuBQL\builder\cuda</Filter>
+    </CudaCompile>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\External\glad\src\glad.c" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="HalfEdgeMeshInterop.cpp" />
+    <ClCompile Include="cuBQL\builder\cpu\instantiate_builders.cpp">
+      <Filter>cuBQL\builder\cpu</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="main.cuh" />
@@ -39,6 +45,135 @@
     <ClInclude Include="VoxelKey.hpp" />
     <ClInclude Include="MortonCode.cuh" />
     <ClInclude Include="LBVH.cuh" />
+    <ClInclude Include="cuBQL\bvh.h">
+      <Filter>cuBQL</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\builder\cpu.h">
+      <Filter>cuBQL\builder</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\builder\cuda.h">
+      <Filter>cuBQL\builder</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\builder\cpu\spatialMedian.h">
+      <Filter>cuBQL\builder\cpu</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\builder\cuda\builder_common.h">
+      <Filter>cuBQL\builder\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\builder\cuda\elh_builder.h">
+      <Filter>cuBQL\builder\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\builder\cuda\gpu_builder.h">
+      <Filter>cuBQL\builder\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\builder\cuda\radix.h">
+      <Filter>cuBQL\builder\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\builder\cuda\rebinMortonBuilder.h">
+      <Filter>cuBQL\builder\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\builder\cuda\sah_builder.h">
+      <Filter>cuBQL\builder\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\builder\cuda\sm_builder.h">
+      <Filter>cuBQL\builder\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\builder\cuda\wide_gpu_builder.h">
+      <Filter>cuBQL\builder\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\math\affine.h">
+      <Filter>cuBQL\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\math\box.h">
+      <Filter>cuBQL\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\math\common.h">
+      <Filter>cuBQL\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\math\conservativeDistances.h">
+      <Filter>cuBQL\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\math\constants.h">
+      <Filter>cuBQL\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\math\linear.h">
+      <Filter>cuBQL\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\math\math.h">
+      <Filter>cuBQL\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\math\quaternion.h">
+      <Filter>cuBQL\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\math\random.h">
+      <Filter>cuBQL\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\math\Ray.h">
+      <Filter>cuBQL\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\math\vec.h">
+      <Filter>cuBQL\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\traversal\fixedAnyShapeQuery.h">
+      <Filter>cuBQL\tarversal</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\traversal\fixedBoxQuery.h">
+      <Filter>cuBQL\tarversal</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\traversal\fixedRadiusQuery.h">
+      <Filter>cuBQL\tarversal</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\traversal\rayQueries.h">
+      <Filter>cuBQL\tarversal</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\traversal\shrinkingRadiusQuery.h">
+      <Filter>cuBQL\tarversal</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\triangleData\math\boxTriangleIntersections.h">
+      <Filter>cuBQL\queries\triangleData\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\triangleData\math\pointToTriangleDistance.h">
+      <Filter>cuBQL\queries\triangleData\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\triangleData\math\rayTriangleIntersections.h">
+      <Filter>cuBQL\queries\triangleData\math</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\triangleData\anyWithinRadius.h">
+      <Filter>cuBQL\queries\triangleData</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\triangleData\boxInsideOutsideIntersects.h">
+      <Filter>cuBQL\queries\triangleData</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\triangleData\closestPointOnAnyTriangle.h">
+      <Filter>cuBQL\queries\triangleData</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\triangleData\crossingCount.h">
+      <Filter>cuBQL\queries\triangleData</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\triangleData\lineOfSight.h">
+      <Filter>cuBQL\queries\triangleData</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\triangleData\pointInsideOutside.h">
+      <Filter>cuBQL\queries\triangleData</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\triangleData\Triangle.h">
+      <Filter>cuBQL\queries\triangleData</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\triangleData\trianglesInBox.h">
+      <Filter>cuBQL\queries\triangleData</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\pointData\findClosest.h">
+      <Filter>cuBQL\queries\pointData</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\pointData\knn.h">
+      <Filter>cuBQL\queries\pointData</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\pointData\old_fcp.h">
+      <Filter>cuBQL\queries\pointData</Filter>
+    </ClInclude>
+    <ClInclude Include="cuBQL\queries\common\knn.h">
+      <Filter>cuBQL\queries\common</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="HashMap.hpp" />
@@ -100,6 +235,39 @@
     </Filter>
     <Filter Include="res\Shaders">
       <UniqueIdentifier>{44ea84d0-ce60-4c0b-8d27-c172a1ef2e6d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuBQL">
+      <UniqueIdentifier>{50546db7-4302-40f2-a525-8f590b4402d6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuBQL\builder">
+      <UniqueIdentifier>{e1a0bc5d-3f33-4809-b288-c689ded9101f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuBQL\math">
+      <UniqueIdentifier>{6f88d958-6a3d-4bdf-b86f-f0a293ef7ff0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuBQL\queries">
+      <UniqueIdentifier>{7cc5cbde-c1a0-4f96-814f-9728da37f96f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuBQL\tarversal">
+      <UniqueIdentifier>{4daa442f-ae96-42ac-9ddc-4d7f33b8be9d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuBQL\builder\cpu">
+      <UniqueIdentifier>{b873b7ec-e8fc-4e78-8852-e5d02c9c7db3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuBQL\builder\cuda">
+      <UniqueIdentifier>{5f4578b9-c679-48e3-9ef1-b0b81a1b4431}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuBQL\queries\common">
+      <UniqueIdentifier>{24f5a2a2-f43e-47ad-b6e3-4df70289aa13}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuBQL\queries\pointData">
+      <UniqueIdentifier>{2e177e83-e72a-48ec-80a7-100677195b47}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuBQL\queries\triangleData">
+      <UniqueIdentifier>{c348e0db-f448-4070-8e5d-c95f79d0da59}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuBQL\queries\triangleData\math">
+      <UniqueIdentifier>{ea03da2a-03dd-4811-bbb1-6fa4d0dd5e21}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

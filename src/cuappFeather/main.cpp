@@ -24,6 +24,12 @@ using VD = VisualDebugging;
 #include "nvapi510/include/nvapi.h"
 #include "nvapi510/include/NvApiDriverSettings.h"
 
+extern "C" __declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
+extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+#define PREFERRED_PSTATE_ID 0x0000001B
+#define PREFERRED_PSTATE_PREFER_MAX 0x00000000
+#define PREFERRED_PSTATE_PREFER_MIN 0x00000001
+
 
 CUDAInstance cuInstance;
 
@@ -1716,6 +1722,25 @@ int main(int argc, char** argv)
 				CUDA_SYNC();
 
 				TE(NN);
+
+				vector<unsigned int> nnIndices(numberOfQueries);
+				vector<float3> nnPositions(numberOfQueries);
+				CUDA_COPY_D2H(nnIndices.data(), d_nnIndices, sizeof(unsigned int) * numberOfQueries);
+				CUDA_COPY_D2H(nnPositions.data(), d_nnPositions, sizeof(float3) * numberOfQueries);
+				CUDA_SYNC();
+
+				for (size_t i = 0; i < numberOfQueries; i++)
+				{
+					auto& q = inputPositions[i];
+					auto ni = nnIndices[i];
+					if (ni >= 0 && ni < cuInstance.d_mesh.numberOfPoints)
+					{
+						auto& p = nnPositions[i];
+						VD::AddLine("NN Morton BVH", { XYZ(q) }, { XYZ(p) }, Color::cyan());
+						VD::AddWiredBox("NN Morton BVH - input", { XYZ(q) }, glm::vec3(0.01f, 0.01f, 0.01f), Color::yellow());
+						//VD::AddWiredBox("NN Morton BVH - result", { XYZ(p) }, glm::vec3(0.01f, 0.01f, 0.01f), Color::blue());
+					}
+				}
 			}
 
 			bvh.Terminate();
@@ -1776,6 +1801,35 @@ int main(int argc, char** argv)
 
 
 			bvh.Terminate();
+			});
+
+		controlPanel->AddButton("GetNearestPoints", 0, 0, [&]() {
+			cuInstance.d_mesh.UpdateBVH();
+
+			vector<float3> inputPositions(cuInstance.h_mesh.numberOfPoints);
+			for (size_t i = 0; i < cuInstance.h_mesh.numberOfPoints; i++)
+			{
+				inputPositions[i] = cuInstance.h_mesh.positions[i];
+			}
+
+			TS(NN);
+			auto results = cuInstance.d_mesh.GetNearestPoints(inputPositions);
+			TE(NN);
+
+			for (size_t i = 0; i < results.size(); i++)
+			{
+				auto& q = inputPositions[i];
+				auto& p = results[i];
+
+				VD::AddLine("NN GetNearestPoints", { XYZ(q) }, { XYZ(p) }, Color::yellow());
+				VD::AddWiredBox("NN GetNearestPoints - input", { XYZ(q) }, glm::vec3(0.01f, 0.01f, 0.01f), Color::red());
+				VD::AddWiredBox("NN GetNearestPoints - result", { XYZ(p) }, glm::vec3(0.01f, 0.01f, 0.01f), Color::blue());
+			}
+
+			auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
+			auto meshRenderable = Feather.GetComponent<Renderable>(meshEntity);
+			cuInstance.interop.Initialize(meshRenderable);
+			cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
 			});
 
 		controlPanel->AddButton("Find Degenerate Faces", 0, 0, [&]() {
@@ -1910,11 +1964,90 @@ int main(int argc, char** argv)
 			//ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
 			auto meshRenderable = Feather.CreateComponent<Renderable>(meshEntity);
 			meshRenderable->Initialize(Renderable::GeometryMode::Triangles);
-			cuInstance.interop.Initialize(meshRenderable);
 			meshRenderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Default.vs"), File("../../res/Shaders/Default.fs")));
 			meshRenderable->AddShader(Feather.CreateShader("TwoSide", File("../../res/Shaders/TwoSide.vs"), File("../../res/Shaders/TwoSide.fs")));
 			meshRenderable->AddShader(Feather.CreateShader("Flat", File("../../res/Shaders/Flat.vs"), File("../../res/Shaders/Flat.gs"), File("../../res/Shaders/Flat.fs")));
 			meshRenderable->SetActiveShaderIndex(0);
+
+
+
+
+
+
+
+
+
+			//// =======================================================================
+			//// <<< 여기에 아래 디버깅 코드를 그대로 붙여넣으세요 >>>
+			//// =======================================================================
+
+			//std::cout << "\n\n[DEBUG] --- Interop Pre-flight Check ---\n";
+
+			//// VBO 핸들 ID를 직접 가져옵니다.
+			//GLuint vboPos = meshRenderable->GetVertices().vbo;
+			//GLuint vboNormal = meshRenderable->GetNormals().vbo;
+			//GLuint vboColor = meshRenderable->GetColors3().vbo;
+			//GLuint ebo = meshRenderable->GetIndices().vbo;
+
+			//std::cout << "[DEBUG] VBO Handle IDs:\n";
+			//std::cout << "  - Position VBO ID: " << vboPos << "\n";
+			//std::cout << "  - Normal VBO ID:   " << vboNormal << "\n";
+			//std::cout << "  - Color VBO ID:    " << vboColor << "\n";
+			//std::cout << "  - EBO ID:          " << ebo << "\n";
+
+			//// 각 버퍼에 실제 할당된 메모리 크기를 확인합니다.
+			//GLint posSize = 0;
+			//GLint normalSize = 0;
+			//GLint colorSize = 0;
+			//GLint eboSize = 0;
+
+			//if (vboPos > 0) {
+			//	glBindBuffer(GL_ARRAY_BUFFER, vboPos);
+			//	glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &posSize);
+			//}
+			//if (vboNormal > 0) {
+			//	glBindBuffer(GL_ARRAY_BUFFER, vboNormal);
+			//	glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &normalSize);
+			//}
+			//if (vboColor > 0) {
+			//	glBindBuffer(GL_ARRAY_BUFFER, vboColor);
+			//	glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &colorSize);
+			//}
+			//if (ebo > 0) {
+			//	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+			//	glGetBufferParameteriv(GL_ELEMENT_ARRAY_BUFFER, GL_BUFFER_SIZE, &eboSize);
+			//}
+
+			//// 다른 코드에 영향을 주지 않도록 바인딩을 해제합니다.
+			//glBindBuffer(GL_ARRAY_BUFFER, 0);
+			//glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+			//std::cout << "[DEBUG] VBO Allocated Sizes:\n";
+			//std::cout << "  - Position VBO Size: " << posSize << " bytes\n";
+			//std::cout << "  - Normal VBO Size:   " << normalSize << " bytes\n";
+			//std::cout << "  - Color VBO Size:    " << colorSize << " bytes\n";
+			//std::cout << "  - EBO Size:          " << eboSize << " bytes\n";
+
+			//// 혹시 이전에 발생한 OpenGL 오류가 있는지 확인합니다.
+			//GLenum err;
+			//while ((err = glGetError()) != GL_NO_ERROR) {
+			//	std::cerr << "[DEBUG] Lingering OpenGL Error Before Interop: " << err << std::endl;
+			//}
+
+			//std::cout << "[DEBUG] --- Calling UploadFromDevice now... ---\n\n";
+
+			//// =======================================================================
+			//// <<< 디버깅 코드 끝 >>>
+			//// =======================================================================
+
+
+
+
+
+
+
+
+			cuInstance.interop.Initialize(meshRenderable);
 			cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
 
 			Feather.CreateEventCallback<KeyEvent>(meshEntity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {

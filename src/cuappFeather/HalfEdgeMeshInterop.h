@@ -21,7 +21,10 @@ public:
     // 필요시 자원 해제
     void Terminate();
 
+	inline bool IsInitialized() const { return initialized; }
+
 private:
+	bool initialized = false;
     Renderable* renderable = nullptr;
 
     cudaGraphicsResource* cudaVboPos = nullptr;

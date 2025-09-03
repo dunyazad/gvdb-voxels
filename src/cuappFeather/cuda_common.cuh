@@ -28,6 +28,7 @@
 #include <thrust/scan.h>
 #include <thrust/gather.h>
 #include <thrust/scatter.h>
+#include <thrust/inner_product.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/iterator/constant_iterator.h>

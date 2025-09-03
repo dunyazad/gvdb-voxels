@@ -12,11 +12,13 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\External\glad\src\glad.c" />
+    <ClCompile Include="cuBQL\builder\cpu\instantiate_builders.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="BitVolume.cu" />
     <ClCompile Include="HalfEdgeMeshInterop.cpp" />
+    <CudaCompile Include="cuBQL\builder\cuda\instantiate_builders.cu" />
     <CudaCompile Include="HalfEdgeMesh.cu" />
     <CudaCompile Include="LBVH.cu" />
     <CudaCompile Include="main.cu" />
@@ -31,6 +33,49 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BitVolume.cuh" />
+    <ClInclude Include="cuBQL\builder\cpu.h" />
+    <ClInclude Include="cuBQL\builder\cpu\spatialMedian.h" />
+    <ClInclude Include="cuBQL\builder\cuda.h" />
+    <ClInclude Include="cuBQL\builder\cuda\builder_common.h" />
+    <ClInclude Include="cuBQL\builder\cuda\elh_builder.h" />
+    <ClInclude Include="cuBQL\builder\cuda\gpu_builder.h" />
+    <ClInclude Include="cuBQL\builder\cuda\radix.h" />
+    <ClInclude Include="cuBQL\builder\cuda\rebinMortonBuilder.h" />
+    <ClInclude Include="cuBQL\builder\cuda\sah_builder.h" />
+    <ClInclude Include="cuBQL\builder\cuda\sm_builder.h" />
+    <ClInclude Include="cuBQL\builder\cuda\wide_gpu_builder.h" />
+    <ClInclude Include="cuBQL\bvh.h" />
+    <ClInclude Include="cuBQL\math\affine.h" />
+    <ClInclude Include="cuBQL\math\box.h" />
+    <ClInclude Include="cuBQL\math\common.h" />
+    <ClInclude Include="cuBQL\math\conservativeDistances.h" />
+    <ClInclude Include="cuBQL\math\constants.h" />
+    <ClInclude Include="cuBQL\math\linear.h" />
+    <ClInclude Include="cuBQL\math\math.h" />
+    <ClInclude Include="cuBQL\math\quaternion.h" />
+    <ClInclude Include="cuBQL\math\random.h" />
+    <ClInclude Include="cuBQL\math\Ray.h" />
+    <ClInclude Include="cuBQL\math\vec.h" />
+    <ClInclude Include="cuBQL\queries\common\knn.h" />
+    <ClInclude Include="cuBQL\queries\pointData\findClosest.h" />
+    <ClInclude Include="cuBQL\queries\pointData\knn.h" />
+    <ClInclude Include="cuBQL\queries\pointData\old_fcp.h" />
+    <ClInclude Include="cuBQL\queries\triangleData\anyWithinRadius.h" />
+    <ClInclude Include="cuBQL\queries\triangleData\boxInsideOutsideIntersects.h" />
+    <ClInclude Include="cuBQL\queries\triangleData\closestPointOnAnyTriangle.h" />
+    <ClInclude Include="cuBQL\queries\triangleData\crossingCount.h" />
+    <ClInclude Include="cuBQL\queries\triangleData\lineOfSight.h" />
+    <ClInclude Include="cuBQL\queries\triangleData\math\boxTriangleIntersections.h" />
+    <ClInclude Include="cuBQL\queries\triangleData\math\pointToTriangleDistance.h" />
+    <ClInclude Include="cuBQL\queries\triangleData\math\rayTriangleIntersections.h" />
+    <ClInclude Include="cuBQL\queries\triangleData\pointInsideOutside.h" />
+    <ClInclude Include="cuBQL\queries\triangleData\Triangle.h" />
+    <ClInclude Include="cuBQL\queries\triangleData\trianglesInBox.h" />
+    <ClInclude Include="cuBQL\traversal\fixedAnyShapeQuery.h" />
+    <ClInclude Include="cuBQL\traversal\fixedBoxQuery.h" />
+    <ClInclude Include="cuBQL\traversal\fixedRadiusQuery.h" />
+    <ClInclude Include="cuBQL\traversal\rayQueries.h" />
+    <ClInclude Include="cuBQL\traversal\shrinkingRadiusQuery.h" />
     <ClInclude Include="HalfEdgeMeshInterop.h" />
     <ClInclude Include="cuda_common.cuh" />
     <ClInclude Include="cuda_vector_math.cuh" />

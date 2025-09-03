@@ -110,6 +110,9 @@ struct DeviceOctree
 
     HashMap<uint64_t, unsigned int> octreeKeys;
 
+    float3* positions = nullptr;
+	unsigned int numberOfPositions = 0;
+
     void NN_H(
         float3* queries,
         unsigned int numberOfQueries,
@@ -134,7 +137,6 @@ struct DeviceOctree
 
     __device__ static bool isLeaf(const OctreeNode& n);
 
-    // DeviceOctree 내부 (isLeaf 아래에 추가)
     __device__ static void preferred_child_order(
         const OctreeNode& n, const float3& q, int order[8]);
 
@@ -148,6 +150,7 @@ struct DeviceOctree
 __global__ void Kernel_DeviceOctree_NN_Batch(
     const OctreeNode* __restrict__ nodes,
     const unsigned int* __restrict__ rootIndex,
+    const float3* __restrict__ positions,
     const float3* __restrict__ queries,
     unsigned int numberOfQueries,
     unsigned int* __restrict__ outIndices,
