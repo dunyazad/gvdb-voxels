@@ -136,8 +136,7 @@ struct HashMap
 
             if (k == key)
             {
-                // ÇÊ¿ä ½Ã atomicExch(&info.entries[slot].value, value);
-                info.entries[slot].value = info.entries[slot].value + 1;
+                atomicAdd(&info.entries[slot].value, 1);
                 return true;
             }
 
@@ -152,7 +151,7 @@ struct HashMap
                 }
                 else if (prev == key)
                 {
-                    info.entries[slot].value = info.entries[slot].value + 1;
+                    atomicAdd(&info.entries[slot].value, 1);
                     return true;
                 }
             }

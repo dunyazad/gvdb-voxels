@@ -4,8 +4,7 @@ void MarginLineFinder::Initialize(float voxelSize, size_t capacity, uint8_t maxP
 {
 	this->voxelSize = voxelSize;
 	pointMap.Initialize(capacity, maxProbe);
-
-	countMap.Initialize(capacity, maxProbe, 0);
+	countMap.Initialize(capacity, maxProbe);
 }
 
 void MarginLineFinder::Terminate()
@@ -17,7 +16,7 @@ void MarginLineFinder::Terminate()
 void MarginLineFinder::Clear()
 {
 	pointMap.Clear();
-	countMap.Clear(0);
+	countMap.Clear();
 }
 
 void MarginLineFinder::InsertPoints(const std::vector<float3>& points, uint64_t tag)
@@ -471,9 +470,6 @@ __global__ void Kernel_MarginLineFinder_Count_Tags(
 	if (tag == UINT64_MAX)
 		return;
 
-	if (tid < 10)
-	printf("Tag: %llu\n", tag);
-	
 	if (false == HashMap<uint64_t, uint64_t>::increase(info_countMap, tag))
 	{
 		printf("Error: Failed to increase count for tag %llu\n", tag);
@@ -493,9 +489,6 @@ __global__ void Kernel_MarginLineFinder_Fill_TagCounts(
 	uint64_t count = 0;
 	HashMap<uint64_t, uint64_t>::find(info_countMap, tag, &count);
 	d_resultTagCounts[tid] = count;
-
-	if (tid < 10)
-		printf("Tag: %llu, Count: %llu\n", tag, count);
 }
 
 void MarginLineFinder::Clustering(float3* d_resultPositions, uint64_t* d_resultTags, uint64_t* d_resultTagCounts, unsigned int* d_numberofResultPositions)
