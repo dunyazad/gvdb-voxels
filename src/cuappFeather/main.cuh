@@ -36,14 +36,14 @@ public:
     CUDAInstance();
     ~CUDAInstance();
 
-    HostPointCloud h_input;
-    DevicePointCloud d_input;
+    HostPointCloud<> h_input;
+    DevicePointCloud<> d_input;
     SCVoxelHashMap vhm;
     HostHalfEdgeMesh h_mesh;
     DeviceHalfEdgeMesh d_mesh;
 
     HalfEdgeMeshInterop interop;
 
-    HostPointCloud ProcessPointCloud(const HostPointCloud& input, float voxelSize);
+    HostPointCloud<> ProcessPointCloud(const HostPointCloud<>& input, float voxelSize);
     void ProcessHalfEdgeMesh(const string& filename);
 };

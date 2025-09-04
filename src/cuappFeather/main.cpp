@@ -369,7 +369,7 @@ int main(int argc, char** argv)
 		f32 ly = My - my;
 		f32 lz = Mz - mz;
 
-		h_pointCloud.Intialize(ply.GetPoints().size() / 3);
+		h_pointCloud.Initialize(ply.GetPoints().size() / 3);
 
 		//auto entity = Feather.CreateEntity("Compound");
 		//auto renderable = Feather.CreateComponent<Renderable>(entity);

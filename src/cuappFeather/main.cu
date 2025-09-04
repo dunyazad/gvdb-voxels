@@ -44,7 +44,7 @@ void CUDAInstance::ProcessHalfEdgeMesh(const string& filename)
     h_mesh.DeserializePLY(filename);
 }
 
-HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& input, float voxelSize)
+HostPointCloud<> CUDAInstance::ProcessPointCloud(const HostPointCloud<>& input, float voxelSize)
 {
     CUDA_TS(ProcessPointCloud);
 
@@ -55,7 +55,7 @@ HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& input, floa
 
     vhm.Occupy(d_input, 3);
 
-    HostPointCloud result = vhm.Serialize();
+    auto result = vhm.Serialize();
     result.CompactValidPoints();
 
     CUDA_TS(MarchingCubes);

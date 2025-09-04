@@ -12,7 +12,7 @@ HostMesh::HostMesh(const DeviceMesh& other)
 HostMesh& HostMesh::operator=(const DeviceMesh& other)
 {
 	Terminate();
-	Intialize(other.numberOfPoints, other.numberOfFaces);
+	Initialize(other.numberOfPoints, other.numberOfFaces);
 
 	CUDA_COPY_D2H(positions, other.positions, sizeof(float3) * other.numberOfPoints);
 	CUDA_COPY_D2H(normals, other.normals, sizeof(float3) * other.numberOfPoints);
@@ -25,7 +25,7 @@ HostMesh& HostMesh::operator=(const DeviceMesh& other)
 	return *this;
 }
 
-void HostMesh::Intialize(unsigned int numberOfPoints, unsigned int numberOfFaces)
+void HostMesh::Initialize(unsigned int numberOfPoints, unsigned int numberOfFaces)
 {
 	if (numberOfPoints == 0) return;
 
@@ -77,7 +77,7 @@ void HostMesh::CompactValidPoints()
 	//}
 
 	//Terminate();
-	//Intialize(static_cast<unsigned int>(new_positions.size()));
+	//Initialize(static_cast<unsigned int>(new_positions.size()));
 	//std::copy(new_positions.begin(), new_positions.end(), positions);
 	//std::copy(new_normals.begin(), new_normals.end(), normals);
 	//std::copy(new_colors.begin(), new_colors.end(), colors);
@@ -93,7 +93,7 @@ DeviceMesh::DeviceMesh(const HostMesh& other)
 DeviceMesh& DeviceMesh::operator=(const HostMesh& other)
 {
 	Terminate();
-	Intialize(other.numberOfPoints, other.numberOfFaces);
+	Initialize(other.numberOfPoints, other.numberOfFaces);
 
 	CUDA_COPY_H2D(positions, other.positions, sizeof(float3) * other.numberOfPoints);
 	CUDA_COPY_H2D(normals, other.normals, sizeof(float3) * other.numberOfPoints);
@@ -106,7 +106,7 @@ DeviceMesh& DeviceMesh::operator=(const HostMesh& other)
 	return *this;
 }
 
-void DeviceMesh::Intialize(unsigned int numberOfPoints, unsigned int numberOfFaces)
+void DeviceMesh::Initialize(unsigned int numberOfPoints, unsigned int numberOfFaces)
 {
 	if (numberOfPoints == 0) return;
 

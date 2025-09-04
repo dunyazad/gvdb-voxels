@@ -63,7 +63,7 @@ void SCVoxelHashMap::CheckOccupiedIndicesLength(unsigned int numberOfVoxelsToOcc
 	printf("SCVoxelHashMap numberOfOccupiedVoxels capacity: %u\n", info.h_occupiedCapacity);
 }
 
-void SCVoxelHashMap::Occupy(const DevicePointCloud& d_input, int offset)
+void SCVoxelHashMap::Occupy(const DevicePointCloud<>& d_input, int offset)
 {
 	CUDA_TS(SCVoxelHashMap_Occupy);
 
@@ -95,7 +95,7 @@ void SCVoxelHashMap::Occupy(float3* d_positions, float3* d_normals, float3* d_co
 	CUDA_TE(SCVoxelHashMap_Occupy);
 }
 
-HostPointCloud SCVoxelHashMap::Serialize()
+HostPointCloud<> SCVoxelHashMap::Serialize()
 {
 	HostPointCloud h_result;
 	if (info.h_numberOfOccupiedVoxels == 0) return h_result;
@@ -118,7 +118,7 @@ HostPointCloud SCVoxelHashMap::Serialize()
 	CUDA_COPY_D2H(&h_numberOfPoints, d_numberOfPoints, sizeof(unsigned int));
 	CUDA_SYNC();
 
-	h_result.Intialize(h_numberOfPoints);
+	h_result.Initialize(h_numberOfPoints);
 	CUDA_COPY_D2H(h_result.positions, d_positions, sizeof(float3) * h_numberOfPoints);
 	CUDA_COPY_D2H(h_result.normals, d_normals, sizeof(float3) * h_numberOfPoints);
 	CUDA_COPY_D2H(h_result.colors, d_colors, sizeof(float3) * h_numberOfPoints);

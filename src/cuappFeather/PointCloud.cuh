@@ -2,9 +2,10 @@
 
 #include <cuda_common.cuh>
 
-struct HostPointCloud;
-struct DevicePointCloud;
+template<typename T = void> struct HostPointCloud;
+template<typename T = void> struct DevicePointCloud;
 
+template<typename T>
 struct HostPointCloud
 {
     float3* positions = nullptr;
@@ -12,18 +13,141 @@ struct HostPointCloud
     float3* colors = nullptr;
     unsigned int numberOfPoints = 0;
 
-    HostPointCloud();
-    HostPointCloud(const HostPointCloud& other);
-    HostPointCloud& operator=(const HostPointCloud& other);
-    HostPointCloud(const DevicePointCloud& other);
-    HostPointCloud& operator=(const DevicePointCloud& other);
+    T* properties = nullptr;
 
-    void Intialize(unsigned int numberOfPoints);
-    void Terminate();
+    HostPointCloud() {}
 
-    void CompactValidPoints();
+    HostPointCloud(const HostPointCloud<T>& other) { operator =(other); }
+    HostPointCloud<T>& operator=(const HostPointCloud<T>& other)
+    {
+        Terminate();
+        Initialize(other.numberOfPoints);
+
+        CUDA_COPY_H2H(positions, other.positions, sizeof(float3) * other.numberOfPoints);
+        CUDA_COPY_H2H(normals, other.normals, sizeof(float3) * other.numberOfPoints);
+        CUDA_COPY_H2H(colors, other.colors, sizeof(float3) * other.numberOfPoints);
+
+        if constexpr (!std::is_void_v<T>)
+        {
+            CUDA_COPY_H2H(properties, other.properties, sizeof(T) * other.numberOfPoints);
+        }
+
+        return *this;
+    }
+
+    HostPointCloud(const DevicePointCloud<T>& other) { operator =(other); }
+    HostPointCloud<T>& operator=(const DevicePointCloud<T>& other)
+    {
+        Terminate();
+        Initialize(other.numberOfPoints);
+
+        CUDA_COPY_D2H(positions, other.positions, sizeof(float3) * other.numberOfPoints);
+        CUDA_COPY_D2H(normals, other.normals, sizeof(float3) * other.numberOfPoints);
+        CUDA_COPY_D2H(colors, other.colors, sizeof(float3) * other.numberOfPoints);
+
+        if constexpr (!std::is_void_v<T>)
+        {
+            CUDA_COPY_D2H(properties, other.properties, sizeof(T) * other.numberOfPoints);
+        }
+
+        return *this;
+    }
+
+    void Initialize(unsigned int numberOfPoints)
+    {
+        if (numberOfPoints == 0) return;
+
+        this->numberOfPoints = numberOfPoints;
+        positions = new float3[numberOfPoints];
+        normals = new float3[numberOfPoints];
+        colors = new float3[numberOfPoints];
+
+        if constexpr (!std::is_void_v<T>)
+        {
+            properties = new T[numberOfPoints];
+        }
+    }
+
+    void Terminate()
+    {
+        if (numberOfPoints > 0)
+        {
+            delete[] positions;
+            delete[] normals;
+            delete[] colors;
+
+            if constexpr (!std::is_void_v<T>)
+            {
+                delete[] properties;
+                properties = nullptr;
+            }
+
+            positions = nullptr;
+            normals = nullptr;
+            colors = nullptr;
+            numberOfPoints = 0;
+        }
+    }
+
+    void CompactValidPoints()
+    {
+        std::vector<float3> new_positions, new_normals, new_colors;
+        new_positions.reserve(numberOfPoints);
+        new_normals.reserve(numberOfPoints);
+        new_colors.reserve(numberOfPoints);
+
+        if constexpr (!std::is_void_v<T>)
+        {
+            std::vector<T> new_properties;
+            new_properties.reserve(numberOfPoints);
+
+            for (unsigned int i = 0; i < numberOfPoints; ++i)
+            {
+                const auto& p = positions[i];
+                if (p.x != FLT_MAX && p.y != FLT_MAX && p.z != FLT_MAX)
+                {
+                    new_positions.push_back(p);
+                    new_normals.push_back(normals[i]);
+                    new_colors.push_back(colors[i]);
+                    new_properties.push_back(properties[i]);
+                }
+            }
+
+            Terminate();
+            Initialize(static_cast<unsigned int>(new_positions.size()));
+            std::copy(new_positions.begin(), new_positions.end(), positions);
+            std::copy(new_normals.begin(), new_normals.end(), normals);
+            std::copy(new_colors.begin(), new_colors.end(), colors);
+            std::copy(new_properties.begin(), new_properties.end(), properties);
+        }
+        else
+        {
+            for (unsigned int i = 0; i < numberOfPoints; ++i)
+            {
+                const auto& p = positions[i];
+                if (p.x != FLT_MAX && p.y != FLT_MAX && p.z != FLT_MAX)
+                {
+                    new_positions.push_back(p);
+                    new_normals.push_back(normals[i]);
+                    new_colors.push_back(colors[i]);
+                }
+            }
+
+            Terminate();
+            Initialize(static_cast<unsigned int>(new_positions.size()));
+            std::copy(new_positions.begin(), new_positions.end(), positions);
+            std::copy(new_normals.begin(), new_normals.end(), normals);
+            std::copy(new_colors.begin(), new_colors.end(), colors);
+        }
+    }
 };
 
+__global__ void Kernel_DevicePointCloudCompactValidPoints(
+    float3* in_positions, float3* in_normals, float3* in_colors,
+    float3* out_positions, float3* out_normals, float3* out_colors,
+    unsigned int* valid_counter, unsigned int N);
+
+template<typename T>
 struct DevicePointCloud
 {
     float3* positions = nullptr;
@@ -31,14 +155,130 @@ struct DevicePointCloud
     float3* colors = nullptr;
     unsigned int numberOfPoints = 0;
 
-    DevicePointCloud();
-    DevicePointCloud(const DevicePointCloud& other);
-    DevicePointCloud& operator=(const DevicePointCloud& other);
-    DevicePointCloud(const HostPointCloud& other);
-    DevicePointCloud& operator=(const HostPointCloud& other);
+    T* properties = nullptr;
 
-    void Intialize(unsigned int numberOfPoints);
-    void Terminate();
+    DevicePointCloud() {}
 
-    void CompactValidPoints();
+    DevicePointCloud(const DevicePointCloud<T>& other) { operator =(other); }
+    DevicePointCloud& operator=(const DevicePointCloud<T>& other)
+    {
+        Terminate();
+        Initialize(other.numberOfPoints);
+
+        CUDA_COPY_D2D(positions, other.positions, sizeof(float3) * other.numberOfPoints);
+        CUDA_COPY_D2D(normals, other.normals, sizeof(float3) * other.numberOfPoints);
+        CUDA_COPY_D2D(colors, other.colors, sizeof(float3) * other.numberOfPoints);
+
+        if constexpr (!std::is_void_v<T>)
+        {
+            CUDA_COPY_D2D(properties, other.properties, sizeof(T) * other.numberOfPoints);
+        }
+        CUDA_SYNC();
+
+        return *this;
+    }
+
+    DevicePointCloud(const HostPointCloud<T>& other) { operator =(other); }
+
+    DevicePointCloud<T>& operator=(const HostPointCloud<T>& other)
+    {
+        Terminate();
+        Initialize(other.numberOfPoints);
+
+        CUDA_COPY_H2D(positions, other.positions, sizeof(float3) * other.numberOfPoints);
+        CUDA_COPY_H2D(normals, other.normals, sizeof(float3) * other.numberOfPoints);
+        CUDA_COPY_H2D(colors, other.colors, sizeof(float3) * other.numberOfPoints);
+
+        if constexpr (!std::is_void_v<T>)
+        {
+            CUDA_COPY_H2D(properties, other.properties, sizeof(T) * other.numberOfPoints);
+        }
+        CUDA_SYNC();
+
+        return *this;
+    }
+
+    void Initialize(unsigned int numberOfPoints)
+    {
+        if (numberOfPoints == 0) return;
+
+        this->numberOfPoints = numberOfPoints;
+        CUDA_MALLOC(&positions, sizeof(float3) * numberOfPoints);
+        CUDA_MALLOC(&normals, sizeof(float3) * numberOfPoints);
+        CUDA_MALLOC(&colors, sizeof(float3) * numberOfPoints);
+
+        if constexpr (!std::is_void_v<T>)
+        {
+            CUDA_MALLOC(&properties, sizeof(T) * numberOfPoints);
+        }
+    }
+
+    void Terminate()
+    {
+        if (numberOfPoints > 0)
+        {
+            CUDA_SAFE_FREE(positions);
+            CUDA_SAFE_FREE(normals);
+            CUDA_SAFE_FREE(colors);
+
+            if constexpr (!std::is_void_v<T>)
+            {
+                CUDA_SAFE_FREE(properties);
+            }
+
+            numberOfPoints = 0;
+        }
+    }
+
+    void CompactValidPoints()
+    {
+        //std::vector<float3> new_positions, new_normals, new_colors;
+        //new_positions.reserve(numberOfPoints);
+        //new_normals.reserve(numberOfPoints);
+        //new_colors.reserve(numberOfPoints);
+
+        //if constexpr (!std::is_void_v<T>)
+        //{
+        //    std::vector<T> new_properties;
+        //    new_properties.reserve(numberOfPoints);
+
+        //    for (unsigned int i = 0; i < numberOfPoints; ++i)
+        //    {
+        //        const auto& p = positions[i];
+        //        if (p.x != FLT_MAX && p.y != FLT_MAX && p.z != FLT_MAX)
+        //        {
+        //            new_positions.push_back(p);
+        //            new_normals.push_back(normals[i]);
+        //            new_colors.push_back(colors[i]);
+        //            new_properties.push_back(properties[i]);
+        //        }
+        //    }
+
+        //    Terminate();
+        //    Initialize(static_cast<unsigned int>(new_positions.size()));
+        //    std::copy(new_positions.begin(), new_positions.end(), positions);
+        //    std::copy(new_normals.begin(), new_normals.end(), normals);
+        //    std::copy(new_colors.begin(), new_colors.end(), colors);
+        //    std::copy(new_properties.begin(), new_properties.end(), properties);
+        //}
+        //else
+        //{
+        //    for (unsigned int i = 0; i < numberOfPoints; ++i)
+        //    {
+        //        const auto& p = positions[i];
+        //        if (p.x != FLT_MAX && p.y != FLT_MAX && p.z != FLT_MAX)
+        //        {
+        //            new_positions.push_back(p);
+        //            new_normals.push_back(normals[i]);
+        //            new_colors.push_back(colors[i]);
+        //        }
+        //    }
+
+        //    Terminate();
+        //    Initialize(static_cast<unsigned int>(new_positions.size()));
+        //    std::copy(new_positions.begin(), new_positions.end(), positions);
+        //    std::copy(new_normals.begin(), new_normals.end(), normals);
+        //    std::copy(new_colors.begin(), new_colors.end(), colors);
+        //}
+    }
 };

@@ -42,14 +42,14 @@ struct VoxelHashMap
 	void CheckOccupiedIndicesLength(unsigned int numberOfVoxelsToOccupy);
 
 	void Occupy(float3* d_positions, float3* d_normals, float3* d_colors, unsigned int numberOfPoints);
-	void Occupy(const DevicePointCloud& d_input);
+	void Occupy(const DevicePointCloud<>& d_input);
 
 	void Occupy_SDF(float3* d_positions, float3* d_normals, float3* d_colors, unsigned int numberOfPoints, int offset = 1);
-	void Occupy_SDF(const DevicePointCloud& d_input, int offset = 1);
+	void Occupy_SDF(const DevicePointCloud<>& d_input, int offset = 1);
 
-	HostPointCloud Serialize();
-	HostPointCloud Serialize_SDF();
-	HostPointCloud Serialize_SDF_Tidy();
+	HostPointCloud<> Serialize();
+	HostPointCloud<> Serialize_SDF();
+	HostPointCloud<> Serialize_SDF_Tidy();
 
 	void Dilation(int iterations, int step);
 

@@ -19,7 +19,7 @@ struct HostMesh
     HostMesh(const DeviceMesh& other);
     HostMesh& operator=(const DeviceMesh& other);
 
-    void Intialize(unsigned int numberOfPoints, unsigned int numberOfFaces);
+    void Initialize(unsigned int numberOfPoints, unsigned int numberOfFaces);
     void Terminate();
 
     void CompactValidPoints();
@@ -39,7 +39,7 @@ struct DeviceMesh
     DeviceMesh(const HostMesh& other);
     DeviceMesh& operator=(const HostMesh& other);
 
-    void Intialize(unsigned int numberOfPoints, unsigned int numberOfFaces);
+    void Initialize(unsigned int numberOfPoints, unsigned int numberOfFaces);
     void Terminate();
 
     void CompactValidPoints();

@@ -72,7 +72,7 @@ void VoxelHashMap::Occupy(float3* d_positions, float3* d_normals, float3* d_colo
 	printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
 }
 
-void VoxelHashMap::Occupy(const DevicePointCloud& d_input)
+void VoxelHashMap::Occupy(const DevicePointCloud<>& d_input)
 {
 	CheckOccupiedIndicesLength(d_input.numberOfPoints);
 	LaunchKernel(Kernel_VoxelHashMap_Occupy, d_input.numberOfPoints, info, d_input.positions, d_input.normals, d_input.colors, d_input.numberOfPoints);
@@ -92,7 +92,7 @@ void VoxelHashMap::Occupy_SDF(float3* d_positions, float3* d_normals, float3* d_
 	printf("Number of occupied voxels : %u\n", info.h_numberOfOccupiedVoxels);
 }
 
-void VoxelHashMap::Occupy_SDF(const DevicePointCloud& d_input, int offset)
+void VoxelHashMap::Occupy_SDF(const DevicePointCloud<>& d_input, int offset)
 {
 	CUDA_TS(Occupy_SDF)
 	int count = (offset * 2 + 1) * (offset * 2 + 1) * (offset * 2 + 1);
@@ -106,13 +106,13 @@ void VoxelHashMap::Occupy_SDF(const DevicePointCloud& d_input, int offset)
 	CUDA_TE(Occupy_SDF)
 }
 
-HostPointCloud VoxelHashMap::Serialize()
+HostPointCloud<> VoxelHashMap::Serialize()
 {
 	DevicePointCloud d_result;
 
 	if (info.h_numberOfOccupiedVoxels == 0) return d_result;
 
-	d_result.Intialize(info.h_numberOfOccupiedVoxels);
+	d_result.Initialize(info.h_numberOfOccupiedVoxels);
 
 	LaunchKernel(Kernel_VoxelHashMap_Serialize, info.h_numberOfOccupiedVoxels, info, d_result.positions, d_result.normals, d_result.colors);
 
@@ -124,13 +124,13 @@ HostPointCloud VoxelHashMap::Serialize()
 	return h_result;
 }
 
-HostPointCloud VoxelHashMap::Serialize_SDF()
+HostPointCloud<> VoxelHashMap::Serialize_SDF()
 {
 	DevicePointCloud d_result;
 
 	if (info.h_numberOfOccupiedVoxels == 0) return d_result;
 
-	d_result.Intialize(info.h_numberOfOccupiedVoxels);
+	d_result.Initialize(info.h_numberOfOccupiedVoxels);
 
 	LaunchKernel(Kernel_VoxelHashMap_Serialize_SDF, info.h_numberOfOccupiedVoxels, info, d_result.positions, d_result.normals, d_result.colors);
 
@@ -142,13 +142,13 @@ HostPointCloud VoxelHashMap::Serialize_SDF()
 	return h_result;
 }
 
-HostPointCloud VoxelHashMap::Serialize_SDF_Tidy()
+HostPointCloud<> VoxelHashMap::Serialize_SDF_Tidy()
 {
 	DevicePointCloud d_result;
 
 	if (info.h_numberOfOccupiedVoxels == 0) return d_result;
 
-	d_result.Intialize(info.h_numberOfOccupiedVoxels);
+	d_result.Initialize(info.h_numberOfOccupiedVoxels);
 
 	LaunchKernel(Kernel_VoxelHashMap_Serialize_SDF_Tidy, info.h_numberOfOccupiedVoxels, info, d_result.positions, d_result.normals, d_result.colors);
 
