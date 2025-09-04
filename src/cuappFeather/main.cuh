@@ -39,8 +39,8 @@ public:
     HostPointCloud<> h_input;
     DevicePointCloud<> d_input;
     SCVoxelHashMap<> vhm;
-    HostHalfEdgeMesh h_mesh;
-    DeviceHalfEdgeMesh d_mesh;
+    HostHalfEdgeMesh<> h_mesh;
+    DeviceHalfEdgeMesh<> d_mesh;
 
     HalfEdgeMeshInterop interop;
 

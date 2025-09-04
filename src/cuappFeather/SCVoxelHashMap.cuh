@@ -414,7 +414,7 @@ struct SCVoxelHashMap
 		return h_result;
 	}
 
-	void MarchingCubes(DeviceHalfEdgeMesh& mesh, float isoValue = 0.0f)
+	void MarchingCubes(DeviceHalfEdgeMesh<T>& mesh, float isoValue = 0.0f)
 	{
 		nvtxRangePushA("MarchingCubes");
 
@@ -461,7 +461,7 @@ struct SCVoxelHashMap
 		nvtxRangePop();
 	}
 
-	void SurfaceProjection_SDF(SCVoxelHashMapInfo<T> info, DeviceHalfEdgeMesh& mesh, int maxIters = 5, float stepScale = 0.5f)
+	void SurfaceProjection_SDF(SCVoxelHashMapInfo<T> info, DeviceHalfEdgeMesh<T>& mesh, int maxIters = 5, float stepScale = 0.5f)
 	{
 		unsigned int numberOfPoints = mesh.numberOfPoints;
 		float3* positions = mesh.positions;
