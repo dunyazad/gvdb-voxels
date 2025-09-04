@@ -1667,7 +1667,8 @@ __global__ void Kernel_DeviceHalfEdgeMesh_FindNearestPoints(
     const cuBQL::Triangle* __restrict__ triangles,
     cuBQL::bvh3f bvh,
     const float3* __restrict__ queries,
-    float3* __restrict__ results,
+    float3* __restrict__ resultsPositions,
+    int* __restrict__ resultTriangleIndices,
     size_t numberOfQueries)
 {
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1679,9 +1680,11 @@ __global__ void Kernel_DeviceHalfEdgeMesh_FindNearestPoints(
     cuBQL::vec3f queryPoint(query.x, query.y, query.z);
     cuBQL::triangles::CPAT cpat;
     cpat.runQuery(triangles, bvh, queryPoint);
-    results[index].x = cpat.P.x;
-    results[index].y = cpat.P.y;
-    results[index].z = cpat.P.z;
+    resultsPositions[index].x = cpat.P.x;
+    resultsPositions[index].y = cpat.P.y;
+    resultsPositions[index].z = cpat.P.z;
+
+    resultTriangleIndices[index] = cpat.triangleIdx;
 
   //  printf("Query[%zu]: (%.3f, %.3f, %.3f) -> Nearest: (%.3f, %.3f, %.3f), dist=%.6f\n",
   //      index, query.x, query.y, query.z,
@@ -1689,31 +1692,39 @@ __global__ void Kernel_DeviceHalfEdgeMesh_FindNearestPoints(
 		//cuBQL::length(cpat.P - queryPoint));
 }
 
-std::vector<float3> DeviceHalfEdgeMesh::GetNearestPoints(const std::vector<float3>& inputQueries)
+void DeviceHalfEdgeMesh::GetNearestPoints(
+    const std::vector<float3>& queries,
+    std::vector<float3>& resultPositions,
+    std::vector<int>& resultTriangleIndices)
 {
 	float3* d_queries = nullptr;
-	CUDA_MALLOC(&d_queries, sizeof(float3) * inputQueries.size());
-	CUDA_COPY_H2D(d_queries, inputQueries.data(), sizeof(float3) * inputQueries.size());
+	CUDA_MALLOC(&d_queries, sizeof(float3) * queries.size());
+	CUDA_COPY_H2D(d_queries, queries.data(), sizeof(float3) * queries.size());
 
-	float3* d_results = nullptr;
-	CUDA_MALLOC(&d_results, sizeof(float3) * inputQueries.size());
+	float3* d_resultPositions = nullptr;
+	CUDA_MALLOC(&d_resultPositions, sizeof(float3) * queries.size());
+
+    int* d_resultTriangleIndices = nullptr;
+    CUDA_MALLOC(&d_resultTriangleIndices, sizeof(int) * queries.size());
 
 	CUDA_SYNC();
 	
-	LaunchKernel(Kernel_DeviceHalfEdgeMesh_FindNearestPoints, inputQueries.size(),
-		triangles, bvh, d_queries, d_results, inputQueries.size());
+	LaunchKernel(Kernel_DeviceHalfEdgeMesh_FindNearestPoints, queries.size(),
+		triangles, bvh, d_queries, d_resultPositions, d_resultTriangleIndices, queries.size());
 
     CUDA_SYNC();
 
-    std::vector<float3> h_results(inputQueries.size());
-    CUDA_COPY_D2H(h_results.data(), d_results, sizeof(float3) * inputQueries.size());
+    resultPositions.resize(queries.size());
+    CUDA_COPY_D2H(resultPositions.data(), d_resultPositions, sizeof(float3) * queries.size());
+
+    resultTriangleIndices.resize(queries.size());
+    CUDA_COPY_D2H(resultTriangleIndices.data(), d_resultTriangleIndices, sizeof(int) * queries.size());
 
     CUDA_SYNC();
 
 	CUDA_FREE(d_queries);
-	CUDA_FREE(d_results);
-
-	return h_results;
+	CUDA_FREE(d_resultPositions);
+    CUDA_FREE(d_resultTriangleIndices);
 }
 #pragma endregion
 

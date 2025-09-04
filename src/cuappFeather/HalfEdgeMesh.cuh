@@ -105,9 +105,6 @@ struct DeviceHalfEdgeMesh
     HashMap<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap;
     FaceNode* faceNodes = nullptr;
 
-    //DeviceLBVH bvh;
-    //MortonKey* mortonKeys = nullptr;
-
     cuBQL::bvh3f bvh;
     cuBQL::Triangle* triangles = nullptr;
     cuBQL::box3f* boxes = nullptr;
@@ -156,7 +153,7 @@ struct DeviceHalfEdgeMesh
 
 	void FindDegenerateFaces(vector<unsigned int>& outFaceIndices) const;
 
-	std::vector<float3> GetNearestPoints(const std::vector<float3>& queries);
+	void GetNearestPoints(const std::vector<float3>& queries, std::vector<float3>& resultPositions, std::vector<int>& resultTriangleIndices);
 
     __host__ __device__ static uint64_t PackEdge(unsigned int v0, unsigned int v1);
     __device__ static bool HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value);

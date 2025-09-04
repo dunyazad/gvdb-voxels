@@ -4,6 +4,23 @@
 
 HostPointCloud::HostPointCloud() {}
 
+HostPointCloud::HostPointCloud(const HostPointCloud& other)
+{
+	operator =(other);
+}
+
+HostPointCloud& HostPointCloud::operator=(const HostPointCloud& other)
+{
+	Terminate();
+	Intialize(other.numberOfPoints);
+
+	CUDA_COPY_H2H(positions, other.positions, sizeof(float3) * other.numberOfPoints);
+	CUDA_COPY_H2H(normals, other.normals, sizeof(float3) * other.numberOfPoints);
+	CUDA_COPY_H2H(colors, other.colors, sizeof(float3) * other.numberOfPoints);
+
+	return *this;
+}
+
 HostPointCloud::HostPointCloud(const DevicePointCloud& other)
 {
 	operator =(other);
@@ -72,6 +89,24 @@ void HostPointCloud::CompactValidPoints()
 }
 
 DevicePointCloud::DevicePointCloud() {}
+
+DevicePointCloud::DevicePointCloud(const DevicePointCloud& other)
+{
+	operator =(other);
+}
+
+DevicePointCloud& DevicePointCloud::operator=(const DevicePointCloud& other)
+{
+	Terminate();
+	Intialize(other.numberOfPoints);
+
+	CUDA_COPY_H2D(positions, other.positions, sizeof(float3) * other.numberOfPoints);
+	CUDA_COPY_H2D(normals, other.normals, sizeof(float3) * other.numberOfPoints);
+	CUDA_COPY_H2D(colors, other.colors, sizeof(float3) * other.numberOfPoints);
+	CUDA_SYNC();
+
+	return *this;
+}
 
 DevicePointCloud::DevicePointCloud(const HostPointCloud& other)
 {

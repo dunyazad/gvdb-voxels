@@ -32,7 +32,9 @@ extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 
 MarginLineFinder marginLineFinder;
 vector<float3> marginLinePoints;
+vector<int> deepLearningClasses;
 
+CUDAInstance cuInstance;
 
 bool ForceGPUPerformance()
 {
@@ -306,232 +308,147 @@ int main(int argc, char** argv)
 		auto entity = Feather.CreateEntity("Control Panel");
 		auto controlPanel = Feather.CreateComponent<ControlPanel>(entity, "Control Panel");
 
-		auto InsertPoints = [&]() {
-			TS(InsertPoints);
-			{
-				auto entity = Feather.GetEntityByName("Compound_Class_0");
-				if (entity != InvalidEntity)
-				{
-					auto renderable = Feather.GetComponent<Renderable>(entity);
-					if (renderable)
-					{
-						vector<float3> points;
-						for (size_t i = 0; i < renderable->GetVertices().size(); i++)
-						{
-							auto& p = renderable->GetVertices()[i];
-							points.push_back(make_float3(XYZ(p)));
-						}
-						marginLineFinder.InsertPoints(points, 1);
-					}
-				}
-			}
-			{
-				auto entity = Feather.GetEntityByName("Compound_Class_1");
-				if (entity != InvalidEntity)
-				{
-					auto renderable = Feather.GetComponent<Renderable>(entity);
-					if (renderable)
-					{
-						vector<float3> points;
-						for (size_t i = 0; i < renderable->GetVertices().size(); i++)
-						{
-							auto& p = renderable->GetVertices()[i];
-							points.push_back(make_float3(XYZ(p)));
-						}
-						marginLineFinder.InsertPoints(points, 2);
-					}
-				}
-			}
-			TE(InsertPoints);
-			};
+		controlPanel->AddButton("GetNearestPoints", 0, 0, [&]() {
+			cuInstance.d_mesh.UpdateBVH();
 
-		auto Dump = [&]() {
+			//vector<float3> inputPositions(cuInstance.h_mesh.numberOfPoints);
+			vector<float3> inputPositions(cuInstance.h_input.numberOfPoints);
+			for (size_t i = 0; i < cuInstance.h_input.numberOfPoints; i++)
+			{
+				inputPositions[i] = cuInstance.h_input.positions[i];
+			}
+
+			TS(NN);
 			vector<float3> resultPositions;
-			vector<uint64_t> resultTags;
-			marginLineFinder.Dump(resultPositions, resultTags);
-
-			auto colors = Color::GetContrastingColors(15);
+			vector<int> resultTriangleIndices;
+			cuInstance.d_mesh.GetNearestPoints(inputPositions, resultPositions, resultTriangleIndices);
+			TE(NN);
 
 			for (size_t i = 0; i < resultPositions.size(); i++)
 			{
-				auto& p = resultPositions[i];
-				auto& tag = resultTags[i];
-
-				auto color = colors[tag % colors.size()];
-
-				VD::AddBox("MarginLine Dump", glm::vec3(XYZ(p)), glm::vec3(0.1f, 0.1f, 0.1f), color);
-			}
-			};
-
-		auto FindMarginLines = [&]() {
-			marginLineFinder.FindMarginLinePoints(marginLinePoints);
-
-			for (size_t i = 0; i < marginLinePoints.size(); i++)
-			{
-				auto& p = marginLinePoints[i];
-
-				VD::AddBox("MarginLine", glm::vec3(XYZ(p)), glm::vec3(0.1f, 0.1f, 0.1f), Color::blue());
-			}
-
-			VD::AddToSelectionList("MarginLine");
-			};
-
-		auto ClearAndReInitialize = [&]() {
-			marginLineFinder.Clear();
-			marginLineFinder.Initialize(0.1f, 1000000 * 64, 64);
-			};
-
-		auto InsertMarginLinePoints = [&]() {
-			marginLineFinder.InsertPoints(marginLinePoints, 3);
-			};
-
-		auto MarginLinesNoiseRemove = [&]() {
-			vector<float3> result;
-			marginLineFinder.MarginLineNoiseRemoval(result);
-
-			for (size_t i = 0; i < result.size(); i++)
-			{
-				auto& p = result[i];
-
-				VD::AddBox("MarginLineNoiseRemoved", glm::vec3(XYZ(p)), glm::vec3(0.1f, 0.1f, 0.1f), Color::red());
-			}
-
-			VD::AddToSelectionList("MarginLineNoiseRemoved");
-			};
-
-		auto Clustering = [&]() {
-			std::vector<float3> clustered_points;
-			std::vector<uint64_t> cluster_ids;
-			std::vector<uint64_t> cluster_counts;
-			marginLineFinder.Clustering(clustered_points, cluster_ids, cluster_counts);
-
-			// 2. 결과를 그룹화 (std::unordered_map 사용으로 성능 향상)
-			std::unordered_map<uint64_t, std::vector<pair<float3, uint64_t>>> clusters;
-			for (size_t i = 0; i < clustered_points.size(); ++i)
-			{
-				//printf("count : %d\n", cluster_counts[i]);
-
-				clusters[cluster_ids[i]].push_back(make_pair(clustered_points[i], cluster_counts[i]));
-			}
-
-			if (clusters.empty()) return;
-
-			// 3. 색상 생성
-			auto colors = Color::GetContrastingColors(clusters.size());
-
-			// 4. 시각화 (올바른 순회 방식 및 일관된 색상 할당)
-			for (auto const& [cluster_id, points] : clusters)
-			{
-				// 클러스터 ID의 해시 값을 기반으로 일관된 색상 할당
-				// 이렇게 하면 실행할 때마다 같은 ID의 클러스터는 같은 색상을 가짐
-				size_t hash_val = std::hash<uint64_t>{}(cluster_id);
-				auto color = colors[hash_val % colors.size()];
-
-				for (auto const& pair : points)
+				if (0 == deepLearningClasses[i])// || 1 == deepLearningClasses[i])
 				{
-					if (pair.second < 100)
-					{
-						//VD::AddWiredBox("ClusteredPoints_Filtered", glm::vec3(XYZ(pair.first)), glm::vec3(1.0f, 1.0f, 1.0f), Color::black());
-					}
-					else
-					{
-						VD::AddBox("ClusteredPoints", glm::vec3(XYZ(pair.first)), glm::vec3(0.1f, 0.1f, 0.1f), color);
-					}
+					auto& q = inputPositions[i];
+					auto& p = resultPositions[i];
+					auto& iii = cuInstance.h_mesh.faces[resultTriangleIndices[i]];
+					auto& v0 = cuInstance.h_mesh.positions[iii.x];
+					auto& v1 = cuInstance.h_mesh.positions[iii.y];
+					auto& v2 = cuInstance.h_mesh.positions[iii.z];
+
+					//VD::AddLine("NN GetNearestPoints", { XYZ(q) }, { XYZ(p) }, Color::yellow());
+					//VD::AddWiredBox("NN GetNearestPoints - input", { XYZ(q) }, glm::vec3(0.01f, 0.01f, 0.01f), Color::red());
+					//VD::AddWiredBox("NN GetNearestPoints - result", { XYZ(p) }, glm::vec3(0.01f, 0.01f, 0.01f), Color::blue());
+
+					VD::AddLine("Triangles", { XYZ(v0) }, { XYZ(v1) }, Color::green());
+					VD::AddLine("Triangles", { XYZ(v1) }, { XYZ(v2) }, Color::green());
+					VD::AddLine("Triangles", { XYZ(v2) }, { XYZ(v0) }, Color::green());
 				}
 			}
-			};
 
-		controlPanel->AddButton("Insert Points", 0, 0, InsertPoints);
-		controlPanel->AddButton("Dump", 0, 0, Dump);
-		controlPanel->AddButton("Find Margin Lines", 0, 0, FindMarginLines);
-		controlPanel->AddButton("Clear & Re-Initialize", 0, 0, ClearAndReInitialize);
-		controlPanel->AddButton("Insert MarginLine Points", 0, 0, InsertMarginLinePoints);
-		controlPanel->AddButton("Margin Lines Noise Remove", 0, 0, MarginLinesNoiseRemove);
-		controlPanel->AddButton("Clustering", 0, 0, Clustering);
-
-		controlPanel->AddButton("Do", 300, 100, [&](){
-			InsertPoints();
-			FindMarginLines();
-			ClearAndReInitialize();
-			InsertMarginLinePoints();
-			MarginLinesNoiseRemove();
-			VD::ClearAll();
-			Clustering();
+			auto meshEntity = Feather.GetEntityByName("MarchingCubesMesh");
+			auto meshRenderable = Feather.GetComponent<Renderable>(meshEntity);
+			cuInstance.interop.Initialize(meshRenderable);
+			cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
 			});
 	}
 #pragma endregion
 
 	Feather.AddOnInitializeCallback([&]() {
-		marginLineFinder.Initialize(0.1f, 1000000 * 64, 64);
-
 		string modelPathRoot = "D:\\Debug\\PLY\\";
-		string class_0 = modelPathRoot + "Compound_Class_0.ply";
+		string compound = modelPathRoot + "Compound.ply";
+
+		HostPointCloud h_pointCloud;
+
+		PLYFormat ply;
+		ply.Deserialize(compound);
+
+		auto [cx, cy, cz] = ply.GetAABBCenter();
+		auto [mx, my, mz] = ply.GetAABBMin();
+		auto [Mx, My, Mz] = ply.GetAABBMax();
+		f32 lx = Mx - mx;
+		f32 ly = My - my;
+		f32 lz = Mz - mz;
+
+		h_pointCloud.Intialize(ply.GetPoints().size() / 3);
+
+		//auto entity = Feather.CreateEntity("Compound");
+		//auto renderable = Feather.CreateComponent<Renderable>(entity);
+		//renderable->Initialize(Renderable::Points);
+		//renderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Default.vs"), File("../../res/Shaders/Default.fs")));
+
+		deepLearningClasses.clear();
+
+		for (size_t i = 0; i < ply.GetPoints().size() / 3; i++)
 		{
-			PLYFormat ply;
-			ply.Deserialize(class_0);
+			auto deepLearningClass = ply.GetDeepLearningClasses()[i];
+			deepLearningClasses.push_back(deepLearningClass);
 
-			auto entity = Feather.CreateEntity("Compound_Class_0");
-			auto renderable = Feather.CreateComponent<Renderable>(entity);
-			renderable->Initialize(Renderable::Points);
-			renderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Default.vs"), File("../../res/Shaders/Default.fs")));
+			//if (1 < deepLearningClass)
+			//{
+			//	continue;
+			//}
 
-			for (size_t i = 0; i < ply.GetPoints().size() / 3; i++)
-			{
-				auto x = ply.GetPoints()[3 * i + 0];
-				auto y = ply.GetPoints()[3 * i + 1];
-				auto z = ply.GetPoints()[3 * i + 2];
+			auto x = ply.GetPoints()[3 * i + 0];
+			auto y = ply.GetPoints()[3 * i + 1];
+			auto z = ply.GetPoints()[3 * i + 2];
 
-				auto nx = ply.GetNormals()[3 * i + 0];
-				auto ny = ply.GetNormals()[3 * i + 1];
-				auto nz = ply.GetNormals()[3 * i + 2];
+			auto nx = ply.GetNormals()[3 * i + 0];
+			auto ny = ply.GetNormals()[3 * i + 1];
+			auto nz = ply.GetNormals()[3 * i + 2];
 
-				auto r = ply.GetColors()[3 * i + 0];
-				auto g = ply.GetColors()[3 * i + 1];
-				auto b = ply.GetColors()[3 * i + 2];
+			auto r = ply.GetColors()[3 * i + 0];
+			auto g = ply.GetColors()[3 * i + 1];
+			auto b = ply.GetColors()[3 * i + 2];
 
-				glm::vec3 position = { x, y, z };
-				glm::vec3 normal = { nx, ny, nz };
-				glm::vec4 color = { r, g, b, 1.0f };
+			glm::vec3 position = { x, y, z };
+			glm::vec3 normal = { nx, ny, nz };
+			glm::vec4 color = { r, g, b, 1.0f };
 
-				renderable->AddVertex(position);
-				renderable->AddNormal(normal);
-				renderable->AddColor(color);
-			}
+			//renderable->AddVertex(position);
+			//renderable->AddNormal(normal);
+			//renderable->AddColor(color);
+
+			h_pointCloud.positions[i] = make_float3(x, y, z);
+			h_pointCloud.normals[i] = make_float3(nx, ny, nz);
+			h_pointCloud.colors[i] = make_float3(r, g, b);
 		}
-		
-		string class_1 = modelPathRoot + "Compound_Class_1.ply";
-		{
-			PLYFormat ply;
-			ply.Deserialize(class_1);
 
-			auto entity = Feather.CreateEntity("Compound_Class_1");
-			auto renderable = Feather.CreateComponent<Renderable>(entity);
-			renderable->Initialize(Renderable::Points);
-			renderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Default.vs"), File("../../res/Shaders/Default.fs")));
+		cuInstance.ProcessPointCloud(h_pointCloud, 0.2f);
 
-			for (size_t i = 0; i < ply.GetPoints().size() / 3; i++)
+		auto meshEntity = Feather.CreateEntity("MarchingCubesMesh");
+		//ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
+		auto meshRenderable = Feather.CreateComponent<Renderable>(meshEntity);
+		meshRenderable->Initialize(Renderable::GeometryMode::Triangles);
+		meshRenderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Default.vs"), File("../../res/Shaders/Default.fs")));
+		meshRenderable->AddShader(Feather.CreateShader("TwoSide", File("../../res/Shaders/TwoSide.vs"), File("../../res/Shaders/TwoSide.fs")));
+		meshRenderable->AddShader(Feather.CreateShader("Flat", File("../../res/Shaders/Flat.vs"), File("../../res/Shaders/Flat.gs"), File("../../res/Shaders/Flat.fs")));
+		meshRenderable->SetActiveShaderIndex(0);
+
+		cuInstance.interop.Initialize(meshRenderable);
+		cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
+
+		Feather.CreateEventCallback<KeyEvent>(meshEntity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
+			auto renderable = Feather.GetComponent<Renderable>(entity);
+			if (nullptr == renderable) return;
+
+			if (0 == event.action)
 			{
-				auto x = ply.GetPoints()[3 * i + 0];
-				auto y = ply.GetPoints()[3 * i + 1];
-				auto z = ply.GetPoints()[3 * i + 2];
-
-				auto nx = ply.GetNormals()[3 * i + 0];
-				auto ny = ply.GetNormals()[3 * i + 1];
-				auto nz = ply.GetNormals()[3 * i + 2];
-
-				auto r = ply.GetColors()[3 * i + 0];
-				auto g = ply.GetColors()[3 * i + 1];
-				auto b = ply.GetColors()[3 * i + 2];
-
-				glm::vec3 position = { x, y, z };
-				glm::vec3 normal = { nx, ny, nz };
-				glm::vec4 color = { r, g, b, 1.0f };
-
-				renderable->AddVertex(position);
-				renderable->AddNormal(normal);
-				renderable->AddColor(color);
+				if (GLFW_KEY_GRAVE_ACCENT == event.keyCode)
+				{
+					renderable->NextDrawingMode();
+				}
+				else if (GLFW_KEY_1 == event.keyCode)
+				{
+					renderable->SetActiveShaderIndex(0);
+				}
+				else if (GLFW_KEY_2 == event.keyCode)
+				{
+					renderable->SetActiveShaderIndex(1);
+				}
 			}
-		}
+			});
+
+		h_pointCloud.Terminate();
 		});
 
 	Feather.AddOnUpdateCallback([&](f32 timeDelta) {

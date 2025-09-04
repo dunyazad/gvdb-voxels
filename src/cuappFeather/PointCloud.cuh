@@ -13,6 +13,8 @@ struct HostPointCloud
     unsigned int numberOfPoints = 0;
 
     HostPointCloud();
+    HostPointCloud(const HostPointCloud& other);
+    HostPointCloud& operator=(const HostPointCloud& other);
     HostPointCloud(const DevicePointCloud& other);
     HostPointCloud& operator=(const DevicePointCloud& other);
 
@@ -30,6 +32,8 @@ struct DevicePointCloud
     unsigned int numberOfPoints = 0;
 
     DevicePointCloud();
+    DevicePointCloud(const DevicePointCloud& other);
+    DevicePointCloud& operator=(const DevicePointCloud& other);
     DevicePointCloud(const HostPointCloud& other);
     DevicePointCloud& operator=(const HostPointCloud& other);
 

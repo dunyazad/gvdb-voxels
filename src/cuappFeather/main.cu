@@ -44,13 +44,14 @@ void CUDAInstance::ProcessHalfEdgeMesh(const string& filename)
     h_mesh.DeserializePLY(filename);
 }
 
-HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& h_input)
+HostPointCloud CUDAInstance::ProcessPointCloud(const HostPointCloud& input, float voxelSize)
 {
     CUDA_TS(ProcessPointCloud);
 
+    h_input = input;
     d_input = h_input;
 
-    vhm.Initialize(0.3f, d_input.numberOfPoints * 32, 32);
+    vhm.Initialize(voxelSize, d_input.numberOfPoints * 32, 32);
 
     vhm.Occupy(d_input, 3);
 
