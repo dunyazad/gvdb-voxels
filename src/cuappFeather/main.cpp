@@ -131,6 +131,147 @@ float3 calculateVertexNormal(unsigned int v_idx, const HostHalfEdgeMesh<PointClo
 	return normalize(normal_sum);
 }
 
+float3 CatmullRom(const float3& p0, const float3& p1, const float3& p2, const float3& p3, float t) {
+	float t2 = t * t;
+	float t3 = t2 * t;
+
+	float3 a, b, c, d;
+
+	// 계수 계산
+	a.x = -0.5f * p0.x + 1.5f * p1.x - 1.5f * p2.x + 0.5f * p3.x;
+	a.y = -0.5f * p0.y + 1.5f * p1.y - 1.5f * p2.y + 0.5f * p3.y;
+	a.z = -0.5f * p0.z + 1.5f * p1.z - 1.5f * p2.z + 0.5f * p3.z;
+
+	b.x = p0.x - 2.5f * p1.x + 2.0f * p2.x - 0.5f * p3.x;
+	b.y = p0.y - 2.5f * p1.y + 2.0f * p2.y - 0.5f * p3.y;
+	b.z = p0.z - 2.5f * p1.z + 2.0f * p2.z - 0.5f * p3.z;
+
+	c.x = -0.5f * p0.x + 0.5f * p2.x;
+	c.y = -0.5f * p0.y + 0.5f * p2.y;
+	c.z = -0.5f * p0.z + 0.5f * p2.z;
+
+	d.x = p1.x;
+	d.y = p1.y;
+	d.z = p1.z;
+
+	// 보간된 점 계산
+	float3 result;
+	result.x = a.x * t3 + b.x * t2 + c.x * t + d.x;
+	result.y = a.y * t3 + b.y * t2 + c.y * t + d.y;
+	result.z = a.z * t3 + b.z * t2 + c.z * t + d.z;
+
+	return result;
+}
+
+std::vector<float3> GenerateCatmullRomSpline(const std::vector<float3>& controlPoints, int pointsPerSegment) {
+	std::vector<float3> splinePoints;
+	if (controlPoints.size() < 4) {
+		return splinePoints; // 최소 4개의 제어점이 필요
+	}
+
+	for (size_t i = 0; i < controlPoints.size() - 3; ++i) {
+		const float3& p0 = controlPoints[i];
+		const float3& p1 = controlPoints[i + 1];
+		const float3& p2 = controlPoints[i + 2];
+		const float3& p3 = controlPoints[i + 3];
+
+		for (int j = 0; j < pointsPerSegment; ++j) {
+			float t = (float)j / (float)pointsPerSegment;
+			splinePoints.push_back(CatmullRom(p0, p1, p2, p3, t));
+		}
+	}
+
+	// 마지막 구간의 끝점을 명시적으로 추가하여 P(n-2)에서 P(n-1)까지 완전히 그리도록 함
+	splinePoints.push_back(controlPoints[controlPoints.size() - 2]);
+
+
+	return splinePoints;
+}
+
+void smoothOpenPolyline_MovingAverage(std::vector<float3>& points, int iterations) {
+	if (points.size() < 3) return; // 점이 3개 미만이면 적용 불가
+
+	for (int iter = 0; iter < iterations; ++iter) {
+		std::vector<float3> smoothedPoints = points; // 복사본 생성
+
+		// 시작점과 끝점을 제외한 내부 점들만 처리 (1부터 n-2까지)
+		for (size_t i = 1; i < points.size() - 1; ++i) {
+			const float3& prev = points[i - 1];
+			const float3& curr = points[i];
+			const float3& next = points[i + 1];
+
+			smoothedPoints[i].x = (prev.x + curr.x + next.x) / 3.0f;
+			smoothedPoints[i].y = (prev.y + curr.y + next.y) / 3.0f;
+			smoothedPoints[i].z = (prev.z + curr.z + next.z) / 3.0f;
+		}
+		points = smoothedPoints; // 결과로 교체
+	}
+}
+
+void smoothOpenPolyline_MovingAverage_Hard(std::vector<float3>& points, int iterations) {
+	if (points.size() < 3) return; // 점이 3개 미만이면 적용 불가
+
+	for (int iter = 0; iter < iterations; ++iter) {
+		std::vector<float3> smoothedPoints = points; // 복사본 생성
+
+		// 시작점과 끝점을 제외한 내부 점들만 처리 (1부터 n-2까지)
+		for (size_t i = 2; i < points.size() - 2; ++i) {
+			const float3& pprev = points[i - 2];
+			const float3& prev = points[i - 1];
+			const float3& curr = points[i];
+			const float3& next = points[i + 1];
+			const float3& nnext = points[i + 2];
+
+			smoothedPoints[i].x = (pprev.x + prev.x + next.x + nnext.x) / 4.0f;
+			smoothedPoints[i].y = (pprev.y + prev.y + next.y + nnext.y) / 4.0f;
+			smoothedPoints[i].z = (pprev.z + prev.z + next.z + nnext.z) / 4.0f;
+		}
+		points = smoothedPoints; // 결과로 교체
+	}
+}
+
+
+void smoothOpenPolyline_ParameterizedMovingAverage(std::vector<float3>& points, int iterations, int windowSize) {
+	// windowSize는 홀수여야 하고, 3 이상이어야 의미가 있습니다.
+	if (windowSize < 3 || windowSize % 2 == 0) {
+		// 오류를 출력하거나, 아무 작업도 하지 않고 반환할 수 있습니다.
+		// 예를 들어, windowSize가 4이면 대칭이 아니므로 중심점을 정의하기 어렵습니다.
+		return;
+	}
+
+	// 윈도우 크기가 전체 포인트 수보다 크거나 같으면 스무딩이 불가능합니다.
+	if (points.size() <= windowSize) {
+		return;
+	}
+
+	// 중심점으로부터 양쪽으로 몇 개의 점을 볼 것인지를 결정 (예: windowSize=5 -> radius=2)
+	int radius = windowSize / 2;
+
+	for (int iter = 0; iter < iterations; ++iter) {
+		std::vector<float3> smoothedPoints = points; // 복사본 생성
+
+		// 양 끝의 'radius' 개수만큼의 점들을 제외한 내부 점들만 처리
+		// 예: radius=2 이면, 2번 인덱스부터 points.size() - 3 인덱스까지 순회
+		for (size_t i = radius; i < points.size() - radius; ++i) {
+
+			// 윈도우 내의 모든 점들의 합을 계산
+			float3 sum = { 0.0f, 0.0f, 0.0f };
+			for (int j = -radius; j <= radius; ++j) {
+				const float3& p = points[i + j];
+				sum.x += p.x;
+				sum.y += p.y;
+				sum.z += p.z;
+			}
+
+			// 합계를 윈도우 크기로 나누어 평균을 계산
+			smoothedPoints[i].x = sum.x / windowSize;
+			smoothedPoints[i].y = sum.y / windowSize;
+			smoothedPoints[i].z = sum.z / windowSize;
+		}
+		points = smoothedPoints; // 결과로 교체
+	}
+}
+
 extern "C" __declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
 extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #define PREFERRED_PSTATE_ID 0x0000001B
@@ -140,6 +281,7 @@ extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 MarginLineFinder marginLineFinder;
 vector<float3> marginLinePoints;
 vector<int> deepLearningClasses;
+std::vector<std::vector<float3>> borderRingPoints;
 
 CUDAInstance cuInstance;
 
@@ -415,7 +557,7 @@ int main(int argc, char** argv)
 		auto entity = Feather.CreateEntity("Control Panel");
 		auto controlPanel = Feather.CreateComponent<ControlPanel>(entity, "Control Panel");
 
-		controlPanel->AddButton("GetNearestPoints", 0, 0, [&]() {
+		auto GetNearestPoints = [&]() {
 			cuInstance.d_mesh.UpdateBVH();
 
 			//vector<float3> inputPositions(cuInstance.h_mesh.numberOfPoints);
@@ -433,7 +575,7 @@ int main(int argc, char** argv)
 
 			for (size_t i = 0; i < resultPositions.size(); i++)
 			{
-				if (0 == deepLearningClasses[i])// || 1 == deepLearningClasses[i])
+				if (IsTooth(deepLearningClasses[i]))
 				{
 					auto& q = inputPositions[i];
 					auto& p = resultPositions[i];
@@ -456,11 +598,44 @@ int main(int argc, char** argv)
 			auto meshRenderable = Feather.GetComponent<Renderable>(meshEntity);
 			cuInstance.interop.Initialize(meshRenderable);
 			cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
-			});
+			};
 
-		controlPanel->AddButton("DLClasses", 0, 0, [&]() {
+		auto ShowVertexDLClasses = [&]() {
 			HostHalfEdgeMesh<PointCloudProperty> h_mesh = cuInstance.d_mesh;
-			
+			for (size_t i = 0; i < h_mesh.numberOfPoints; i++)
+			{
+				auto& p = h_mesh.positions[i];
+				auto& cl = h_mesh.properties[i].deepLearningClass;
+
+				if (0 != cl && 1 != cl)
+					VD::AddText("DeepLearningClass", std::to_string(cl), { XYZ(p) });
+			}
+			};
+
+		auto BorderLines = [&]() {
+			HostHalfEdgeMesh<PointCloudProperty> h_mesh = cuInstance.d_mesh;
+			for (size_t i = 0; i < h_mesh.numberOfPoints; i++)
+			{
+				auto& he = h_mesh.halfEdges[i];
+				if (UINT32_MAX == he.oppositeIndex) continue;
+
+				auto& oe = h_mesh.halfEdges[he.oppositeIndex];
+
+				auto& dlc = h_mesh.properties[he.vertexIndex].deepLearningClass;
+				auto& odlc = h_mesh.properties[oe.vertexIndex].deepLearningClass;
+
+				if (dlc == 0 && odlc == 1)
+				{
+					auto& v = h_mesh.positions[he.vertexIndex];
+					auto& ov = h_mesh.positions[oe.vertexIndex];
+					VD::AddLine("Border Line", { XYZ(v) }, { XYZ(ov) }, Color::red(), Color::red());
+				}
+			}
+			};
+
+		auto DLClasses = [&]() {
+			HostHalfEdgeMesh<PointCloudProperty> h_mesh = cuInstance.d_mesh;
+
 			map<int, string> names;
 			for (size_t i = 0; i < h_mesh.numberOfFaces; i++)
 			{
@@ -491,9 +666,9 @@ int main(int argc, char** argv)
 			{
 				VD::AddToSelectionList(kvp.second);
 			}
-			});
+			};
 
-		controlPanel->AddButton("Border Lines (Non-manifold)", 0, 0, [&]() {
+		auto MarginLinesNonManifold = [&]() {
 			HostHalfEdgeMesh<PointCloudProperty> h_mesh = cuInstance.d_mesh;
 			if (h_mesh.numberOfFaces == 0) return;
 
@@ -518,6 +693,7 @@ int main(int argc, char** argv)
 			while (!borderHalfEdgeIndices.empty())
 			{
 				std::vector<unsigned int> currentRing;
+				std::vector<float3> currentRingPoints;
 				unsigned int startHeIdx = *borderHalfEdgeIndices.begin();
 				unsigned int currentHeIdx = startHeIdx;
 				unsigned int prevHeIdx = UINT32_MAX; // 이전 에지를 추적하기 위한 변수
@@ -530,6 +706,8 @@ int main(int argc, char** argv)
 					const auto& currentHe = h_mesh.halfEdges[currentHeIdx];
 					const auto& nextHeInFace = h_mesh.halfEdges[currentHe.nextIndex];
 					unsigned int endVertex = nextHeInFace.vertexIndex;
+
+					currentRingPoints.push_back(h_mesh.positions[currentHe.vertexIndex]);
 
 					// 다음 경계 에지 후보들을 찾음
 					auto it = borderEdgeStartMap.find(endVertex);
@@ -590,8 +768,10 @@ int main(int argc, char** argv)
 
 				} while (currentHeIdx != startHeIdx);
 				currentRing.push_back(startHeIdx);
+				currentRingPoints.push_back(h_mesh.positions[h_mesh.halfEdges[startHeIdx].vertexIndex]);
 
 				borderRings.push_back(currentRing);
+				borderRingPoints.push_back(currentRingPoints);
 			}
 
 			// 4. (Optional) Visualize the found border loops.
@@ -631,42 +811,113 @@ int main(int argc, char** argv)
 					}
 				}
 			}
-			});
+			};
 
-		controlPanel->AddButton("Show Vertex DLClasses", 0, 0, [&]() {
-			HostHalfEdgeMesh<PointCloudProperty> h_mesh = cuInstance.d_mesh;
-			for (size_t i = 0; i < h_mesh.numberOfPoints; i++)
+		auto CatmulRomSpline = [&]() {
+			std::vector<glm::vec4> colors = {
+				Color::red(),
+				Color::green(),
+				Color::blue(),
+				Color::yellow(),
+				Color::magenta(),
+				Color::cyan()
+			};
+
+			for (size_t i = 0; i < borderRingPoints.size(); i++)
 			{
-				auto& p = h_mesh.positions[i];
-				auto& cl = h_mesh.properties[i].deepLearningClass;
+				auto& points = borderRingPoints[i];
 
-				if(0 != cl && 1 != cl)
-				VD::AddText("DeepLearningClass", std::to_string(cl), { XYZ(p) });
-			}
-			});
-
-		controlPanel->AddButton("Margin Lines", 0, 0, [&]() {
-			HostHalfEdgeMesh<PointCloudProperty> h_mesh = cuInstance.d_mesh;
-			for (size_t i = 0; i < h_mesh.numberOfPoints; i++)
-			{
-				auto& he = h_mesh.halfEdges[i];
-				if (UINT32_MAX == he.oppositeIndex) continue;
-
-				auto& oe = h_mesh.halfEdges[he.oppositeIndex];
-
-				auto& dlc = h_mesh.properties[he.vertexIndex].deepLearningClass;
-				auto& odlc = h_mesh.properties[oe.vertexIndex].deepLearningClass;
-
-				if (dlc == 0 && odlc == 1)
+				if ((points.size() > 300) && (points.back() == points.front()))
 				{
-					auto& v = h_mesh.positions[he.vertexIndex];
-					auto& ov = h_mesh.positions[oe.vertexIndex];
-					VD::AddLine("MarginLine", { XYZ(v) }, { XYZ(ov) }, Color::red(), Color::red());
+					auto result = GenerateCatmullRomSpline(points, 10);
+
+					const auto& color = colors[i % colors.size()];
+
+					for (size_t j = 0; j < result.size() - 1; j++)
+					{
+						auto& p0 = result[j];
+						auto& p1 = result[(j + 1) % result.size()];
+
+						VD::AddLine("MarginLine", { XYZ(p0) }, { XYZ(p1) }, color, color);
+					}
 				}
 			}
-			});
+			};
+
+		auto Smoothing = [&]() {
+			std::vector<glm::vec4> colors = {
+				Color::red(),
+				Color::green(),
+				Color::blue(),
+				Color::yellow(),
+				Color::magenta(),
+				Color::cyan()
+			};
+
+			cuInstance.d_mesh.UpdateBVH();
+
+			for (size_t iteration = 0; iteration < 10; iteration++)
+			{
+				for (size_t i = 0; i < borderRingPoints.size(); i++)
+				{
+					auto& points = borderRingPoints[i];
+
+					if ((points.size() > 300) && (points.back() == points.front()))
+					{
+						smoothOpenPolyline_MovingAverage_Hard(points, 10);
+						//smoothOpenPolyline_ParameterizedMovingAverage(points, 7, 100);
+
+						vector<float3> resultPositions;
+						vector<int> resultTriangleIndices;
+						cuInstance.d_mesh.GetNearestPoints(points, resultPositions, resultTriangleIndices);
+
+						for (size_t i = 0; i < resultPositions.size(); i++)
+						{
+							auto& q = points[i];
+							auto& p = resultPositions[i];
+							q = p;
+							
+							//VD::AddLine("NN GetNearestPoints", { XYZ(q) }, { XYZ(p) }, Color::yellow());
+							//VD::AddWiredBox("NN GetNearestPoints - input", { XYZ(q) }, glm::vec3(0.01f, 0.01f, 0.01f), Color::red());
+							//VD::AddWiredBox("NN GetNearestPoints - result", { XYZ(p) }, glm::vec3(0.01f, 0.01f, 0.01f), Color::blue());
+
+							//VD::AddLine("Triangles", { XYZ(v0) }, { XYZ(v1) }, Color::green());
+							//VD::AddLine("Triangles", { XYZ(v1) }, { XYZ(v2) }, Color::green());
+							//VD::AddLine("Triangles", { XYZ(v2) }, { XYZ(v0) }, Color::green());
+						}
+					}
+				}
+			}
 
 
+
+
+			for (size_t i = 0; i < borderRingPoints.size(); i++)
+			{
+				auto& points = borderRingPoints[i];
+				const auto& color = colors[i % colors.size()];
+
+				if ((points.size() > 300) && (points.back() == points.front()))
+				{
+					for (size_t j = 0; j < points.size() - 1; j++)
+					{
+						auto& p0 = points[j];
+						auto& p1 = points[(j + 1) % points.size()];
+
+						VD::AddLine("MarginLine", { XYZ(p0) }, { XYZ(p1) }, color, color);
+					}
+				}
+			}
+
+			};
+
+		controlPanel->AddButton("GetNearestPoints", 0, 0, GetNearestPoints);
+		controlPanel->AddButton("Show Vertex DLClasses", 0, 0, ShowVertexDLClasses);
+		controlPanel->AddButton("Border Lines", 0, 0, BorderLines);
+		controlPanel->AddButton("DLClasses", 0, 0, DLClasses);
+		controlPanel->AddButton("Margin Lines (Non-manifold)", 0, 0, MarginLinesNonManifold);
+		controlPanel->AddButton("CatmulRom-Spline", 0, 0, CatmulRomSpline);
+		controlPanel->AddButton("Smoothing", 0, 0, Smoothing);
 	}
 #pragma endregion
 
@@ -732,7 +983,7 @@ int main(int argc, char** argv)
 			h_pointCloud.properties[i] = {deepLearningClass};
 		}
 
-		cuInstance.ProcessPointCloud(h_pointCloud, 0.1f, 3);
+		cuInstance.ProcessPointCloud(h_pointCloud, 0.05f, 3);
 
 		auto meshEntity = Feather.CreateEntity("MarchingCubesMesh");
 		//ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
