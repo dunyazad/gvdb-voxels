@@ -6,6 +6,11 @@
 
 class Renderable;
 
+struct PointCloudProperty
+{
+    int deepLearningClass = INT32_MAX;
+};
+
 class HalfEdgeMeshInterop
 {
 public:
@@ -16,7 +21,7 @@ public:
     void Initialize(Renderable* renderable);
 
     // DeviceHalfEdgeMesh에서 vertex/normal/color를 바로 VBO에 복사
-    void UploadFromDevice(DeviceHalfEdgeMesh<>& deviceMesh);
+    void UploadFromDevice(DeviceHalfEdgeMesh<PointCloudProperty>& deviceMesh);
 
     // 필요시 자원 해제
     void Terminate();

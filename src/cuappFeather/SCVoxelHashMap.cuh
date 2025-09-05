@@ -68,6 +68,7 @@ __global__ __forceinline__ void Kernel_SCVoxelHashMap_Occupy(
 	float3* d_positions,
 	float3* d_normals,
 	float3* d_colors,
+	T* d_properties,
 	unsigned int numberOfPoints,
 	int offset)
 {
@@ -77,6 +78,7 @@ __global__ __forceinline__ void Kernel_SCVoxelHashMap_Occupy(
 	float3 p = d_positions[tid];
 	float3 n = d_normals[tid];
 	float3 c = d_colors ? d_colors[tid] : make_float3(0, 0, 0);
+	T& property = d_properties[tid];
 
 	int3 baseIndex = PositionToIndex(p, info.voxelSize);
 
@@ -96,7 +98,14 @@ __global__ __forceinline__ void Kernel_SCVoxelHashMap_Occupy(
 				float sign = (dot(n, dir) >= 0.0f) ? 1.0f : -1.0f;
 				float sdf = dist * sign;
 
-				SCVoxelHashMap<T>::InsertVoxel(info, index, sdf, n, c);
+				if constexpr (std::is_void_v<T>)
+				{
+					SCVoxelHashMap<T>::InsertVoxel(info, index, sdf, n, c, nullptr);
+				}
+				else
+				{
+					SCVoxelHashMap<T>::InsertVoxel(info, index, sdf, n, c, &property);
+				}
 			}
 		}
 	}
@@ -108,6 +117,7 @@ __global__ __forceinline__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 	float3* d_positions,
 	float3* d_normals,
 	float3* d_colors,
+	T* d_properties,
 	unsigned int* d_numberOfPoints)
 {
 	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -122,6 +132,7 @@ __global__ __forceinline__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 	float3 voxelPosition = IndexToPosition(voxelIndex, info.voxelSize);
 	float3 voxelNormal = voxel->normalSum / (float)max(1u, voxel->count);
 	float3 voxelColor = voxel->colorSum / (float)max(1u, voxel->count);
+	T& voxelProperty = voxel->property;
 
 	// X Axis
 	{
@@ -130,14 +141,19 @@ __global__ __forceinline__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 		float3 position;
 		float3 normal;
 		float3 color;
+		T property;
 		if (true == SCVoxelHashMap<T>::CheckZeroCrossing(
 			info, sdf, voxelPosition, voxelNormal, voxelColor, neighborIndex,
-			position, normal, color))
+			position, normal, color, &property))
 		{
 			auto index = atomicAdd(d_numberOfPoints, 1u);
 			d_positions[index] = position;
 			d_normals[index] = normal;
 			d_colors[index] = color;
+			if constexpr (!std::is_void_v<T>)
+			{
+				d_properties[index] = property;
+			}
 			voxel->zeroCrossingPointIndex.x = index;
 		}
 	}
@@ -149,14 +165,19 @@ __global__ __forceinline__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 		float3 position;
 		float3 normal;
 		float3 color;
+		T property;
 		if (true == SCVoxelHashMap<T>::CheckZeroCrossing(
 			info, sdf, voxelPosition, voxelNormal, voxelColor, neighborIndex,
-			position, normal, color))
+			position, normal, color, &property))
 		{
 			auto index = atomicAdd(d_numberOfPoints, 1u);
 			d_positions[index] = position;
 			d_normals[index] = normal;
 			d_colors[index] = color;
+			if constexpr (!std::is_void_v<T>)
+			{
+				d_properties[index] = property;
+			}
 			voxel->zeroCrossingPointIndex.y = index;
 		}
 	}
@@ -168,14 +189,19 @@ __global__ __forceinline__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 		float3 position;
 		float3 normal;
 		float3 color;
+		T property;
 		if (true == SCVoxelHashMap<T>::CheckZeroCrossing(
 			info, sdf, voxelPosition, voxelNormal, voxelColor, neighborIndex,
-			position, normal, color))
+			position, normal, color, &property))
 		{
 			auto index = atomicAdd(d_numberOfPoints, 1u);
 			d_positions[index] = position;
 			d_normals[index] = normal;
 			d_colors[index] = color;
+			if constexpr (!std::is_void_v<T>)
+			{
+				d_properties[index] = property;
+			}
 			voxel->zeroCrossingPointIndex.z = index;
 		}
 	}
@@ -353,7 +379,7 @@ struct SCVoxelHashMap
 
 		CheckOccupiedIndicesLength(d_input.numberOfPoints * count);
 		LaunchKernel(Kernel_SCVoxelHashMap_Occupy<T>, d_input.numberOfPoints,
-			info, d_input.positions, d_input.normals, d_input.colors, d_input.numberOfPoints, offset);
+			info, d_input.positions, d_input.normals, d_input.colors, d_input.properties, d_input.numberOfPoints, offset);
 		CUDA_COPY_D2H(&info.h_numberOfOccupiedVoxels, info.d_numberOfOccupiedVoxels, sizeof(unsigned int));
 		CUDA_SYNC();
 
@@ -386,15 +412,20 @@ struct SCVoxelHashMap
 		float3* d_positions = nullptr;
 		float3* d_normals = nullptr;
 		float3* d_colors = nullptr;
+		T* d_properties = nullptr;
 		unsigned int* d_numberOfPoints = nullptr;
 
 		CUDA_MALLOC(&d_positions, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
 		CUDA_MALLOC(&d_normals, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
 		CUDA_MALLOC(&d_colors, sizeof(float3) * info.h_numberOfOccupiedVoxels * 3);
+		if constexpr (!std::is_void_v<T>)
+		{
+			CUDA_MALLOC(&d_properties, sizeof(T) * info.h_numberOfOccupiedVoxels * 3);
+		}
 		CUDA_MALLOC(&d_numberOfPoints, sizeof(unsigned int));
 
 		LaunchKernel(Kernel_SCVoxelHashMap_CreateZeroCrossingPoints<T>, info.h_numberOfOccupiedVoxels,
-			info, d_positions, d_normals, d_colors, d_numberOfPoints);
+			info, d_positions, d_normals, d_colors, d_properties, d_numberOfPoints);
 		CUDA_SYNC();
 
 		unsigned int h_numberOfPoints = 0;
@@ -405,11 +436,19 @@ struct SCVoxelHashMap
 		CUDA_COPY_D2H(h_result.positions, d_positions, sizeof(float3) * h_numberOfPoints);
 		CUDA_COPY_D2H(h_result.normals, d_normals, sizeof(float3) * h_numberOfPoints);
 		CUDA_COPY_D2H(h_result.colors, d_colors, sizeof(float3) * h_numberOfPoints);
+		if constexpr (!std::is_void_v<T>)
+		{
+			CUDA_COPY_D2H(h_result.properties, d_properties, sizeof(T) * h_numberOfPoints);
+		}
 
-		CUDA_FREE(d_positions);
-		CUDA_FREE(d_normals);
-		CUDA_FREE(d_colors);
-		CUDA_FREE(d_numberOfPoints);
+		CUDA_SAFE_FREE(d_positions);
+		CUDA_SAFE_FREE(d_normals);
+		CUDA_SAFE_FREE(d_colors);
+		if constexpr (!std::is_void_v<T>)
+		{
+			CUDA_SAFE_FREE(d_properties)
+		}
+		CUDA_SAFE_FREE(d_numberOfPoints);
 
 		return h_result;
 	}
@@ -432,7 +471,7 @@ struct SCVoxelHashMap
 		CUDA_SYNC();
 
 		LaunchKernel(Kernel_SCVoxelHashMap_CreateZeroCrossingPoints<T>, info.h_numberOfOccupiedVoxels,
-			info, mesh.positions, mesh.normals, mesh.colors, d_numberOfPoints);
+			info, mesh.positions, mesh.normals, mesh.colors, mesh.properties, d_numberOfPoints);
 		CUDA_SYNC();
 
 		LaunchKernel(Kernel_SCVoxelHashMap_MarchingCubes<T>, info.h_numberOfOccupiedVoxels,
@@ -497,7 +536,7 @@ struct SCVoxelHashMap
 	}
 
 	__device__ static SCVoxel<T>* InsertVoxel(
-		SCVoxelHashMapInfo<T>& info, const int3& index, float sdf, float3 normal, float3 color)
+		SCVoxelHashMapInfo<T>& info, const int3& index, float sdf, float3 normal, float3 color, T* property)
 	{
 		VoxelKey key = IndexToVoxelKey(index);
 		size_t hashIdx = VoxelKeyHash(key, info.capacity);
@@ -535,6 +574,7 @@ struct SCVoxelHashMap
 				}
 
 				entry->voxel.coordinate = index;
+				entry->voxel.property = *property;
 
 				return &entry->voxel;
 			}
@@ -545,7 +585,7 @@ struct SCVoxelHashMap
 
 	__device__ static bool CheckZeroCrossing(SCVoxelHashMapInfo<T>& info,
 		float osdf, const float3& op, const float3& on, const float3& oc,
-		const int3& index, float3& outPosition, float3& outNormal, float3& outColor)
+		const int3& index, float3& outPosition, float3& outNormal, float3& outColor, T* outProperty)
 	{
 		auto voxel = SCVoxelHashMap<T>::GetVoxel(info, index);
 		if (nullptr == voxel || 0 == voxel->count) return false;
@@ -559,10 +599,14 @@ struct SCVoxelHashMap
 		float3 np = IndexToPosition(index, info.voxelSize);
 		float3 nn = voxel->normalSum / (float)max(1u, voxel->count);
 		float3 nc = voxel->colorSum / (float)max(1u, voxel->count);
-
+		
 		outPosition = op + ratio * (np - op);;
 		outNormal = on + ratio * (nn - on);
 		outColor = oc + ratio * (nc - oc);
+		if constexpr (!std::is_void_v<T>)
+		{
+			*outProperty = voxel->property;
+		}
 
 		return true;
 	}

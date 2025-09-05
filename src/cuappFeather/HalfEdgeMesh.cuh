@@ -50,6 +50,7 @@ struct HostHalfEdgeMesh
     float3* positions = nullptr;
     float3* normals = nullptr;
     float3* colors = nullptr;
+    T* properties = nullptr;
     unsigned int numberOfPoints = 0;
 
     uint3* faces = nullptr;
@@ -73,6 +74,10 @@ struct HostHalfEdgeMesh
         memcpy(positions, other.positions, sizeof(float3) * numberOfPoints);
         memcpy(normals, other.normals, sizeof(float3) * numberOfPoints);
         memcpy(colors, other.colors, sizeof(float3) * numberOfPoints);
+        if constexpr (!std::is_void_v<T>)
+        {
+            memcpy(properties, other.properties, sizeof(T) * numberOfPoints);
+        }
         memcpy(faces, other.faces, sizeof(uint3) * numberOfFaces);
         memcpy(halfEdges, other.halfEdges, sizeof(HalfEdge) * numberOfFaces * 3);
         memcpy(halfEdgeFaces, other.halfEdgeFaces, sizeof(HalfEdgeFace) * numberOfFaces);
@@ -106,12 +111,17 @@ struct HostHalfEdgeMesh
             positions = new float3[numberOfPoints];
             normals = new float3[numberOfPoints];
             colors = new float3[numberOfPoints];
+            if constexpr (!std::is_void_v<T>)
+            {
+                properties = new T[numberOfPoints];
+            }
         }
         else
         {
             positions = nullptr;
             normals = nullptr;
             colors = nullptr;
+            properties = nullptr;
         }
         if (numberOfFaces > 0)
         {
@@ -137,6 +147,10 @@ struct HostHalfEdgeMesh
         if (positions) delete[] positions;
         if (normals) delete[] normals;
         if (colors) delete[] colors;
+        if constexpr (!std::is_void_v<T>)
+        {
+            if (properties) delete[] properties;
+        }
         if (faces) delete[] faces;
         if (halfEdges) delete[] halfEdges;
         if (halfEdgeFaces) delete[] halfEdgeFaces;
@@ -145,6 +159,7 @@ struct HostHalfEdgeMesh
         positions = nullptr;
         normals = nullptr;
         colors = nullptr;
+        properties = nullptr;
         faces = nullptr;
         halfEdges = nullptr;
         halfEdgeFaces = nullptr;
@@ -164,6 +179,10 @@ struct HostHalfEdgeMesh
         CUDA_COPY_D2H(positions, deviceMesh.positions, sizeof(float3) * numberOfPoints);
         CUDA_COPY_D2H(normals, deviceMesh.normals, sizeof(float3) * numberOfPoints);
         CUDA_COPY_D2H(colors, deviceMesh.colors, sizeof(float3) * numberOfPoints);
+        if constexpr (!std::is_void_v<T>)
+        {
+            CUDA_COPY_D2H(properties, deviceMesh.properties, sizeof(T) * numberOfPoints);
+        }
         CUDA_COPY_D2H(faces, deviceMesh.faces, sizeof(uint3) * numberOfFaces);
         CUDA_COPY_D2H(halfEdges, deviceMesh.halfEdges, sizeof(HalfEdge) * numberOfFaces * 3);
         CUDA_COPY_D2H(halfEdgeFaces, deviceMesh.halfEdgeFaces, sizeof(HalfEdgeFace) * numberOfFaces);
@@ -183,6 +202,10 @@ struct HostHalfEdgeMesh
         CUDA_COPY_H2D(deviceMesh.positions, positions, sizeof(float3) * numberOfPoints);
         CUDA_COPY_H2D(deviceMesh.normals, normals, sizeof(float3) * numberOfPoints);
         CUDA_COPY_H2D(deviceMesh.colors, colors, sizeof(float3) * numberOfPoints);
+        if constexpr (!std::is_void_v<T>)
+        {
+            CUDA_COPY_H2D(deviceMesh.properties, properties, sizeof(T) * numberOfPoints);
+        }
         CUDA_COPY_H2D(deviceMesh.faces, faces, sizeof(uint3) * numberOfFaces);
         CUDA_COPY_H2D(deviceMesh.halfEdges, halfEdges, sizeof(HalfEdge) * numberOfFaces * 3);
         CUDA_COPY_H2D(deviceMesh.halfEdgeFaces, halfEdgeFaces, sizeof(HalfEdgeFace) * numberOfFaces);
@@ -321,6 +344,13 @@ struct HostHalfEdgeMesh
                 else
                     ply.AddColor(colors[i].x, colors[i].y, colors[i].z);
             }
+            if constexpr (!std::is_void_v<T>)
+            {
+                if (properties)
+                {
+                    ply.GetDeepLearningClasses().push_back(properties[i].deepLearningClass);
+                }
+            }
         }
 
         for (unsigned int f = 0; f < numberOfFaces; ++f)
@@ -377,6 +407,18 @@ struct HostHalfEdgeMesh
                 colors[i].x = cs[i * stride + 0];
                 colors[i].y = cs[i * stride + 1];
                 colors[i].z = cs[i * stride + 2];
+            }
+        }
+
+        if constexpr (!std::is_void_v<T>)
+        {
+            if (properties && !ply.GetDeepLearningClasses().empty())
+            {
+                for (unsigned int i = 0; i < n; ++i)
+                {
+                    auto deepLearningClass = ply.GetDeepLearningClasses()[i];
+                    properties[i].deepLearningClass = deepLearningClass;
+                }
             }
         }
 
@@ -689,9 +731,11 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_CompactVertices(
     const float3* oldPositions,
     const float3* oldNormals,
     const float3* oldColors,
+    const T* oldProperties,
     float3* newPositions,
     float3* newNormals,
     float3* newColors,
+    T* newProperties,
     unsigned int numberOfPoints)
 {
     unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -704,6 +748,10 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_CompactVertices(
     newPositions[index] = oldPositions[threadid];
     newNormals[index] = oldNormals[threadid];
     newColors[index] = oldColors[threadid];
+    if constexpr (!std::is_void_v<T>)
+    {
+        newProperties[index] = oldProperties[threadid];
+    }
 }
 
 template<typename T>
@@ -1400,6 +1448,7 @@ struct DeviceHalfEdgeMesh
     float3* positions = nullptr;
     float3* normals = nullptr;
     float3* colors = nullptr;
+    T* properties = nullptr;
     unsigned int numberOfPoints = 0;
 
     uint3* faces = nullptr;
@@ -1464,12 +1513,17 @@ struct DeviceHalfEdgeMesh
             CUDA_MALLOC(&positions, sizeof(float3) * numberOfPoints);
             CUDA_MALLOC(&normals, sizeof(float3) * numberOfPoints);
             CUDA_MALLOC(&colors, sizeof(float3) * numberOfPoints);
+            if constexpr (!std::is_void_v<T>)
+            {
+                CUDA_MALLOC(&properties, sizeof(T) * numberOfPoints);
+            }
         }
         else
         {
             positions = nullptr;
             normals = nullptr;
             colors = nullptr;
+            properties = nullptr;
         }
         if (numberOfFaces > 0)
         {
@@ -1499,6 +1553,10 @@ struct DeviceHalfEdgeMesh
         CUDA_SAFE_FREE(positions);
         CUDA_SAFE_FREE(normals);
         CUDA_SAFE_FREE(colors);
+        if constexpr (!std::is_void_v<T>)
+        {
+            CUDA_SAFE_FREE(properties);
+        }
         CUDA_SAFE_FREE(faces);
         CUDA_SAFE_FREE(halfEdges);
         CUDA_SAFE_FREE(halfEdgeFaces);
@@ -1525,6 +1583,10 @@ struct DeviceHalfEdgeMesh
         CUDA_COPY_H2D(positions, hostMesh.positions, sizeof(float3) * hostMesh.numberOfPoints);
         CUDA_COPY_H2D(normals, hostMesh.normals, sizeof(float3) * hostMesh.numberOfPoints);
         CUDA_COPY_H2D(colors, hostMesh.colors, sizeof(float3) * hostMesh.numberOfPoints);
+        if constexpr (!std::is_void_v<T>)
+        {
+            CUDA_COPY_H2D(properties, hostMesh.properties, sizeof(T) * hostMesh.numberOfPoints);
+        }
         CUDA_COPY_H2D(faces, hostMesh.faces, sizeof(uint3) * hostMesh.numberOfFaces);
         CUDA_COPY_H2D(halfEdges, hostMesh.halfEdges, sizeof(HalfEdge) * hostMesh.numberOfFaces * 3);
         CUDA_COPY_H2D(halfEdgeFaces, hostMesh.halfEdgeFaces, sizeof(HalfEdgeFace) * hostMesh.numberOfFaces);
@@ -1543,6 +1605,10 @@ struct DeviceHalfEdgeMesh
         CUDA_COPY_D2H(hostMesh.positions, positions, sizeof(float3) * numberOfPoints);
         CUDA_COPY_D2H(hostMesh.normals, normals, sizeof(float3) * numberOfPoints);
         CUDA_COPY_D2H(hostMesh.colors, colors, sizeof(float3) * numberOfPoints);
+        if constexpr (!std::is_void_v<T>)
+        {
+            CUDA_COPY_D2H(hostMesh.properties, properties, sizeof(T) * numberOfPoints);
+        }
         CUDA_COPY_D2H(hostMesh.faces, faces, sizeof(uint3) * numberOfFaces);
         CUDA_COPY_D2H(hostMesh.halfEdges, halfEdges, sizeof(HalfEdge) * numberOfFaces * 3);
         CUDA_COPY_D2H(hostMesh.halfEdgeFaces, halfEdgeFaces, sizeof(HalfEdgeFace) * numberOfFaces);
@@ -1659,6 +1725,11 @@ struct DeviceHalfEdgeMesh
         CUDA_MALLOC(&newNormals, sizeof(float3) * numberOfPoints);
         float3* newColors = nullptr;
         CUDA_MALLOC(&newColors, sizeof(float3) * numberOfPoints);
+        T* newProperties = nullptr;
+        if constexpr (!std::is_void_v<T>)
+        {
+            CUDA_MALLOC(&newProperties, sizeof(T) * numberOfPoints);
+        }
 
         unsigned int* newVertexToHalfEdge = nullptr;
         CUDA_MALLOC(&newVertexToHalfEdge, sizeof(unsigned int) * numberOfPoints);
@@ -1666,7 +1737,8 @@ struct DeviceHalfEdgeMesh
         unsigned int numberOfNewPoints = 0;
         LaunchKernel(Kernel_DeviceHalfEdgeMesh_CompactVertices<T>, numberOfPoints,
             vertexToHalfEdge, vertexIndexMapping, vertexIndexMappingIndex,
-            positions, normals, colors, newPositions, newNormals, newColors, numberOfPoints);
+            positions, normals, colors, properties,
+            newPositions, newNormals, newColors, newProperties, numberOfPoints);
 
         LaunchKernel(Kernel_DeviceHalfEdgeMesh_RemapVertexToHalfEdge<T>, numberOfPoints,
             vertexToHalfEdge, newVertexToHalfEdge, vertexIndexMapping, numberOfPoints);
@@ -1678,10 +1750,15 @@ struct DeviceHalfEdgeMesh
         float3* oldPositions = positions;
         float3* oldNormals = normals;
         float3* oldColors = colors;
+        T* oldProperties = properties;
 
         positions = newPositions;
         normals = newNormals;
         colors = newColors;
+        if constexpr (!std::is_void_v<T>)
+        {
+            properties = newProperties;
+        }
 
         unsigned int* oldVertexToHalfEdge = vertexToHalfEdge;
         vertexToHalfEdge = newVertexToHalfEdge;
@@ -1693,6 +1770,10 @@ struct DeviceHalfEdgeMesh
         CUDA_FREE(oldPositions);
         CUDA_FREE(oldNormals);
         CUDA_FREE(oldColors);
+        if constexpr (!std::is_void_v<T>)
+        {
+            CUDA_FREE(oldProperties);
+        }
 
         CUDA_FREE(oldVertexToHalfEdge);
 

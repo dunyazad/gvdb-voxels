@@ -30,20 +30,21 @@ namespace Eigen {
     using Vector3ui = Vector<unsigned int, 3>;
 }
 
+
 class CUDAInstance
 {
 public:
     CUDAInstance();
     ~CUDAInstance();
 
-    HostPointCloud<> h_input;
-    DevicePointCloud<> d_input;
-    SCVoxelHashMap<> vhm;
-    HostHalfEdgeMesh<> h_mesh;
-    DeviceHalfEdgeMesh<> d_mesh;
+    HostPointCloud<PointCloudProperty> h_input;
+    DevicePointCloud<PointCloudProperty> d_input;
+    SCVoxelHashMap<PointCloudProperty> vhm;
+    HostHalfEdgeMesh<PointCloudProperty> h_mesh;
+    DeviceHalfEdgeMesh<PointCloudProperty> d_mesh;
 
     HalfEdgeMeshInterop interop;
 
-    HostPointCloud<> ProcessPointCloud(const HostPointCloud<>& input, float voxelSize);
+    HostPointCloud<PointCloudProperty> ProcessPointCloud(const HostPointCloud<PointCloudProperty>& input, float voxelSize = 0.2f, unsigned int occupyOffset = 3);
     void ProcessHalfEdgeMesh(const string& filename);
 };

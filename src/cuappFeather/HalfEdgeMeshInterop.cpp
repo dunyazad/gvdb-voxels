@@ -73,7 +73,7 @@ void HalfEdgeMeshInterop::Terminate()
     if (cudaEbo) { cudaGraphicsUnregisterResource(cudaEbo); cudaEbo = nullptr; }
 }
 
-void HalfEdgeMeshInterop::UploadFromDevice(DeviceHalfEdgeMesh<>& deviceMesh)
+void HalfEdgeMeshInterop::UploadFromDevice(DeviceHalfEdgeMesh<PointCloudProperty>& deviceMesh)
 {
  //   if(false == initialized || nullptr == renderable)
  //   {
