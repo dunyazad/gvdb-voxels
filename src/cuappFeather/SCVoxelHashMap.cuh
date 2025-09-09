@@ -2,10 +2,9 @@
 
 #include <cuda_common.cuh>
 
-#include <VoxelKey.hpp>
-#include <PointCloud.cuh>
+#include <SCVoxelKey.hpp>
+#include <SimplePointCloud.cuh>
 #include <HalfEdgeMesh.cuh>
-#include <VEFM.cuh>
 
 template<typename T>
 struct VoxelProperty {
@@ -253,55 +252,6 @@ __global__ __forceinline__ void Kernel_SCVoxelHashMap_MarchingCubes(
 	//}
 }
 
-template<typename T>
-__global__ __forceinline__ void Kernel_SCVoxelHashMap_SurfaceProjection_SDF(
-	SCVoxelHashMapInfo<T> info,
-	float3* positions,
-	float3* normals,
-	unsigned int numberOfPoints,
-	int maxIters = 5,
-	float stepScale = 0.5f)
-{
-	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
-	if (tid >= numberOfPoints) return;
-
-	float3 p = positions[tid];
-
-	// Simple Sampling
-	/*
-	for (int iter = 0; iter < maxIters; ++iter)
-	{
-		float sdf = SCVoxelHashMap::SampleSDF(info, p);
-		if (fabsf(sdf) < info.voxelSize * 0.05f)
-			break;
-		float3 grad = SCVoxelHashMap::SampleSDFGradient(info, p);
-		if (length(grad) < 1e-6f) break;
-		p = p - sdf * grad * stepScale;
-	}
-	*/
-
-	for (int iter = 0; iter < maxIters; ++iter)
-	{
-		float sdf = SCVoxelHashMap<T>::TrilinearSampleSDF(info, p);
-		if (fabsf(sdf) > info.voxelSize * 2.0f || sdf == FLT_MAX) break;
-		if (fabsf(sdf) < info.voxelSize * 0.05f) break;
-		float3 grad = SCVoxelHashMap<T>::TrilinearSampleSDFGradient(info, p);
-		float glen = length(grad);
-		if (glen < 1e-3f || isnan(glen)) break;
-		p = p - sdf * grad * stepScale;
-	}
-
-	positions[tid] = p;
-
-	// Update normal using SDF gradient (optional)
-	if (normals)
-	{
-		float3 n = SCVoxelHashMap<T>::SampleSDFGradient(info, p);
-		if (length(n) > 1e-6f)
-			normals[tid] = n;
-	}
-}
-
 template<typename T = void>
 struct SCVoxelHashMap
 {
@@ -488,8 +438,6 @@ struct SCVoxelHashMap
 
 		mesh.BuildHalfEdges();
 
-		//SCVoxelHashMap::SurfaceProjection_SDF(info, mesh);
-
 		//mesh.LaplacianSmoothing(5, 1.0f, true);
 
 		CUDA_FREE(d_numberOfPoints);
@@ -498,17 +446,6 @@ struct SCVoxelHashMap
 		CUDA_SYNC();
 
 		nvtxRangePop();
-	}
-
-	void SurfaceProjection_SDF(SCVoxelHashMapInfo<T> info, DeviceHalfEdgeMesh<T>& mesh, int maxIters = 5, float stepScale = 0.5f)
-	{
-		unsigned int numberOfPoints = mesh.numberOfPoints;
-		float3* positions = mesh.positions;
-		float3* normals = mesh.normals;
-
-		LaunchKernel(Kernel_SCVoxelHashMap_SurfaceProjection_SDF<T>, numberOfPoints,
-			info, positions, normals, numberOfPoints, maxIters, stepScale);
-		CUDA_SYNC();
 	}
 
 #ifdef __CUDA_ARCH__

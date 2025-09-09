@@ -1,8 +1,8 @@
 #pragma once
 
 #include <cuda_common.cuh>
-#include <VoxelKey.hpp>
-#include <PointCloud.cuh>
+#include <SCVoxelKey.hpp>
+#include <SimplePointCloud.cuh>
 
 struct Voxel
 {

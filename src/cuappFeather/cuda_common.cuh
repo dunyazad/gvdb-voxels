@@ -85,6 +85,8 @@ typedef double f64;
 #define f64_min (DBL_MIN)
 #endif
 
+#ifndef __CUSTOM_DEFINITIONS_FOR_CUDA__
+#define __CUSTOM_DEFINITIONS_FOR_CUDA__
 #define CUDA_CHECK(call) \
     do { \
         cudaError_t err = call; \
@@ -164,18 +166,21 @@ typedef double f64;
 #define CUDA_SYNC() cudaDeviceSynchronize();
 #endif
 
-
-
 #ifndef RAW_PTR
 #define RAW_PTR(x) (thrust::raw_pointer_cast((x).data()))
 #endif
 
-
 #ifndef PI
 #define PI 3.14159265358979323846
 #endif
+
+#ifndef DEG2RAD
 #define DEG2RAD (PI/180)
+#endif
+
+#ifndef RAD2DEG
 #define RAD2DEG (180/PI)
+#endif
 
 #ifndef XYZ
 #define XYZ(v) (v).x, (v).y, (v).z
@@ -183,7 +188,7 @@ typedef double f64;
 #ifndef XYZW
 #define XYZW(v) (v).x, (v).y, (v).z, (v).w
 #endif
-
+#endif
 
 struct cuAABB
 {

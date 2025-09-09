@@ -2,7 +2,7 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <CudaCompile Include="main.cu" />
-    <CudaCompile Include="PointCloud.cu" />
+    <CudaCompile Include="SimplePointCloud.cu" />
     <CudaCompile Include="VoxelHashMap.cu" />
     <CudaCompile Include="SCVoxelHashMap.cu" />
     <CudaCompile Include="Mesh.cu" />
@@ -34,7 +34,7 @@
     <ClInclude Include="cuda_vector_math.cuh" />
     <ClInclude Include="cuda_common.cuh" />
     <ClInclude Include="Octree.cuh" />
-    <ClInclude Include="PointCloud.cuh" />
+    <ClInclude Include="SimplePointCloud.cuh" />
     <ClInclude Include="SCVoxelHashMap.cuh" />
     <ClInclude Include="Mesh.cuh" />
     <ClInclude Include="HalfEdgeMesh.cuh" />
@@ -43,7 +43,7 @@
     <ClInclude Include="HalfEdgeMeshInterop.h" />
     <ClInclude Include="ThrustHalfEdgeMesh.cuh" />
     <ClInclude Include="KdTree.hpp" />
-    <ClInclude Include="VoxelKey.hpp" />
+    <ClInclude Include="SCVoxelKey.hpp" />
     <ClInclude Include="MortonCode.cuh" />
     <ClInclude Include="LBVH.cuh" />
     <ClInclude Include="cuBQL\bvh.h">
@@ -178,7 +178,7 @@
     <ClInclude Include="MarginLineFinder.cuh" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="HashMap.hpp" />
+    <None Include="SimpleHashMap.hpp" />
     <None Include="..\..\res\Shaders\Default.fs">
       <Filter>res\Shaders</Filter>
     </None>

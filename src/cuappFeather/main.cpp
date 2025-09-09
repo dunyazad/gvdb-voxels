@@ -212,9 +212,6 @@ void smoothOpenPolyline_MovingAverage_Hard(std::vector<float3>& points, int iter
 	if (points.size() < 3) return; // 점이 3개 미만이면 적용 불가
 
 	for (int iter = 0; iter < iterations; ++iter) {
-		std::vector<float3> smoothedPoints = points; // 복사본 생성
-
-		// 시작점과 끝점을 제외한 내부 점들만 처리 (1부터 n-2까지)
 		for (size_t i = 2; i < points.size() - 2; ++i) {
 			const float3& pprev = points[i - 2];
 			const float3& prev = points[i - 1];
@@ -222,11 +219,10 @@ void smoothOpenPolyline_MovingAverage_Hard(std::vector<float3>& points, int iter
 			const float3& next = points[i + 1];
 			const float3& nnext = points[i + 2];
 
-			smoothedPoints[i].x = (pprev.x + prev.x + next.x + nnext.x) / 4.0f;
-			smoothedPoints[i].y = (pprev.y + prev.y + next.y + nnext.y) / 4.0f;
-			smoothedPoints[i].z = (pprev.z + prev.z + next.z + nnext.z) / 4.0f;
+			points[i].x = (pprev.x + prev.x + next.x + nnext.x) / 4.0f;
+			points[i].y = (pprev.y + prev.y + next.y + nnext.y) / 4.0f;
+			points[i].z = (pprev.z + prev.z + next.z + nnext.z) / 4.0f;
 		}
-		points = smoothedPoints; // 결과로 교체
 	}
 }
 
@@ -672,7 +668,7 @@ int main(int argc, char** argv)
 			HostHalfEdgeMesh<PointCloudProperty> h_mesh = cuInstance.d_mesh;
 			if (h_mesh.numberOfFaces == 0) return;
 
-			// 1. 데이터 구조 변경: 한 시작 정점에 여러 경계 에지가 연결될 수 있도록 vector 사용
+			// 1. 데이터 구조 : 한 시작 정점에 여러 경계 에지가 연결될 수 있도록 vector 사용
 			std::map<unsigned int, std::vector<unsigned int>> borderEdgeStartMap;
 			std::set<unsigned int> borderHalfEdgeIndices;
 
@@ -689,14 +685,14 @@ int main(int argc, char** argv)
 
 			std::vector<std::vector<unsigned int>> borderRings;
 
-			// 2. 모든 경계 에지를 처리할 때까지 루프 추적
+			// 2. 모든 경계 에지를 처리할 때까지
 			while (!borderHalfEdgeIndices.empty())
 			{
 				std::vector<unsigned int> currentRing;
 				std::vector<float3> currentRingPoints;
 				unsigned int startHeIdx = *borderHalfEdgeIndices.begin();
 				unsigned int currentHeIdx = startHeIdx;
-				unsigned int prevHeIdx = UINT32_MAX; // 이전 에지를 추적하기 위한 변수
+				unsigned int prevHeIdx = UINT32_MAX; // 이전 에지를 추적
 
 				do
 				{
@@ -774,10 +770,9 @@ int main(int argc, char** argv)
 				borderRingPoints.push_back(currentRingPoints);
 			}
 
-			// 4. (Optional) Visualize the found border loops.
+			// 4. Visualize the found border loops.
 			printf("Assembled into %zu border ring(s).\n", borderRings.size());
 
-			// Define some distinct colors for visualizing different rings.
 			std::vector<glm::vec4> colors = {
 				Color::red(),
 				Color::green(),
@@ -802,11 +797,9 @@ int main(int argc, char** argv)
 						const auto& he = h_mesh.halfEdges[heIdx];
 						const auto& nextHe = h_mesh.halfEdges[he.nextIndex];
 
-						// Get the start and end vertex positions for the edge.
 						const auto& v0 = h_mesh.positions[he.vertexIndex];
 						const auto& v1 = h_mesh.positions[nextHe.vertexIndex];
 
-						// Use your visualization utility to add the line segment.
 						VD::AddLine(lineName, { XYZ(v0) }, { XYZ(v1) }, color, color);
 					}
 				}
@@ -844,19 +837,14 @@ int main(int argc, char** argv)
 			}
 			};
 
-		auto Smoothing = [&]() {
-			std::vector<glm::vec4> colors = {
-				Color::red(),
-				Color::green(),
-				Color::blue(),
-				Color::yellow(),
-				Color::magenta(),
-				Color::cyan()
+		auto UpdateBVH = [&]() {
+			cuInstance.d_mesh.UpdateBVH();
 			};
 
-			cuInstance.d_mesh.UpdateBVH();
+		auto Smoothing = [&]() {
+			TS(Smoothing);
 
-			for (size_t iteration = 0; iteration < 10; iteration++)
+			//for (size_t iteration = 0; iteration < 10; iteration++)
 			{
 				for (size_t i = 0; i < borderRingPoints.size(); i++)
 				{
@@ -864,7 +852,7 @@ int main(int argc, char** argv)
 
 					if ((points.size() > 300) && (points.back() == points.front()))
 					{
-						smoothOpenPolyline_MovingAverage_Hard(points, 10);
+						smoothOpenPolyline_MovingAverage_Hard(points, 100);
 						//smoothOpenPolyline_ParameterizedMovingAverage(points, 7, 100);
 
 						vector<float3> resultPositions;
@@ -888,16 +876,26 @@ int main(int argc, char** argv)
 					}
 				}
 			}
+			TE(Smoothing);
+			};
 
-
-
+		auto ShowMarginLines = [&]() {
+			std::vector<glm::vec4> colors = {
+				Color::red(),
+				Color::green(),
+				Color::blue(),
+				Color::yellow(),
+				Color::magenta(),
+				Color::cyan()
+			};
 
 			for (size_t i = 0; i < borderRingPoints.size(); i++)
 			{
 				auto& points = borderRingPoints[i];
 				const auto& color = colors[i % colors.size()];
 
-				if ((points.size() > 300) && (points.back() == points.front()))
+				//if ((points.size() > 300) && (points.back() == points.front()))
+				if (points.size() > 300)
 				{
 					for (size_t j = 0; j < points.size() - 1; j++)
 					{
@@ -908,16 +906,17 @@ int main(int argc, char** argv)
 					}
 				}
 			}
-
 			};
 
 		controlPanel->AddButton("GetNearestPoints", 0, 0, GetNearestPoints);
 		controlPanel->AddButton("Show Vertex DLClasses", 0, 0, ShowVertexDLClasses);
 		controlPanel->AddButton("Border Lines", 0, 0, BorderLines);
 		controlPanel->AddButton("DLClasses", 0, 0, DLClasses);
-		controlPanel->AddButton("Margin Lines (Non-manifold)", 0, 0, MarginLinesNonManifold);
 		controlPanel->AddButton("CatmulRom-Spline", 0, 0, CatmulRomSpline);
+		controlPanel->AddButton("Margin Lines (Non-manifold)", 0, 0, MarginLinesNonManifold);
+		controlPanel->AddButton("UpdateBVH", 0, 0, UpdateBVH);
 		controlPanel->AddButton("Smoothing", 0, 0, Smoothing);
+		controlPanel->AddButton("Show MarginLines", 0, 0, ShowMarginLines);
 	}
 #pragma endregion
 
@@ -936,6 +935,9 @@ int main(int argc, char** argv)
 		f32 lx = Mx - mx;
 		f32 ly = My - my;
 		f32 lz = Mz - mz;
+
+		auto aabbMin = make_float3(mx, my, mz);
+		auto aabbMax = make_float3(Mx, My, Mz);
 
 		h_pointCloud.Initialize(ply.GetPoints().size() / 3);
 
@@ -981,6 +983,10 @@ int main(int argc, char** argv)
 			h_pointCloud.normals[i] = make_float3(nx, ny, nz);
 			h_pointCloud.colors[i] = make_float3(r, g, b);
 			h_pointCloud.properties[i] = {deepLearningClass};
+
+			auto code = MortonCode::FromPosition(make_float3(x, y, z), aabbMin, aabbMax);
+			auto lowerCorner = MortonCode::ToPosition(code, aabbMin, aabbMax);
+			VD::AddBox("MortonCode", glm::vec3(XYZ(lowerCorner)), glm::vec3(0.01f, 0.01f, 0.01f), Color::blue());
 		}
 
 		cuInstance.ProcessPointCloud(h_pointCloud, 0.05f, 3);

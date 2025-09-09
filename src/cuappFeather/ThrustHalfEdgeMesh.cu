@@ -1,5 +1,5 @@
 #include <ThrustHalfEdgeMesh.cuh>
-#include <HashMap.hpp>
+#include <SimpleHashMap.hpp>
 
 ThrustHostHalfEdgeMesh::ThrustHostHalfEdgeMesh()
 {
@@ -650,7 +650,7 @@ void ThrustDeviceHalfEdgeMesh::BuildHalfEdges()
 //    return result;
 //}
 
-__device__ bool ThrustDeviceHalfEdgeMesh::HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value)
+__device__ bool ThrustDeviceHalfEdgeMesh::SimpleHashMapInsert(SimpleHashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value)
 {
     size_t idx = key % info.capacity;
     for (int i = 0; i < info.maxProbe; ++i)
@@ -666,7 +666,7 @@ __device__ bool ThrustDeviceHalfEdgeMesh::HashMapInsert(HashMapInfo<uint64_t, un
     }
     return false;
 }
-__device__ bool ThrustDeviceHalfEdgeMesh::HashMapFind(const HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int* outValue)
+__device__ bool ThrustDeviceHalfEdgeMesh::SimpleHashMapFind(const SimpleHashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int* outValue)
 {
     size_t idx = key % info.capacity;
     for (int i = 0; i < info.maxProbe; ++i)

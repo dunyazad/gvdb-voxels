@@ -1,8 +1,8 @@
 #pragma once
 
 #include <cuda_common.cuh>
-#include <HashMap.hpp>
-#include <VoxelKey.hpp>
+#include <SimpleHashMap.hpp>
+#include <SCVoxelKey.hpp>
 //#include <LBVH.cuh>
 
 #include "cuBQL/bvh.h"
@@ -27,7 +27,7 @@ struct FaceNode
     unsigned int nextNodeIndex = UINT32_MAX;
 };
 
-struct FaceNodeHashMapEntry
+struct FaceNodeSimpleHashMapEntry
 {
     VoxelKey key = UINT64_MAX;
     unsigned int length = 0;
@@ -588,7 +588,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
     unsigned int numberOfFaces,
     HalfEdge* halfEdges,
     HalfEdgeFace* halfEdgeFaces,
-    HashMapInfo<uint64_t, unsigned int> info)
+    SimpleHashMapInfo<uint64_t, unsigned int> info)
 {
     unsigned int faceIdx = blockIdx.x * blockDim.x + threadIdx.x;
     if (faceIdx >= numberOfFaces) return;
@@ -619,9 +619,9 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
 
     halfEdgeFaces[faceIdx].halfEdgeIndex = he0;
 
-    DeviceHalfEdgeMesh<T>::HashMapInsert(info, DeviceHalfEdgeMesh<T>::PackEdge(v0, v1), he0);
-    DeviceHalfEdgeMesh<T>::HashMapInsert(info, DeviceHalfEdgeMesh<T>::PackEdge(v1, v2), he1);
-    DeviceHalfEdgeMesh<T>::HashMapInsert(info, DeviceHalfEdgeMesh<T>::PackEdge(v2, v0), he2);
+    DeviceHalfEdgeMesh<T>::SimpleHashMapInsert(info, DeviceHalfEdgeMesh<T>::PackEdge(v0, v1), he0);
+    DeviceHalfEdgeMesh<T>::SimpleHashMapInsert(info, DeviceHalfEdgeMesh<T>::PackEdge(v1, v2), he1);
+    DeviceHalfEdgeMesh<T>::SimpleHashMapInsert(info, DeviceHalfEdgeMesh<T>::PackEdge(v2, v0), he2);
 }
 
 template<typename T>
@@ -629,7 +629,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_LinkOpposites(
     const uint3* faces,
     unsigned int numberOfFaces,
     HalfEdge* halfEdges,
-    HashMapInfo<uint64_t, unsigned int> info)
+    SimpleHashMapInfo<uint64_t, unsigned int> info)
 {
     unsigned int faceIdx = blockIdx.x * blockDim.x + threadIdx.x;
     if (faceIdx >= numberOfFaces) return;
@@ -642,19 +642,19 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_LinkOpposites(
     {
         uint64_t oppKey = DeviceHalfEdgeMesh<T>::PackEdge(face.y, face.x);
         unsigned int oppIdx = UINT32_MAX;
-        if (DeviceHalfEdgeMesh<T>::HashMapFind(info, oppKey, &oppIdx))
+        if (DeviceHalfEdgeMesh<T>::SimpleHashMapFind(info, oppKey, &oppIdx))
             halfEdges[he0].oppositeIndex = oppIdx;
     }
     {
         uint64_t oppKey = DeviceHalfEdgeMesh<T>::PackEdge(face.z, face.y);
         unsigned int oppIdx = UINT32_MAX;
-        if (DeviceHalfEdgeMesh<T>::HashMapFind(info, oppKey, &oppIdx))
+        if (DeviceHalfEdgeMesh<T>::SimpleHashMapFind(info, oppKey, &oppIdx))
             halfEdges[he1].oppositeIndex = oppIdx;
     }
     {
         uint64_t oppKey = DeviceHalfEdgeMesh<T>::PackEdge(face.x, face.z);
         unsigned int oppIdx = UINT32_MAX;
-        if (DeviceHalfEdgeMesh<T>::HashMapFind(info, oppKey, &oppIdx))
+        if (DeviceHalfEdgeMesh<T>::SimpleHashMapFind(info, oppKey, &oppIdx))
             halfEdges[he2].oppositeIndex = oppIdx;
     }
 }
@@ -787,8 +787,8 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_RemapVertexIndexOfFace
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap(
-    HashMapInfo<uint64_t, FaceNodeHashMapEntry> info,
+__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeSimpleHashMap(
+    SimpleHashMapInfo<uint64_t, FaceNodeSimpleHashMapEntry> info,
     float3* positions,
     uint3* faces,
     FaceNode* faceNodes,
@@ -813,7 +813,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap(
     for (unsigned int probe = 0; probe < info.maxProbe; ++probe)
     {
         size_t slot = (hashIdx + probe) % info.capacity;
-        HashMapEntry<uint64_t, FaceNodeHashMapEntry>* entry = &info.entries[slot];
+        SimpleHashMapEntry<uint64_t, FaceNodeSimpleHashMapEntry>* entry = &info.entries[slot];
 
         uint64_t old = atomicCAS(
             reinterpret_cast<unsigned long long*>(&entry->key),
@@ -850,12 +850,12 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_HashMap(
+__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_SimpleHashMap(
     const float3* points,
     unsigned int numPoints,
     const float3* positions,
     const uint3* faces,
-    HashMapInfo<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap,
+    SimpleHashMapInfo<uint64_t, FaceNodeSimpleHashMapEntry> faceNodeSimpleHashMap,
     const FaceNode* faceNodes,
     float voxelSize,
     unsigned int* outIndices)
@@ -875,12 +875,12 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_H
             {
                 int3 voxelIndex = make_int3(centerVoxel.x + dx, centerVoxel.y + dy, centerVoxel.z + dz);
                 uint64_t voxelKey = IndexToVoxelKey(voxelIndex);
-                size_t hashIdx = VoxelKeyHash(voxelKey, faceNodeHashMap.capacity);
+                size_t hashIdx = VoxelKeyHash(voxelKey, faceNodeSimpleHashMap.capacity);
 
-                for (unsigned int probe = 0; probe < faceNodeHashMap.maxProbe; ++probe)
+                for (unsigned int probe = 0; probe < faceNodeSimpleHashMap.maxProbe; ++probe)
                 {
-                    size_t slot = (hashIdx + probe) % faceNodeHashMap.capacity;
-                    const auto& entry = faceNodeHashMap.entries[slot];
+                    size_t slot = (hashIdx + probe) % faceNodeSimpleHashMap.capacity;
+                    const auto& entry = faceNodeSimpleHashMap.entries[slot];
                     if (entry.key == voxelKey)
                     {
                         unsigned int nodeIdx = entry.value.headIndex;
@@ -911,12 +911,12 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_H
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_HashMap_ClosestPoint(
+__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_SimpleHashMap_ClosestPoint(
     const float3* points,
     unsigned int numPoints,
     const float3* positions,
     const uint3* faces,
-    HashMapInfo<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap,
+    SimpleHashMapInfo<uint64_t, FaceNodeSimpleHashMapEntry> faceNodeSimpleHashMap,
     const FaceNode* faceNodes,
     float voxelSize,
     int offset,
@@ -939,12 +939,12 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_H
             {
                 int3 voxelIndex = make_int3(centerVoxel.x + dx, centerVoxel.y + dy, centerVoxel.z + dz);
                 uint64_t voxelKey = IndexToVoxelKey(voxelIndex);
-                size_t hashIdx = VoxelKeyHash(voxelKey, faceNodeHashMap.capacity);
+                size_t hashIdx = VoxelKeyHash(voxelKey, faceNodeSimpleHashMap.capacity);
 
-                for (unsigned int probe = 0; probe < faceNodeHashMap.maxProbe; ++probe)
+                for (unsigned int probe = 0; probe < faceNodeSimpleHashMap.maxProbe; ++probe)
                 {
-                    size_t slot = (hashIdx + probe) % faceNodeHashMap.capacity;
-                    const auto& entry = faceNodeHashMap.entries[slot];
+                    size_t slot = (hashIdx + probe) % faceNodeSimpleHashMap.capacity;
+                    const auto& entry = faceNodeSimpleHashMap.entries[slot];
                     if (entry.key == voxelKey)
                     {
                         unsigned int nodeIdx = entry.value.headIndex;
@@ -1458,7 +1458,7 @@ struct DeviceHalfEdgeMesh
     HalfEdgeFace* halfEdgeFaces = nullptr;
     unsigned int* vertexToHalfEdge = nullptr;
 
-    HashMap<uint64_t, FaceNodeHashMapEntry> faceNodeHashMap;
+    SimpleHashMap<uint64_t, FaceNodeSimpleHashMapEntry> faceNodeSimpleHashMap;
     FaceNode* faceNodes = nullptr;
 
     cuBQL::bvh3f bvh;
@@ -1569,7 +1569,7 @@ struct DeviceHalfEdgeMesh
 
         CUDA_SAFE_FREE(faceNodes);
 
-        faceNodeHashMap.Terminate();
+        faceNodeSimpleHashMap.Terminate();
 
         numberOfPoints = 0;
         numberOfFaces = 0;
@@ -1689,7 +1689,7 @@ struct DeviceHalfEdgeMesh
         CUDA_TS(BuildHalfEdges);
 
         unsigned int numHalfEdges = numberOfFaces * 3;
-        HashMap<uint64_t, unsigned int> edgeMap;
+        SimpleHashMap<uint64_t, unsigned int> edgeMap;
         edgeMap.Initialize(numHalfEdges * 2);
 
         LaunchKernel(Kernel_DeviceHalfEdgeMesh_BuildHalfEdges<T>, numberOfFaces,
@@ -1784,25 +1784,25 @@ struct DeviceHalfEdgeMesh
         //UpdateBVH();
     }
 
-    void BuildFaceNodeHashMap()
+    void BuildFaceNodeSimpleHashMap()
     {
-        faceNodeHashMap.Terminate();
-        faceNodeHashMap.Initialize(numberOfFaces * 64);
-        faceNodeHashMap.Clear(0xFFFFFFFF);
+        faceNodeSimpleHashMap.Terminate();
+        faceNodeSimpleHashMap.Initialize(numberOfFaces * 64);
+        faceNodeSimpleHashMap.Clear(0xFFFFFFFF);
 
         CUDA_MALLOC(&faceNodes, sizeof(FaceNode) * numberOfFaces);
         CUDA_MEMSET(faceNodes, 0xFF, sizeof(FaceNode) * numberOfFaces);
 
         float voxelSize = 0.1f;
 
-        //printf("Face count: %u, HashMap capacity: %zu, maxProbe: %u\n", numberOfFaces, faceNodeHashMap.info.capacity, faceNodeHashMap.info.maxProbe);
+        //printf("Face count: %u, SimpleHashMap capacity: %zu, maxProbe: %u\n", numberOfFaces, faceNodeSimpleHashMap.info.capacity, faceNodeSimpleHashMap.info.maxProbe);
 
         unsigned int* d_numDropped;
         CUDA_MALLOC(&d_numDropped, sizeof(unsigned int));
         CUDA_MEMSET(d_numDropped, 0, sizeof(unsigned int));
 
-        LaunchKernel(Kernel_DeviceHalfEdgeMesh_BuildFaceNodeHashMap, numberOfFaces,
-            faceNodeHashMap.info,
+        LaunchKernel(Kernel_DeviceHalfEdgeMesh_BuildFaceNodeSimpleHashMap, numberOfFaces,
+            faceNodeSimpleHashMap.info,
             positions,
             faces,
             faceNodes,
@@ -1822,9 +1822,9 @@ struct DeviceHalfEdgeMesh
     vector<float3> GetFaceNodePositions()
     {
         // 1. host로 데이터 복사
-        std::vector<HashMapEntry<uint64_t, FaceNodeHashMapEntry>> h_entries(faceNodeHashMap.info.capacity);
-        CUDA_COPY_D2H(h_entries.data(), faceNodeHashMap.info.entries,
-            sizeof(HashMapEntry<uint64_t, FaceNodeHashMapEntry>) * faceNodeHashMap.info.capacity);
+        std::vector<SimpleHashMapEntry<uint64_t, FaceNodeSimpleHashMapEntry>> h_entries(faceNodeSimpleHashMap.info.capacity);
+        CUDA_COPY_D2H(h_entries.data(), faceNodeSimpleHashMap.info.entries,
+            sizeof(SimpleHashMapEntry<uint64_t, FaceNodeSimpleHashMapEntry>) * faceNodeSimpleHashMap.info.capacity);
 
         std::vector<FaceNode> h_faceNodes(numberOfFaces);
         CUDA_COPY_D2H(h_faceNodes.data(), faceNodes, sizeof(FaceNode) * numberOfFaces);
@@ -1870,9 +1870,9 @@ struct DeviceHalfEdgeMesh
         std::vector<FaceNode> h_faceNodes(numberOfFaces);
         CUDA_COPY_D2H(h_faceNodes.data(), faceNodes, sizeof(FaceNode) * numberOfFaces);
 
-        std::vector<HashMapEntry<uint64_t, FaceNodeHashMapEntry>> h_entries(faceNodeHashMap.info.capacity);
-        CUDA_COPY_D2H(h_entries.data(), faceNodeHashMap.info.entries,
-            sizeof(HashMapEntry<uint64_t, FaceNodeHashMapEntry>) * faceNodeHashMap.info.capacity);
+        std::vector<SimpleHashMapEntry<uint64_t, FaceNodeSimpleHashMapEntry>> h_entries(faceNodeSimpleHashMap.info.capacity);
+        CUDA_COPY_D2H(h_entries.data(), faceNodeSimpleHashMap.info.entries,
+            sizeof(SimpleHashMapEntry<uint64_t, FaceNodeSimpleHashMapEntry>) * faceNodeSimpleHashMap.info.capacity);
 
         // 2. 연결리스트를 따라가며 방문한 faceNode 인덱스 체크
         std::vector<bool> visited(numberOfFaces, false);
@@ -1911,10 +1911,10 @@ struct DeviceHalfEdgeMesh
         unsigned int* d_indices = nullptr;
         CUDA_MALLOC(&d_indices, sizeof(unsigned int) * numberOfInputPoints);
 
-        LaunchKernel(Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_HashMap, numberOfInputPoints,
+        LaunchKernel(Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_SimpleHashMap, numberOfInputPoints,
             d_positions, numberOfInputPoints,
             positions, faces,
-            faceNodeHashMap.info,
+            faceNodeSimpleHashMap.info,
             faceNodes,
             /*voxelSize=*/0.1f,
             d_indices);
@@ -1936,10 +1936,10 @@ struct DeviceHalfEdgeMesh
         CUDA_MALLOC(&d_indices, sizeof(unsigned int) * numberOfInputPoints);
         CUDA_MALLOC(&d_closest, sizeof(float3) * numberOfInputPoints);
 
-        LaunchKernel(Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_HashMap_ClosestPoint, numberOfInputPoints,
+        LaunchKernel(Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_SimpleHashMap_ClosestPoint, numberOfInputPoints,
             d_positions, numberOfInputPoints,
             positions, faces,
-            faceNodeHashMap.info,
+            faceNodeSimpleHashMap.info,
             faceNodes,
             /*voxelSize=*/0.1f,
             offset,
@@ -2402,7 +2402,7 @@ struct DeviceHalfEdgeMesh
         return (static_cast<uint64_t>(v0) << 32) | static_cast<uint64_t>(v1);
     }
 
-    __device__ static bool HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value)
+    __device__ static bool SimpleHashMapInsert(SimpleHashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value)
     {
         size_t idx = key % info.capacity;
         for (int i = 0; i < info.maxProbe; ++i)
@@ -2419,7 +2419,7 @@ struct DeviceHalfEdgeMesh
         return false;
     }
 
-    __device__ static bool HashMapFind(const HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int* outValue)
+    __device__ static bool SimpleHashMapFind(const SimpleHashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int* outValue)
     {
         size_t idx = key % info.capacity;
         for (int i = 0; i < info.maxProbe; ++i)

@@ -9,7 +9,7 @@
 
 #include <Serialization.hpp>
 
-#include <HashMap.hpp>
+#include <SimpleHashMap.hpp>
 #include <MortonCode.cuh>
 
 #include <map>
@@ -108,7 +108,7 @@ struct DeviceOctree
     unsigned int numberOfNodes = 0;
     unsigned int* d_numberOfNodes = nullptr;
 
-    HashMap<uint64_t, unsigned int> octreeKeys;
+    SimpleHashMap<uint64_t, unsigned int> octreeKeys;
 
     float3* positions = nullptr;
 	unsigned int numberOfPositions = 0;

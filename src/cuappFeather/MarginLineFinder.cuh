@@ -2,12 +2,12 @@
 
 #include <cuda_common.cuh>
 
-#include <HashMap.hpp>
+#include <SimpleHashMap.hpp>
 
 struct MarginLineFinder
 {
-	HashMap<uint64_t, uint64_t> pointMap;
-	HashMap<uint64_t, uint64_t> countMap;
+	SimpleHashMap<uint64_t, uint64_t> pointMap;
+	SimpleHashMap<uint64_t, uint64_t> countMap;
 
 	void Initialize(float voxelSize, size_t capacity, uint8_t maxProbe = 64);
 
@@ -95,6 +95,6 @@ struct MarginLineFinder
 		return make_int3(ix, iy, iz);
 	}
 
-	__device__ static inline uint64_t FindRootVoxel(HashMapInfo<uint64_t, uint64_t> info, uint64_t key);
-	__device__ static inline void UnionVoxel(HashMapInfo<uint64_t, uint64_t> info, uint64_t a, uint64_t b);
+	__device__ static inline uint64_t FindRootVoxel(SimpleHashMapInfo<uint64_t, uint64_t> info, uint64_t key);
+	__device__ static inline void UnionVoxel(SimpleHashMapInfo<uint64_t, uint64_t> info, uint64_t a, uint64_t b);
 };

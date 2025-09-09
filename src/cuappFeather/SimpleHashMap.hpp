@@ -22,33 +22,33 @@ __host__ __device__ inline uint64_t empty_key<uint64_t>()
 }
 
 template<typename Key, typename Value>
-struct HashMapEntry
+struct SimpleHashMapEntry
 {
     Key key;
     Value value;
 };
 
 template<typename Key, typename Value>
-struct HashMapInfo
+struct SimpleHashMapInfo
 {
-    HashMapEntry<Key, Value>* entries = nullptr;
+    SimpleHashMapEntry<Key, Value>* entries = nullptr;
     size_t capacity = 1024 * 1024 * 1024;
     uint8_t maxProbe = 64;
 	unsigned int* numberOfEntries = nullptr;
 };
 
 template<typename Key, typename Value>
-struct HashMap
+struct SimpleHashMap
 {
-    HashMapInfo<Key, Value> info;
+    SimpleHashMapInfo<Key, Value> info;
 
     void Initialize(size_t capacity = 1024 * 1024 * 1024, uint8_t maxProbe = 64, int value = 0xFF)
     {
         info.capacity = capacity;
         info.maxProbe = maxProbe;
 
-        CUDA_CHECK(CUDA_MALLOC(&info.entries, sizeof(HashMapEntry<Key, Value>) * info.capacity));
-        CUDA_CHECK(CUDA_MEMSET(info.entries, value, sizeof(HashMapEntry<Key, Value>) * info.capacity));
+        CUDA_CHECK(CUDA_MALLOC(&info.entries, sizeof(SimpleHashMapEntry<Key, Value>) * info.capacity));
+        CUDA_CHECK(CUDA_MEMSET(info.entries, value, sizeof(SimpleHashMapEntry<Key, Value>) * info.capacity));
 
         CUDA_CHECK(CUDA_MALLOC(&info.numberOfEntries, sizeof(unsigned int)));
         CUDA_CHECK(CUDA_MEMSET(info.numberOfEntries, 0, sizeof(unsigned int)));
@@ -73,7 +73,7 @@ struct HashMap
     {
         if (info.entries != nullptr)
         {
-            CUDA_CHECK(CUDA_MEMSET(info.entries, value, sizeof(HashMapEntry<Key, Value>) * info.capacity));
+            CUDA_CHECK(CUDA_MEMSET(info.entries, value, sizeof(SimpleHashMapEntry<Key, Value>) * info.capacity));
         }
 
         if (info.numberOfEntries != nullptr)
@@ -82,14 +82,14 @@ struct HashMap
         }
     }
 
-    __host__ __device__ static inline size_t HashMap_hash(Key key, size_t capacity)
+    __host__ __device__ static inline size_t SimpleHashMap_hash(Key key, size_t capacity)
     {
         return static_cast<size_t>(key) % capacity;
     }
 
-    __device__ static bool insert(const HashMapInfo<Key, Value>& info, Key key, const Value& value)
+    __device__ static bool insert(const SimpleHashMapInfo<Key, Value>& info, Key key, const Value& value)
     {
-        size_t idx = HashMap_hash(key, info.capacity);
+        size_t idx = SimpleHashMap_hash(key, info.capacity);
 
         for (int i = 0; i < info.maxProbe; ++i)
         {
@@ -124,9 +124,9 @@ struct HashMap
         return false;
     }
 
-    __device__ static bool increase(const HashMapInfo<Key, Value>& info, Key key)
+    __device__ static bool increase(const SimpleHashMapInfo<Key, Value>& info, Key key)
     {
-        size_t idx = HashMap_hash(key, info.capacity);
+        size_t idx = SimpleHashMap_hash(key, info.capacity);
 
         for (int i = 0; i < info.maxProbe; ++i)
         {
@@ -159,9 +159,9 @@ struct HashMap
         return false;
     }
 
-    __device__ static bool find(const HashMapInfo<Key, Value>& info, Key key, Value* outValue)
+    __device__ static bool find(const SimpleHashMapInfo<Key, Value>& info, Key key, Value* outValue)
     {
-        size_t idx = HashMap_hash(key, info.capacity);
+        size_t idx = SimpleHashMap_hash(key, info.capacity);
 
         for (int i = 0; i < info.maxProbe; ++i)
         {

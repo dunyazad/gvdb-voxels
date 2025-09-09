@@ -361,7 +361,7 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodeKeys(
     float3 aabbMin,
     float3 aabbMax,
     uint64_t depth,
-    HashMap<uint64_t, unsigned int> octreeKeys)
+    SimpleHashMap<uint64_t, unsigned int> octreeKeys)
 {
     const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= numberOfPoints) return;
@@ -369,20 +369,20 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodeKeys(
     const float3 p = positions[tid];
     const uint64_t code = Octree::ToKey(p, aabbMin, aabbMax, depth);
 
-    HashMap<uint64_t, unsigned int>::insert(octreeKeys.info, code, tid);
+    SimpleHashMap<uint64_t, unsigned int>::insert(octreeKeys.info, code, tid);
     
     if (depth == 0u) return;
 
     auto parentCode = Octree::GetParentKey(code);
     for (long i = (long)depth - 1; i >= 0; i--)
     {
-        HashMap<uint64_t, unsigned int>::insert(octreeKeys.info, parentCode, 1);
+        SimpleHashMap<uint64_t, unsigned int>::insert(octreeKeys.info, parentCode, 1);
         parentCode = Octree::GetParentKey(parentCode);
     }
 }
 
 __global__ void Kernel_DeviceOctree_BuildOctreeNodes(
-    HashMap<uint64_t, unsigned int> octreeKeys,
+    SimpleHashMap<uint64_t, unsigned int> octreeKeys,
     OctreeNode* nodes,
     unsigned int* numberOfNodes)
 {
@@ -408,7 +408,7 @@ __global__ void Kernel_DeviceOctree_BuildOctreeNodes(
 }
 
 __global__ void Kernel_DeviceOctree_LinkOctreeNodes(
-    HashMap<uint64_t, unsigned int> hm,
+    SimpleHashMap<uint64_t, unsigned int> hm,
     OctreeNode* __restrict__ nodes,
     unsigned int numberOfNodes,
     unsigned int* __restrict__ rootIndex,

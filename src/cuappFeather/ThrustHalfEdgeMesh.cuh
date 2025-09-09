@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cuda_common.cuh>
-#include <HashMap.hpp>
+#include <SimpleHashMap.hpp>
 
 struct ThrustHalfEdge
 {
@@ -89,6 +89,6 @@ struct ThrustDeviceHalfEdgeMesh
 
     //std::vector<unsigned int> GetOneRingVertices(unsigned int v);
 
-    __device__ static bool HashMapInsert(HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value);
-    __device__ static bool HashMapFind(const HashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int* outValue);
+    __device__ static bool SimpleHashMapInsert(SimpleHashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int value);
+    __device__ static bool SimpleHashMapFind(const SimpleHashMapInfo<uint64_t, unsigned int>& info, uint64_t key, unsigned int* outValue);
 };

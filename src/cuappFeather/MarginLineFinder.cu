@@ -38,7 +38,7 @@ void MarginLineFinder::InsertPoints(const std::vector<float3>& points, uint64_t 
 }
 
 __global__ void Kernel_MarginLineFinder_InsertPoints(
-	HashMapInfo<uint64_t, uint64_t> info,
+	SimpleHashMapInfo<uint64_t, uint64_t> info,
 	const float3* points, int numberOfPoints, uint64_t tag, float voxelSize)
 {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -55,7 +55,7 @@ __global__ void Kernel_MarginLineFinder_InsertPoints(
 	//	return;
 	//}
 
-	HashMap<uint64_t, uint64_t>::insert(info, key, tag);
+	SimpleHashMap<uint64_t, uint64_t>::insert(info, key, tag);
 }
 
 void MarginLineFinder::InsertPoints(const float3* d_points, int numberOfPoints, uint64_t tag)
@@ -103,23 +103,23 @@ void MarginLineFinder::Dump(std::vector<float3>& resultPositions, std::vector<ui
 	CUDA_SYNC();
 }
 
-__device__ uint64_t MarginLineFinder::FindRootVoxel(HashMapInfo<uint64_t, uint64_t> info, uint64_t key)
+__device__ uint64_t MarginLineFinder::FindRootVoxel(SimpleHashMapInfo<uint64_t, uint64_t> info, uint64_t key)
 {
 	while (true)
 	{
 		uint64_t parent = UINT64_MAX;
-		HashMap<uint64_t, uint64_t>::find(info, key, &parent);
+		SimpleHashMap<uint64_t, uint64_t>::find(info, key, &parent);
 		if (parent == key | UINT64_MAX == parent) break;
 		uint64_t grand = UINT64_MAX;
-		HashMap<uint64_t, uint64_t>::find(info, parent, &grand);
+		SimpleHashMap<uint64_t, uint64_t>::find(info, parent, &grand);
 		if (UINT64_MAX == grand) break;
-		if (parent != grand) HashMap<uint64_t, uint64_t>::insert(info, key, grand);
+		if (parent != grand) SimpleHashMap<uint64_t, uint64_t>::insert(info, key, grand);
 		key = parent;
 	}
 	return key;
 }
 
-__device__ void MarginLineFinder::UnionVoxel(HashMapInfo<uint64_t, uint64_t> info, uint64_t a, uint64_t b)
+__device__ void MarginLineFinder::UnionVoxel(SimpleHashMapInfo<uint64_t, uint64_t> info, uint64_t a, uint64_t b)
 {
 	uint64_t rootA = FindRootVoxel(info, a);
 	uint64_t rootB = FindRootVoxel(info, b);
@@ -129,16 +129,16 @@ __device__ void MarginLineFinder::UnionVoxel(HashMapInfo<uint64_t, uint64_t> inf
 		if (rootA < rootB)
 		{
 			uint64_t vb = UINT64_MAX;
-			HashMap<uint64_t, uint64_t>::find(info, rootB, &vb);
+			SimpleHashMap<uint64_t, uint64_t>::find(info, rootB, &vb);
 			if (rootA < vb)
-				HashMap<uint64_t, uint64_t>::insert(info, rootB, rootA);
+				SimpleHashMap<uint64_t, uint64_t>::insert(info, rootB, rootA);
 		}
 		else
 		{
 			uint64_t va = UINT64_MAX;
-			HashMap<uint64_t, uint64_t>::find(info, rootA, &va);
+			SimpleHashMap<uint64_t, uint64_t>::find(info, rootA, &va);
 			if (rootB < va)
-				HashMap<uint64_t, uint64_t>::insert(info, rootA, rootB);
+				SimpleHashMap<uint64_t, uint64_t>::insert(info, rootA, rootB);
 		}
 	}
 }
@@ -162,7 +162,7 @@ __device__ void MarginLineFinder::UnionVoxel(HashMapInfo<uint64_t, uint64_t> inf
 
 
 __global__ void Kernel_MarginLineFinder_Dump(
-	HashMapInfo<uint64_t, uint64_t> info,
+	SimpleHashMapInfo<uint64_t, uint64_t> info,
 	float3* resultPositions, uint64_t* resultTags, unsigned int* numberOfResultPositions, float voxelSize)
 {
 	auto tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -213,7 +213,7 @@ void MarginLineFinder::FindMarginLinePoints(std::vector<float3>& result)
 }
 
 __global__ void Kernel_MarginLineFinder_FindMarginLinePoints(
-	HashMapInfo<uint64_t, uint64_t> info,
+	SimpleHashMapInfo<uint64_t, uint64_t> info,
 	float3* resultPoints, unsigned int* numberOfResultPoints, float voxelSize)
 {
 	auto tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -250,7 +250,7 @@ __global__ void Kernel_MarginLineFinder_FindMarginLinePoints(
 				uint64_t nkey = MarginLineFinder::ToKey(ni);
 
 				uint64_t nv = 0;
-				if (HashMap<uint64_t, uint64_t>::find(info, nkey, &nv))
+				if (SimpleHashMap<uint64_t, uint64_t>::find(info, nkey, &nv))
 				{
 					if(1 == nv)
 					{
@@ -310,7 +310,7 @@ void MarginLineFinder::MarginLineNoiseRemoval(std::vector<float3>& result)
 }
 
 __global__ void Kernel_MarginLineFinder_NoiseRemoval(
-	HashMapInfo<uint64_t, uint64_t> info,
+	SimpleHashMapInfo<uint64_t, uint64_t> info,
 	float3* resultPoints, unsigned int* numberOfResultPoints, float voxelSize)
 {
 	auto tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -339,7 +339,7 @@ __global__ void Kernel_MarginLineFinder_NoiseRemoval(
 				uint64_t nkey = MarginLineFinder::ToKey(ni);
 
 				uint64_t nv = 0;
-				if (HashMap<uint64_t, uint64_t>::find(info, nkey, &nv))
+				if (SimpleHashMap<uint64_t, uint64_t>::find(info, nkey, &nv))
 				{
 					count++;
 				}
@@ -401,7 +401,7 @@ void MarginLineFinder::Clustering(std::vector<float3>& resultPositions, std::vec
 }
 
 __global__ void Kernel_MarginLineFinder_Prepare_Clustering(
-	HashMapInfo<uint64_t, uint64_t> info,
+	SimpleHashMapInfo<uint64_t, uint64_t> info,
 	float3* d_resultPositions, uint64_t* d_resultTags, uint64_t* d_resultTagCounts, unsigned int* d_numberofResultPositions, float voxelSize)
 {
 	auto tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -421,7 +421,7 @@ __global__ void Kernel_MarginLineFinder_Prepare_Clustering(
 }
 
 __global__ void Kernel_MarginLineFinder_Clustering(
-	HashMapInfo<uint64_t, uint64_t> info,
+	SimpleHashMapInfo<uint64_t, uint64_t> info,
 	float3* d_resultPositions, uint64_t* d_resultTags, uint64_t* d_resultTagCounts, unsigned int* d_numberofResultPositions, float voxelSize)
 {
 	auto tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -447,7 +447,7 @@ __global__ void Kernel_MarginLineFinder_Clustering(
 				ni.z += dz;
 				uint64_t nkey = MarginLineFinder::ToKey(ni);
 				uint64_t nv = 0;
-				if (HashMap<uint64_t, uint64_t>::find(info, nkey, &nv))
+				if (SimpleHashMap<uint64_t, uint64_t>::find(info, nkey, &nv))
 				{
 					MarginLineFinder::UnionVoxel(info, key, nkey);
 				}
@@ -456,12 +456,12 @@ __global__ void Kernel_MarginLineFinder_Clustering(
 	}
 
 	uint64_t value = UINT64_MAX;
-	HashMap<uint64_t, uint64_t>::find(info, key, &value);
+	SimpleHashMap<uint64_t, uint64_t>::find(info, key, &value);
 	d_resultTags[tid] = value;
 }
 
 __global__ void Kernel_MarginLineFinder_Count_Tags(
-	HashMapInfo<uint64_t, uint64_t> info_countMap,
+	SimpleHashMapInfo<uint64_t, uint64_t> info_countMap,
 	float3* d_resultPositions, uint64_t* d_resultTags, uint64_t* d_resultTagCounts, unsigned int* d_numberofResultPositions, float voxelSize)
 {
 	auto tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -470,14 +470,14 @@ __global__ void Kernel_MarginLineFinder_Count_Tags(
 	if (tag == UINT64_MAX)
 		return;
 
-	if (false == HashMap<uint64_t, uint64_t>::increase(info_countMap, tag))
+	if (false == SimpleHashMap<uint64_t, uint64_t>::increase(info_countMap, tag))
 	{
 		printf("Error: Failed to increase count for tag %llu\n", tag);
 	}
 }
 
 __global__ void Kernel_MarginLineFinder_Fill_TagCounts(
-	HashMapInfo<uint64_t, uint64_t> info_countMap,
+	SimpleHashMapInfo<uint64_t, uint64_t> info_countMap,
 	float3* d_resultPositions, uint64_t* d_resultTags, uint64_t* d_resultTagCounts, unsigned int* d_numberofResultPositions, float voxelSize)
 {
 	auto tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -487,7 +487,7 @@ __global__ void Kernel_MarginLineFinder_Fill_TagCounts(
 		return;
 
 	uint64_t count = 0;
-	HashMap<uint64_t, uint64_t>::find(info_countMap, tag, &count);
+	SimpleHashMap<uint64_t, uint64_t>::find(info_countMap, tag, &count);
 	d_resultTagCounts[tid] = count;
 }
 

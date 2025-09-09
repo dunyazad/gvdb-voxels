@@ -1,7 +1,7 @@
 #pragma once
 #include <cuda_common.cuh>
 
-#include <HashMap.hpp>
+#include <SimpleHashMap.hpp>
 
 namespace VEFM
 {

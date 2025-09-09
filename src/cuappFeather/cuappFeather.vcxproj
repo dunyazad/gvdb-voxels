@@ -26,7 +26,7 @@
     <CudaCompile Include="Mesh.cu" />
     <CudaCompile Include="MortonCode.cu" />
     <CudaCompile Include="Octree.cu" />
-    <CudaCompile Include="PointCloud.cu" />
+    <CudaCompile Include="SimplePointCloud.cu" />
     <CudaCompile Include="SCVoxelHashMap.cu" />
     <CudaCompile Include="ThrustHalfEdgeMesh.cu" />
     <CudaCompile Include="VEFM.cu" />
@@ -90,12 +90,12 @@
     <ClInclude Include="Mesh.cuh" />
     <ClInclude Include="MortonCode.cuh" />
     <ClInclude Include="Octree.cuh" />
-    <ClInclude Include="PointCloud.cuh" />
+    <ClInclude Include="SimplePointCloud.cuh" />
     <ClInclude Include="SCVoxelHashMap.cuh" />
     <ClInclude Include="ThrustHalfEdgeMesh.cuh" />
     <ClInclude Include="VEFM.cuh" />
     <ClInclude Include="VoxelHashMap.cuh" />
-    <ClInclude Include="VoxelKey.hpp" />
+    <ClInclude Include="SCVoxelKey.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\res\Shaders\Default.fs" />
@@ -115,7 +115,7 @@
     <None Include="..\..\res\Shaders\Texturing.vs" />
     <None Include="..\..\res\Shaders\TwoSide.fs" />
     <None Include="..\..\res\Shaders\TwoSide.vs" />
-    <None Include="HashMap.hpp" />
+    <None Include="SimpleHashMap.hpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{8A222423-956D-411E-9E4F-EE1C1C85880B}</ProjectGuid>

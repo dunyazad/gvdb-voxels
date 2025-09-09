@@ -9,8 +9,8 @@
 
 #include <cuda_common.cuh>
 
-#include <PointCloud.cuh>
-#include <HashMap.hpp>
+#include <SimplePointCloud.cuh>
+#include <SimpleHashMap.hpp>
 #include <BitVolume.cuh>
 #include <DenseGrid.hpp>
 #include <VoxelHashMap.cuh>
