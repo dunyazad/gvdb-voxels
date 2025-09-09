@@ -948,6 +948,10 @@ int main(int argc, char** argv)
 
 		deepLearningClasses.clear();
 
+		vector<float3> inputPoints;
+		float3 new_aabbMin = { FLT_MAX,  FLT_MAX,  FLT_MAX };
+		float3 new_aabbMax = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+
 		for (size_t i = 0; i < ply.GetPoints().size() / 3; i++)
 		{
 			auto deepLearningClass = ply.GetDeepLearningClasses()[i];
@@ -984,45 +988,150 @@ int main(int argc, char** argv)
 			h_pointCloud.colors[i] = make_float3(r, g, b);
 			h_pointCloud.properties[i] = {deepLearningClass};
 
-			auto code = MortonCode::FromPosition(make_float3(x, y, z), aabbMin, aabbMax);
-			auto lowerCorner = MortonCode::ToPosition(code, aabbMin, aabbMax);
-			VD::AddBox("MortonCode", glm::vec3(XYZ(lowerCorner)), glm::vec3(0.01f, 0.01f, 0.01f), Color::blue());
+			//auto code = MortonCode::FromPosition(make_float3(x, y, z), aabbMin, aabbMax);
+			//auto lowerCorner = MortonCode::ToPosition(code, aabbMin, aabbMax);
+			//VD::AddBox("MortonCode", glm::vec3(XYZ(lowerCorner)), glm::vec3(0.01f, 0.01f, 0.01f), Color::blue());
+
+			inputPoints.push_back(make_float3(x, y, z));
+
+			new_aabbMin.x = min(new_aabbMin.x, position.x);
+			new_aabbMin.y = min(new_aabbMin.y, position.y);
+			new_aabbMin.z = min(new_aabbMin.z, position.z);
+
+			new_aabbMax.x = max(new_aabbMax.x, position.x);
+			new_aabbMax.y = max(new_aabbMax.y, position.y);
+			new_aabbMax.z = max(new_aabbMax.z, position.z);
+		}
+
+		TS(Octree);
+		HPOctree octree;
+		octree.Initialize(inputPoints.data(), inputPoints.size(), {new_aabbMin, new_aabbMax});
+		TE(Octree);
+
+		auto domain_length = octree.domain_length;
+		auto domain_aabb = octree.domainAABB;
+
+		auto result = octree.Dump();
+		unsigned int maxDepth = 0;
+		for (auto& key : result)
+		{
+			auto& p = key.ToPosition(domain_aabb, domain_length);
+			auto aabb = key.GetAABB(domain_aabb, domain_length);
+
+			//// --- 여기부터 디버깅 코드 추가 ---
+			//float width = aabb.max.x - aabb.min.x;
+			//float height = aabb.max.y - aabb.min.y;
+			//float depth = aabb.max.z - aabb.min.z;
+
+			//// 계산된 너비/높이/깊이 값을 콘솔에 출력합니다.
+			//// printf 포맷은 사용하시는 환경에 맞게 조절하세요.
+			//printf("Key(d=%u): width=%.4f, height=%.4f, depth=%.4f\n", key.d, width, height, depth);
+			//// --- 여기까지 ---
+
+			if (key.d > maxDepth) maxDepth = key.d;
+
+			string name = "HPOctreeKey_" + to_string(key.d);
+			VD::AddWiredBox(name, { glm::vec3(XYZ(aabb.min)), glm::vec3(XYZ(aabb.max)) }, Color::blue());
+		}
+
+		// ================================================================
+		// 2. 옥트리를 만드는 데 사용된 inputPoints를 직접 그려보는 테스트 코드
+		// ================================================================
+		for (const auto& point : inputPoints)
+		{
+			// inputPoints 벡터의 내용을 직접 빨간색 점으로 그리기
+			// (VD::AddPoint 같은 함수가 있다면 사용하시고, 없다면 작은 박스로 대체)
+			VD::AddBox("DebugPoint", glm::vec3(point.x, point.y, point.z), glm::vec3(0.05f, 0.05f, 0.05f), Color::red());
+		}
+		// ================================================================
+
+
+		for (size_t i = 0; i < maxDepth; i++)
+		{
+			string name = "HPOctreeKey_" + to_string(i);
+			VD::AddToSelectionList(name);
 		}
 
 		cuInstance.ProcessPointCloud(h_pointCloud, 0.05f, 3);
+		{
+			auto entity = Feather.CreateEntity("PointCloud");
 
-		auto meshEntity = Feather.CreateEntity("MarchingCubesMesh");
-		//ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
-		auto meshRenderable = Feather.CreateComponent<Renderable>(meshEntity);
-		meshRenderable->Initialize(Renderable::GeometryMode::Triangles);
-		meshRenderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Default.vs"), File("../../res/Shaders/Default.fs")));
-		meshRenderable->AddShader(Feather.CreateShader("TwoSide", File("../../res/Shaders/TwoSide.vs"), File("../../res/Shaders/TwoSide.fs")));
-		meshRenderable->AddShader(Feather.CreateShader("Flat", File("../../res/Shaders/Flat.vs"), File("../../res/Shaders/Flat.gs"), File("../../res/Shaders/Flat.fs")));
-		meshRenderable->SetActiveShaderIndex(0);
+			auto renderable = Feather.CreateComponent<Renderable>(entity);
+			renderable->Initialize(Renderable::GeometryMode::Triangles);
+			renderable->AddShader(Feather.CreateShader("Instancing", File("../../res/Shaders/Instancing.vs"), File("../../res/Shaders/Instancing.fs")));
+			renderable->AddShader(Feather.CreateShader("InstancingWithoutNormal", File("../../res/Shaders/InstancingWithoutNormal.vs"), File("../../res/Shaders/InstancingWithoutNormal.fs")));
+			renderable->SetActiveShaderIndex(1);
 
-		cuInstance.interop.Initialize(meshRenderable);
-		cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
+			auto [indices, vertices, normals, colors, uvs] = GeometryBuilder::BuildSphere({ 0.0f, 0.0f, 0.0f }, 0.05f, 6, 6);
+			//auto [indices, vertices, normals, colors, uvs] = GeometryBuilder::BuildBox("zero", "half");
+			renderable->AddIndices(indices);
+			renderable->AddVertices(vertices);
+			renderable->AddNormals(normals);
+			renderable->AddColors(colors);
+			renderable->AddUVs(uvs);
 
-		Feather.CreateEventCallback<KeyEvent>(meshEntity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
-			auto renderable = Feather.GetComponent<Renderable>(entity);
-			if (nullptr == renderable) return;
-
-			if (0 == event.action)
+			for (size_t i = 0; i < h_pointCloud.numberOfPoints; i++)
 			{
-				if (GLFW_KEY_GRAVE_ACCENT == event.keyCode)
+				auto& p = h_pointCloud.positions[i];
+				if (FLT_MAX == p.x || FLT_MAX == p.y || FLT_MAX == p.z) continue;
+				auto& n = h_pointCloud.normals[i];
+				auto& c = h_pointCloud.colors[i];
+
+				glm::vec3 position(XYZ(p));
+				glm::vec3 normal(XYZ(n));
+				glm::vec4 color(XYZ(c), 1.0f);
+
+				renderable->AddInstanceColor(color);
+				renderable->AddInstanceNormal(normal);
+
+				glm::mat4 tm = glm::identity<glm::mat4>();
+				glm::mat4 rot = glm::mat4(1.0f);
+				if (glm::length(normal) > 0.0001f)
 				{
-					renderable->NextDrawingMode();
+					glm::vec3 axis = glm::normalize(glm::cross(glm::vec3(0, 0, 1), normal));
+					float angle = acos(glm::dot(glm::normalize(normal), glm::vec3(0, 0, 1)));
+					if (glm::length(axis) > 0.0001f)
+						rot = glm::rotate(glm::mat4(1.0f), angle, axis);
 				}
-				else if (GLFW_KEY_1 == event.keyCode)
-				{
-					renderable->SetActiveShaderIndex(0);
-				}
-				else if (GLFW_KEY_2 == event.keyCode)
-				{
-					renderable->SetActiveShaderIndex(1);
-				}
+				tm = glm::translate(tm, position) * rot * glm::scale(glm::mat4(1.0f), glm::vec3(0.125f));
+				renderable->AddInstanceTransform(tm);
+				renderable->IncreaseNumberOfInstances();
 			}
-			});
+		}
+		{
+			//auto meshEntity = Feather.CreateEntity("MarchingCubesMesh");
+			////ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
+			//auto meshRenderable = Feather.CreateComponent<Renderable>(meshEntity);
+			//meshRenderable->Initialize(Renderable::GeometryMode::Triangles);
+			//meshRenderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Default.vs"), File("../../res/Shaders/Default.fs")));
+			//meshRenderable->AddShader(Feather.CreateShader("TwoSide", File("../../res/Shaders/TwoSide.vs"), File("../../res/Shaders/TwoSide.fs")));
+			//meshRenderable->AddShader(Feather.CreateShader("Flat", File("../../res/Shaders/Flat.vs"), File("../../res/Shaders/Flat.gs"), File("../../res/Shaders/Flat.fs")));
+			//meshRenderable->SetActiveShaderIndex(0);
+
+			//cuInstance.interop.Initialize(meshRenderable);
+			//cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
+
+			//Feather.CreateEventCallback<KeyEvent>(meshEntity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
+			//	auto renderable = Feather.GetComponent<Renderable>(entity);
+			//	if (nullptr == renderable) return;
+
+			//	if (0 == event.action)
+			//	{
+			//		if (GLFW_KEY_GRAVE_ACCENT == event.keyCode)
+			//		{
+			//			renderable->NextDrawingMode();
+			//		}
+			//		else if (GLFW_KEY_1 == event.keyCode)
+			//		{
+			//			renderable->SetActiveShaderIndex(0);
+			//		}
+			//		else if (GLFW_KEY_2 == event.keyCode)
+			//		{
+			//			renderable->SetActiveShaderIndex(1);
+			//		}
+			//	}
+			//	});
+		}
 
 		h_pointCloud.Terminate();
 		});

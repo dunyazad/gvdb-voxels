@@ -22,6 +22,7 @@
 #include <Octree.cuh>
 #include <LBVH.cuh>
 #include <MarginLineFinder.cuh>
+#include <HPOctree.cuh>
 
 #include <Eigen/Core>
 #include <Eigen/Dense>

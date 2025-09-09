@@ -82,9 +82,23 @@ struct SimpleHashMap
         }
     }
 
+    //__host__ __device__ static inline size_t SimpleHashMap_hash(Key key, size_t capacity)
+    //{
+    //    return static_cast<size_t>(key) % capacity;
+    //}
+
     __host__ __device__ static inline size_t SimpleHashMap_hash(Key key, size_t capacity)
     {
-        return static_cast<size_t>(key) % capacity;
+        size_t k = static_cast<size_t>(key);
+
+        // 간단한 고품질 정수 해시 함수 (MurmurHash3 Finalizer 변형)
+        k ^= k >> 33;
+        k *= 0xff51afd7ed558ccdULL;
+        k ^= k >> 33;
+        k *= 0xc4ceb9fe1a85ec53ULL;
+        k ^= k >> 33;
+
+        return k % capacity;
     }
 
     __device__ static bool insert(const SimpleHashMapInfo<Key, Value>& info, Key key, const Value& value)
