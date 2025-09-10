@@ -131,14 +131,14 @@ struct HPOctreeKey
 		return cell_aabb;
 	}
 
-	__host__ __device__ inline cuAABB GetAABB(const cuAABB& octree_aabb)
+	__host__ __device__ inline cuAABB GetAABB(const cuAABB& octree_aabb) const
 	{
 		const float domain_length = HPOctreeKey::GetDomainLength(octree_aabb);
 
 		return GetAABB(*this, octree_aabb, domain_length);
 	}
 
-	__host__ __device__ inline cuAABB GetAABB(const cuAABB& octree_aabb, float domain_length)
+	__host__ __device__ inline cuAABB GetAABB(const cuAABB& octree_aabb, float domain_length) const
 	{
 		return GetAABB(*this, octree_aabb, domain_length);
 	}
@@ -177,9 +177,9 @@ struct HPOctreeKey
 		FromPosition(position, aabb, domain_length);
 	}
 
-	__host__ __device__ void FromPosition(const float3& position, const cuAABB& aabb, float domain_length, unsigned int target_depth = 0)
+	__host__ __device__ void FromPosition(const float3& position, const cuAABB& aabb, float domain_length, unsigned int target_depth = UINT32_MAX)
 	{
-		if(0 == target_depth) target_depth = (1u << DEPTH_BITS) - 1; // 15
+		if(UINT32_MAX == target_depth) target_depth = (1u << DEPTH_BITS) - 1; // 15
 
 		this->d = target_depth;
 
@@ -303,12 +303,26 @@ struct NNS_Result
 	float distance_sq = FLT_MAX;
 };
 
+struct HPOctreeNode
+{
+	unsigned int parentIndex = UINT32_MAX;
+	unsigned int firstChildIndex = UINT32_MAX;
+	unsigned int childCount = UINT32_MAX;
+
+	HPOctreeKey key;
+
+	__host__ __device__ HPOctreeNode()
+		: parentIndex(UINT32_MAX), firstChildIndex(UINT32_MAX), childCount(0)
+	{
+	}
+};
+
 struct HPOctree
 {
 	SimpleHashMap<uint64_t, unsigned int> keys;
 
 	void Initialize(const vector<float3>& positions, const cuAABB& aabb, unsigned int maxDepth = 0);
-	void Initialize(float3* h_positions, unsigned int numberOfPositions, const cuAABB& aabb, unsigned int maxDepth = 0);
+	void Initialize(const float3* h_positions, unsigned int numberOfPositions, const cuAABB& aabb, unsigned int maxDepth = 0);
 
 	void Terminate();
 
@@ -317,10 +331,13 @@ struct HPOctree
 	cuAABB originalAABB;
 	cuAABB domainAABB;
 	float domain_length =0.0f;
+	unsigned int maxDepth = 0;
 	float3* d_positions = nullptr;
 	unsigned int numberOfPositions = 0;
+	HPOctreeNode* d_nodes = nullptr;
+	unsigned int numberOfNodes = 0;
 
-	void SearchOnDevice(const std::vector<float3>& h_query_points, std::vector<NNS_Result>& h_results);
+	std::vector<NNS_Result> SearchOnDevice(const std::vector<float3>& h_query_points);
 };
 
 namespace std
@@ -353,4 +370,5 @@ __global__ void FindNearestNeighbor_kernel(
 	unsigned int numQueries,
 	unsigned int numPositions,
 	cuAABB domainAABB,
-	float domain_length);
+	float domain_length,
+	unsigned int maxDepth);

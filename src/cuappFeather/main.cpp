@@ -948,10 +948,6 @@ int main(int argc, char** argv)
 
 		deepLearningClasses.clear();
 
-		vector<float3> inputPoints;
-		float3 new_aabbMin = { FLT_MAX,  FLT_MAX,  FLT_MAX };
-		float3 new_aabbMax = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
-
 		for (size_t i = 0; i < ply.GetPoints().size() / 3; i++)
 		{
 			auto deepLearningClass = ply.GetDeepLearningClasses()[i];
@@ -987,55 +983,6 @@ int main(int argc, char** argv)
 			h_pointCloud.normals[i] = make_float3(nx, ny, nz);
 			h_pointCloud.colors[i] = make_float3(r, g, b);
 			h_pointCloud.properties[i] = {deepLearningClass};
-
-			//auto code = MortonCode::FromPosition(make_float3(x, y, z), aabbMin, aabbMax);
-			//auto lowerCorner = MortonCode::ToPosition(code, aabbMin, aabbMax);
-			//VD::AddBox("MortonCode", glm::vec3(XYZ(lowerCorner)), glm::vec3(0.01f, 0.01f, 0.01f), Color::blue());
-
-			inputPoints.push_back(make_float3(x, y, z));
-
-			new_aabbMin.x = min(new_aabbMin.x, position.x);
-			new_aabbMin.y = min(new_aabbMin.y, position.y);
-			new_aabbMin.z = min(new_aabbMin.z, position.z);
-
-			new_aabbMax.x = max(new_aabbMax.x, position.x);
-			new_aabbMax.y = max(new_aabbMax.y, position.y);
-			new_aabbMax.z = max(new_aabbMax.z, position.z);
-		}
-
-		TS(Octree);
-		HPOctree octree;
-		octree.Initialize(inputPoints.data(), inputPoints.size(), {new_aabbMin, new_aabbMax}, 10);
-		TE(Octree);
-
-		auto domain_length = octree.domain_length;
-		auto domain_aabb = octree.domainAABB;
-
-		auto result = octree.Dump();
-		unsigned int maxDepth = 0;
-		for (auto& key : result)
-		{
-			auto& p = key.ToPosition(domain_aabb, domain_length);
-			auto aabb = key.GetAABB(domain_aabb, domain_length);
-
-			if (key.d > maxDepth) maxDepth = key.d;
-
-			string name = "HPOctreeKey_" + to_string(key.d);
-			VD::AddWiredBox(name, { glm::vec3(XYZ(aabb.min)), glm::vec3(XYZ(aabb.max)) }, Color::blue());
-		}
-
-		//printf("zeroNum : %d\n", zeroNum);
-
-		//for (const auto& point : inputPoints)
-		//{
-		//	VD::AddBox("DebugPoint", glm::vec3(point.x, point.y, point.z), glm::vec3(0.05f, 0.05f, 0.05f), Color::red());
-		//}
-
-
-		for (size_t i = 0; i <= maxDepth; i++)
-		{
-			string name = "HPOctreeKey_" + to_string(i);
-			VD::AddToSelectionList(name);
 		}
 
 		cuInstance.ProcessPointCloud(h_pointCloud, 0.05f, 3);
@@ -1085,38 +1032,158 @@ int main(int argc, char** argv)
 			}
 		}
 		{
-			//auto meshEntity = Feather.CreateEntity("MarchingCubesMesh");
-			////ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
-			//auto meshRenderable = Feather.CreateComponent<Renderable>(meshEntity);
-			//meshRenderable->Initialize(Renderable::GeometryMode::Triangles);
-			//meshRenderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Default.vs"), File("../../res/Shaders/Default.fs")));
-			//meshRenderable->AddShader(Feather.CreateShader("TwoSide", File("../../res/Shaders/TwoSide.vs"), File("../../res/Shaders/TwoSide.fs")));
-			//meshRenderable->AddShader(Feather.CreateShader("Flat", File("../../res/Shaders/Flat.vs"), File("../../res/Shaders/Flat.gs"), File("../../res/Shaders/Flat.fs")));
-			//meshRenderable->SetActiveShaderIndex(0);
+			auto meshEntity = Feather.CreateEntity("MarchingCubesMesh");
+			//ApplyHalfEdgeMeshToEntity(meshEntity, cudaInstance.h_mesh);
+			auto meshRenderable = Feather.CreateComponent<Renderable>(meshEntity);
+			meshRenderable->Initialize(Renderable::GeometryMode::Triangles);
+			meshRenderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Default.vs"), File("../../res/Shaders/Default.fs")));
+			meshRenderable->AddShader(Feather.CreateShader("TwoSide", File("../../res/Shaders/TwoSide.vs"), File("../../res/Shaders/TwoSide.fs")));
+			meshRenderable->AddShader(Feather.CreateShader("Flat", File("../../res/Shaders/Flat.vs"), File("../../res/Shaders/Flat.gs"), File("../../res/Shaders/Flat.fs")));
+			meshRenderable->SetActiveShaderIndex(0);
 
-			//cuInstance.interop.Initialize(meshRenderable);
-			//cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
+			cuInstance.interop.Initialize(meshRenderable);
+			cuInstance.interop.UploadFromDevice(cuInstance.d_mesh);
 
-			//Feather.CreateEventCallback<KeyEvent>(meshEntity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
-			//	auto renderable = Feather.GetComponent<Renderable>(entity);
-			//	if (nullptr == renderable) return;
+			Feather.CreateEventCallback<KeyEvent>(meshEntity, [cx, cy, cz, lx, ly, lz](Entity entity, const KeyEvent& event) {
+				auto renderable = Feather.GetComponent<Renderable>(entity);
+				if (nullptr == renderable) return;
 
-			//	if (0 == event.action)
+				if (0 == event.action)
+				{
+					if (GLFW_KEY_GRAVE_ACCENT == event.keyCode)
+					{
+						renderable->NextDrawingMode();
+					}
+					else if (GLFW_KEY_1 == event.keyCode)
+					{
+						renderable->SetActiveShaderIndex(0);
+					}
+					else if (GLFW_KEY_2 == event.keyCode)
+					{
+						renderable->SetActiveShaderIndex(1);
+					}
+				}
+				});
+		}
+
+		//cuInstance.d_mesh.LaplacianSmoothing(10);
+
+		{
+			float3 new_aabbMin = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+			float3 new_aabbMax = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+			vector<float3> inputPoints(cuInstance.h_mesh.numberOfFaces);
+			
+			for (size_t i = 0; i < cuInstance.h_mesh.numberOfFaces; i++)
+			{
+				auto& f = cuInstance.h_mesh.faces[i];
+				auto& v0 = cuInstance.h_mesh.positions[f.x];
+				auto& v1 = cuInstance.h_mesh.positions[f.y];
+				auto& v2 = cuInstance.h_mesh.positions[f.z];
+				inputPoints[i] = (v0 + v1 + v2) / 3.0f;
+
+				new_aabbMin.x = fminf(new_aabbMin.x, inputPoints[i].x);
+				new_aabbMin.y = fminf(new_aabbMin.y, inputPoints[i].y);
+				new_aabbMin.z = fminf(new_aabbMin.z, inputPoints[i].z);
+
+				new_aabbMax.x = fmaxf(new_aabbMax.x, inputPoints[i].x);
+				new_aabbMax.y = fmaxf(new_aabbMax.y, inputPoints[i].y);
+				new_aabbMax.z = fmaxf(new_aabbMax.z, inputPoints[i].z);
+			}
+
+			TS(Octree);
+			HPOctree octree;
+			octree.Initialize(inputPoints.data(), inputPoints.size(), { new_aabbMin, new_aabbMax }, 10);
+			TE(Octree);
+
+			{
+				auto domain_aabb = octree.domainAABB;
+				auto domain_length = octree.domain_length;
+
+				vector<HPOctreeNode> h_nodes(octree.numberOfNodes);
+				CUDA_COPY_D2H(h_nodes.data(), octree.d_nodes, sizeof(HPOctreeNode)* octree.numberOfNodes);
+
+				function<void(unsigned int, unsigned int)> DrawNode;
+				DrawNode = [&](unsigned int nodeIndex, unsigned int depth) {
+					const HPOctreeNode& node = h_nodes[nodeIndex];
+					const uint64_t& code = node.key.ToCode();
+					auto aabb = node.key.GetAABB(domain_aabb, domain_length);
+					string name = "HPOctreeKey_" + to_string(node.key.d);
+					VD::AddWiredBox(name, { glm::vec3(XYZ(aabb.min)), glm::vec3(XYZ(aabb.max)) }, Color::blue());
+
+					if (node.childCount > 0)
+					{
+						for (unsigned int i = 0; i < node.childCount; ++i)
+						{
+							DrawNode(node.firstChildIndex + i, depth + 1);
+						}
+					}
+					};
+
+				DrawNode(0, 0);
+
+				for (size_t i = 0; i <= octree.maxDepth; i++)
+				{
+					string name = "HPOctreeKey_" + to_string(i);
+					VD::AddToSelectionList(name);
+				}
+			}
+
+			{
+				/*
+				auto domain_length = octree.domain_length;
+				auto domain_aabb = octree.domainAABB;
+
+				auto result = octree.Dump();
+				unsigned int maxDepth = 0;
+
+				map<uint64_t, unsigned int> countMap;
+				for (auto& key : result)
+				{
+					auto& p = key.ToPosition(domain_aabb, domain_length);
+					auto aabb = key.GetAABB(domain_aabb, domain_length);
+
+					if (key.d > maxDepth) maxDepth = key.d;
+
+					countMap[key.ToCode()]++;
+
+					string name = "HPOctreeKey_" + to_string(key.d);
+					VD::AddWiredBox(name, { glm::vec3(XYZ(aabb.min)), glm::vec3(XYZ(aabb.max)) }, Color::blue());
+				}
+
+				for (auto& kvp : countMap)
+				{
+					if (kvp.second > 1)
+					{
+						HPOctreeKey key;
+						key.FromCode(kvp.first);
+						printf("%d, %d, %d, %d : %d\n", key.d, key.x, key.y, key.z, kvp.second);
+					}
+				}
+
+				for (size_t i = 0; i <= maxDepth; i++)
+				{
+					string name = "HPOctreeKey_" + to_string(i);
+					VD::AddToSelectionList(name);
+				}
+				*/
+			}
+
+			//vector<float3> h_positions(cuInstance.d_mesh.numberOfPoints);
+			//CUDA_COPY_D2H(h_positions.data(), cuInstance.d_mesh.positions, sizeof(float) * cuInstance.d_mesh.numberOfPoints);
+
+			//vector<float3> input(cuInstance.h_mesh.numberOfPoints);
+			//memcpy(input.data(), cuInstance.h_mesh.positions, sizeof(float3) * cuInstance.h_mesh.numberOfPoints);
+			//auto results = octree.SearchOnDevice(input);
+
+			//for (size_t i = 0; i < cuInstance.h_mesh.numberOfPoints; i++)
+			//{
+			//	if (results[i].index < cuInstance.d_mesh.numberOfPoints)
 			//	{
-			//		if (GLFW_KEY_GRAVE_ACCENT == event.keyCode)
-			//		{
-			//			renderable->NextDrawingMode();
-			//		}
-			//		else if (GLFW_KEY_1 == event.keyCode)
-			//		{
-			//			renderable->SetActiveShaderIndex(0);
-			//		}
-			//		else if (GLFW_KEY_2 == event.keyCode)
-			//		{
-			//			renderable->SetActiveShaderIndex(1);
-			//		}
+			//		auto& p0 = input[i];
+			//		auto& p1 = h_positions[results[i].index];
+			//		VD::AddLine("NN", glm::vec3(XYZ(p0)), glm::vec3(XYZ(p1)), Color::red());
 			//	}
-			//	});
+			//}
 		}
 
 		h_pointCloud.Terminate();
