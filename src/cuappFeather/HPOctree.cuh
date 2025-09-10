@@ -308,6 +308,7 @@ struct HPOctreeNode
 	unsigned int parentIndex = UINT32_MAX;
 	unsigned int firstChildIndex = UINT32_MAX;
 	unsigned int childCount = UINT32_MAX;
+	unsigned int pointIndex = UINT32_MAX;
 
 	HPOctreeKey key;
 
@@ -320,11 +321,14 @@ struct HPOctreeNode
 struct HPOctree
 {
 	SimpleHashMap<uint64_t, unsigned int> keys;
+	SimpleHashMap<uint64_t, unsigned int> leaf_map;
 
 	void Initialize(const vector<float3>& positions, const cuAABB& aabb, unsigned int maxDepth = 0);
 	void Initialize(const float3* h_positions, unsigned int numberOfPositions, const cuAABB& aabb, unsigned int maxDepth = 0);
 
 	void Terminate();
+
+	std::vector<NNS_Result> Search(const std::vector<float3>& h_queries);
 
 	vector<HPOctreeKey> Dump();
 

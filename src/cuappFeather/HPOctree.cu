@@ -1,5 +1,24 @@
 #include <HPOctree.cuh>
 
+__global__ void Kernel_CreateLeafMap(
+	SimpleHashMapInfo<uint64_t, unsigned int> leaf_map_info,
+	const float3* d_positions,
+	unsigned int numberOfPositions,
+	unsigned int maxDepth,
+	cuAABB aabb,
+	float domain_length)
+{
+	auto tid = blockDim.x * blockIdx.x + threadIdx.x;
+	if (tid >= numberOfPositions) return;
+
+	const float3& p = d_positions[tid];
+	HPOctreeKey leaf_key;
+	leaf_key.FromPosition(p, aabb, domain_length, maxDepth);
+	uint64_t leaf_code = leaf_key.ToCode();
+
+	SimpleHashMap<uint64_t, unsigned int>::insert(leaf_map_info, leaf_code, tid);
+}
+
 __global__ void Kernel_HPOctree_Occupy(
 	SimpleHashMapInfo<uint64_t, unsigned int> info,
 	float3* d_positions,
@@ -70,6 +89,7 @@ __device__ inline unsigned int lower_bound_device(const uint64_t* arr, unsigned 
 }
 
 __global__ void Kernel_BuildOctreeNodes(
+	SimpleHashMapInfo<uint64_t, unsigned int> leaf_map_info,
 	HPOctreeNode* nodes,
 	const uint64_t* d_sorted_keys,
 	unsigned int numNodes,
@@ -92,6 +112,13 @@ __global__ void Kernel_BuildOctreeNodes(
 		{
 			parent_idx = UINT32_MAX;
 		}
+	}
+
+	unsigned int point_idx = UINT32_MAX; // 기본값은 '없음'
+	if (my_key.d == maxDepth) // 현재 노드가 리프 노드라면
+	{
+		// leaf_map에서 현재 리프 키로 pointIndex를 찾는다.
+		SimpleHashMap<uint64_t, unsigned int>::find(leaf_map_info, my_key_code, &point_idx);
 	}
 
 	uint32_t first_child_idx = UINT32_MAX;
@@ -129,6 +156,80 @@ __global__ void Kernel_BuildOctreeNodes(
 	nodes[tid].firstChildIndex = first_child_idx;
 	nodes[tid].childCount = child_count;
 	nodes[tid].key = my_key;
+	nodes[tid].pointIndex = point_idx;
+}
+
+__global__ void Kernel_NNSearch(
+	NNS_Result* d_results,
+	const float3* d_query_points,
+	unsigned int numQueries,
+	const HPOctreeNode* d_nodes,
+	unsigned int numNodes,
+	const float3* d_positions, // 원본 데이터 포인트 배열
+	cuAABB domain_aabb,
+	float domain_length,
+	unsigned int maxDepth)
+{
+	auto tid = blockDim.x * blockIdx.x + threadIdx.x;
+	if (tid >= numQueries) return;
+
+	const float3 query_pos = d_query_points[tid];
+
+	// 1. 각 스레드(쿼리 포인트)를 위한 변수 초기화
+	float best_dist_sq = FLT_MAX;
+	unsigned int best_index = UINT32_MAX;
+
+	// GPU 커널 내에서 사용할 작은 로컬 메모리 스택
+	unsigned int stack[32]; // 옥트리 최대 깊이보다 충분히 큰 크기
+	int stack_ptr = 0;
+
+	// 2. 탐색 시작: 스택에 루트 노드(인덱스 0)를 넣는다.
+	stack[stack_ptr++] = 0;
+
+	// 3. 스택이 빌 때까지 깊이 우선 탐색(DFS) 수행
+	while (stack_ptr > 0)
+	{
+		unsigned int nodeIndex = stack[--stack_ptr]; // 스택에서 노드를 꺼냄(Pop)
+		const HPOctreeNode& node = d_nodes[nodeIndex];
+
+		// **가지치기(Pruning) 검사**
+		cuAABB aabb = node.key.GetAABB(domain_aabb, domain_length);
+		if (detail::PointToAABBDistanceSq(query_pos, aabb) >= best_dist_sq)
+		{
+			continue; // 이 노드와 모든 자식은 탐색할 필요 없음
+		}
+
+		// 4. 노드 타입에 따라 처리
+		if (node.childCount > 0) // 내부 노드(Internal Node)인 경우
+		{
+			// 자식들을 스택에 넣는다 (Push)
+			// (최적화: 쿼리 지점과 가까운 자식부터 스택에 넣으면 더 좋음)
+			for (unsigned int i = 0; i < node.childCount; ++i)
+			{
+				if (stack_ptr < 32) // 스택 오버플로우 방지
+				{
+					stack[stack_ptr++] = node.firstChildIndex + i;
+				}
+			}
+		}
+		else // 리프 노드(Leaf Node)인 경우
+		{
+			// 노드에 저장된 pointIndex를 이용해 실제 데이터 포인트와 거리 비교
+			unsigned int point_idx = node.pointIndex;
+			float dist_sq = detail::DistanceSq(query_pos, d_positions[point_idx]);
+
+			// 더 가까운 점을 찾으면 업데이트
+			if (dist_sq < best_dist_sq)
+			{
+				best_dist_sq = dist_sq;
+				best_index = point_idx;
+			}
+		}
+	}
+
+	// 5. 최종 결과를 전역 메모리에 기록
+	d_results[tid].index = best_index;
+	d_results[tid].distance_sq = best_dist_sq;
 }
 
 void HPOctree::Initialize(const vector<float3>& positions, const cuAABB& aabb, unsigned int maxDepth)
@@ -156,6 +257,7 @@ void HPOctree::Initialize(const float3* h_positions, unsigned int numberOfPositi
 	const size_t capacity_with_margin = required_capacity * 2;
 	
 	keys.Initialize(capacity_with_margin, 64);
+	leaf_map.Initialize(capacity_with_margin, 64);
 
 	CUDA_TS(OctreeInitialiize);
 
@@ -182,7 +284,7 @@ void HPOctree::Initialize(const float3* h_positions, unsigned int numberOfPositi
 	CUDA_MEMSET(d_nodes, 0xFF, sizeof(HPOctreeNode) * numberOfNodes);
 
 	LaunchKernel(Kernel_BuildOctreeNodes, numberOfNodes,
-		d_nodes, thrust::raw_pointer_cast(d_sorted_keys), numberOfNodes, maxDepth);
+		leaf_map.info, d_nodes, thrust::raw_pointer_cast(d_sorted_keys), numberOfNodes, maxDepth);
 
 	CUDA_SAFE_FREE(d_compacted_keys);
 	CUDA_SAFE_FREE(d_compaction_counter);
@@ -193,12 +295,52 @@ void HPOctree::Initialize(const float3* h_positions, unsigned int numberOfPositi
 void HPOctree::Terminate()
 {
 	keys.Terminate();
+	leaf_map.Terminate();
 
 	CUDA_SAFE_FREE(d_positions);
 	numberOfPositions = 0;
 
 	CUDA_SAFE_FREE(d_nodes);
 	numberOfNodes = 0;
+}
+
+std::vector<NNS_Result> HPOctree::Search(const std::vector<float3>& h_queries)
+{
+	unsigned int numQueries = h_queries.size();
+	std::vector<NNS_Result> h_results(numQueries);
+	if (numQueries == 0) return h_results;
+
+	float3* d_query_points;
+	NNS_Result* d_results;
+
+	CUDA_MALLOC(&d_query_points, sizeof(float3) * numQueries);
+	CUDA_MALLOC(&d_results, sizeof(NNS_Result) * numQueries);
+
+	CUDA_COPY_H2D(d_query_points, h_queries.data(), sizeof(float3) * numQueries);
+
+	// NN 탐색 커널 실행!
+	LaunchKernel(Kernel_NNSearch, numQueries,
+		d_results,
+		d_query_points,
+		numQueries,
+		d_nodes,
+		numberOfNodes,
+		d_positions, // 원본 데이터 포인트의 GPU 포인터
+		domainAABB,
+		domain_length,
+		maxDepth
+	);
+	CUDA_SYNC();
+
+	CUDA_COPY_D2H(h_results.data(), d_results, sizeof(NNS_Result) * numQueries);
+
+	// h_results에 담긴 결과 확인...
+	// ...
+
+	cudaFree(d_query_points);
+	cudaFree(d_results);
+
+	return h_results;
 }
 
 vector<HPOctreeKey> HPOctree::Dump()

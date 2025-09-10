@@ -1129,6 +1129,25 @@ int main(int argc, char** argv)
 			}
 
 			{
+				vector<float3> queryPoints(cuInstance.h_mesh.numberOfPoints);
+				memcpy(queryPoints.data(), cuInstance.h_mesh.positions, sizeof(float3) * cuInstance.h_mesh.numberOfPoints);
+
+				vector<float3> h_positions(octree.numberOfPositions);
+				CUDA_COPY_D2H(h_positions.data(), octree.d_positions, sizeof(float3)* octree.numberOfPositions);
+
+				TS(Query);
+				auto results = octree.Search(queryPoints);
+				TE(Query);
+
+				for (size_t i = 0; i < results.size(); i++)
+				{
+					auto& q = queryPoints[i];
+					auto& r = h_positions[results[i].index];
+					VD::AddLine("NN", { XYZ(q) }, { XYZ(r) }, Color::red());
+				}
+			}
+
+			{
 				/*
 				auto domain_length = octree.domain_length;
 				auto domain_aabb = octree.domainAABB;
