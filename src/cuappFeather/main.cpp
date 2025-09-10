@@ -1005,7 +1005,7 @@ int main(int argc, char** argv)
 
 		TS(Octree);
 		HPOctree octree;
-		octree.Initialize(inputPoints.data(), inputPoints.size(), {new_aabbMin, new_aabbMax});
+		octree.Initialize(inputPoints.data(), inputPoints.size(), {new_aabbMin, new_aabbMax}, 10);
 		TE(Octree);
 
 		auto domain_length = octree.domain_length;
@@ -1018,35 +1018,21 @@ int main(int argc, char** argv)
 			auto& p = key.ToPosition(domain_aabb, domain_length);
 			auto aabb = key.GetAABB(domain_aabb, domain_length);
 
-			//// --- 여기부터 디버깅 코드 추가 ---
-			//float width = aabb.max.x - aabb.min.x;
-			//float height = aabb.max.y - aabb.min.y;
-			//float depth = aabb.max.z - aabb.min.z;
-
-			//// 계산된 너비/높이/깊이 값을 콘솔에 출력합니다.
-			//// printf 포맷은 사용하시는 환경에 맞게 조절하세요.
-			//printf("Key(d=%u): width=%.4f, height=%.4f, depth=%.4f\n", key.d, width, height, depth);
-			//// --- 여기까지 ---
-
 			if (key.d > maxDepth) maxDepth = key.d;
 
 			string name = "HPOctreeKey_" + to_string(key.d);
 			VD::AddWiredBox(name, { glm::vec3(XYZ(aabb.min)), glm::vec3(XYZ(aabb.max)) }, Color::blue());
 		}
 
-		// ================================================================
-		// 2. 옥트리를 만드는 데 사용된 inputPoints를 직접 그려보는 테스트 코드
-		// ================================================================
-		for (const auto& point : inputPoints)
-		{
-			// inputPoints 벡터의 내용을 직접 빨간색 점으로 그리기
-			// (VD::AddPoint 같은 함수가 있다면 사용하시고, 없다면 작은 박스로 대체)
-			VD::AddBox("DebugPoint", glm::vec3(point.x, point.y, point.z), glm::vec3(0.05f, 0.05f, 0.05f), Color::red());
-		}
-		// ================================================================
+		//printf("zeroNum : %d\n", zeroNum);
+
+		//for (const auto& point : inputPoints)
+		//{
+		//	VD::AddBox("DebugPoint", glm::vec3(point.x, point.y, point.z), glm::vec3(0.05f, 0.05f, 0.05f), Color::red());
+		//}
 
 
-		for (size_t i = 0; i < maxDepth; i++)
+		for (size_t i = 0; i <= maxDepth; i++)
 		{
 			string name = "HPOctreeKey_" + to_string(i);
 			VD::AddToSelectionList(name);

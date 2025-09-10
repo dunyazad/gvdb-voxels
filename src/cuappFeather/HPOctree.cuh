@@ -165,7 +165,7 @@ struct HPOctreeKey
 		return make_float3(px, py, pz);
 	}
 
-	__host__ __device__ void FromPosition(const float3& position, const cuAABB& aabb)
+	__host__ __device__ void FromPosition(const float3& position, const cuAABB& aabb, unsigned int target_depth = 0)
 	{
 		const float domain_length = GetDomainLength(aabb);
 		if (domain_length <= 0.0f)
@@ -177,9 +177,10 @@ struct HPOctreeKey
 		FromPosition(position, aabb, domain_length);
 	}
 
-	__host__ __device__ void FromPosition(const float3& position, const cuAABB& aabb, float domain_length)
+	__host__ __device__ void FromPosition(const float3& position, const cuAABB& aabb, float domain_length, unsigned int target_depth = 0)
 	{
-		const unsigned int target_depth = (1u << DEPTH_BITS) - 1; // 15
+		if(0 == target_depth) target_depth = (1u << DEPTH_BITS) - 1; // 15
+
 		this->d = target_depth;
 
 		const float norm_x = (position.x - aabb.min.x) / domain_length;
@@ -306,8 +307,8 @@ struct HPOctree
 {
 	SimpleHashMap<uint64_t, unsigned int> keys;
 
-	void Initialize(const vector<float3>& positions, const cuAABB& aabb);
-	void Initialize(float3* h_positions, unsigned int numberOfPositions, const cuAABB& aabb);
+	void Initialize(const vector<float3>& positions, const cuAABB& aabb, unsigned int maxDepth = 0);
+	void Initialize(float3* h_positions, unsigned int numberOfPositions, const cuAABB& aabb, unsigned int maxDepth = 0);
 
 	void Terminate();
 

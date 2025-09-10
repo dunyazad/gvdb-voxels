@@ -4,6 +4,7 @@ __global__ void Kernel_HPOctree_Occupy(
 	SimpleHashMapInfo<uint64_t, unsigned int> info,
 	float3* d_positions,
 	unsigned int numberOfPositions,
+	unsigned int maxDepth,
 	cuAABB aabb,
 	float domain_length)
 {
@@ -13,7 +14,7 @@ __global__ void Kernel_HPOctree_Occupy(
 	const float3& p = d_positions[tid];
 
 	HPOctreeKey leaf_key;
-	leaf_key.FromPosition(p, aabb, domain_length);
+	leaf_key.FromPosition(p, aabb, domain_length, maxDepth);
 
 	for (int d = leaf_key.d; d >= 0; --d)
 	{
@@ -30,7 +31,7 @@ __global__ void Kernel_HPOctree_Occupy(
 	}
 }
 
-void HPOctree::Initialize(const vector<float3>& positions, const cuAABB& aabb)
+void HPOctree::Initialize(const vector<float3>& positions, const cuAABB& aabb, unsigned int maxDepth)
 {
 	originalAABB = aabb;
 	domainAABB = HPOctreeKey::GetDomainAABB(aabb);
@@ -59,12 +60,12 @@ void HPOctree::Initialize(const vector<float3>& positions, const cuAABB& aabb)
 	CUDA_TS(OctreeInitialiize);
 
 	LaunchKernel(Kernel_HPOctree_Occupy, numberOfPositions,
-		keys.info, d_positions, numberOfPositions, domainAABB, domain_length);
+		keys.info, d_positions, numberOfPositions, maxDepth, domainAABB, domain_length);
 
 	CUDA_TE(OctreeInitialiize);
 }
 
-void HPOctree::Initialize(float3* h_positions, unsigned int numberOfPositions, const cuAABB& aabb)
+void HPOctree::Initialize(float3* h_positions, unsigned int numberOfPositions, const cuAABB& aabb, unsigned int maxDepth)
 {
 	originalAABB = aabb;
 	domainAABB = HPOctreeKey::GetDomainAABB(aabb);
@@ -93,7 +94,7 @@ void HPOctree::Initialize(float3* h_positions, unsigned int numberOfPositions, c
 	CUDA_TS(OctreeInitialiize);
 
 	LaunchKernel(Kernel_HPOctree_Occupy, numberOfPositions,
-		keys.info, d_positions, numberOfPositions, domainAABB, domain_length);
+		keys.info, d_positions, numberOfPositions, maxDepth, domainAABB, domain_length);
 
 	CUDA_TE(OctreeInitialiize);
 }
