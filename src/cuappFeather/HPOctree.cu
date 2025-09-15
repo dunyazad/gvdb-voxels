@@ -180,12 +180,13 @@ __global__ void Kernel_NNSearch(
 	unsigned int best_index = UINT32_MAX;
 
 	// GPU 커널 내에서 사용할 작은 로컬 메모리 스택
-	unsigned int stack[32]; // 옥트리 최대 깊이보다 충분히 큰 크기
+	unsigned int stack[64]; // 옥트리 최대 깊이보다 충분히 큰 크기
 	int stack_ptr = 0;
 
 	// 2. 탐색 시작: 스택에 루트 노드(인덱스 0)를 넣는다.
 	stack[stack_ptr++] = 0;
 
+	int count = 0;
 	// 3. 스택이 빌 때까지 깊이 우선 탐색(DFS) 수행
 	while (stack_ptr > 0)
 	{
@@ -206,7 +207,7 @@ __global__ void Kernel_NNSearch(
 			// (최적화: 쿼리 지점과 가까운 자식부터 스택에 넣으면 더 좋음)
 			for (unsigned int i = 0; i < node.childCount; ++i)
 			{
-				if (stack_ptr < 32) // 스택 오버플로우 방지
+				if (stack_ptr < 64) // 스택 오버플로우 방지
 				{
 					stack[stack_ptr++] = node.firstChildIndex + i;
 				}
@@ -216,13 +217,16 @@ __global__ void Kernel_NNSearch(
 		{
 			// 노드에 저장된 pointIndex를 이용해 실제 데이터 포인트와 거리 비교
 			unsigned int point_idx = node.pointIndex;
-			float dist_sq = detail::DistanceSq(query_pos, d_positions[point_idx]);
-
-			// 더 가까운 점을 찾으면 업데이트
-			if (dist_sq < best_dist_sq)
+			if (UINT32_MAX != point_idx)
 			{
-				best_dist_sq = dist_sq;
-				best_index = point_idx;
+				float dist_sq = detail::DistanceSq(query_pos, d_positions[point_idx]);
+
+				// 더 가까운 점을 찾으면 업데이트
+				if (dist_sq < best_dist_sq)
+				{
+					best_dist_sq = dist_sq;
+					best_index = point_idx;
+				}
 			}
 		}
 	}
@@ -260,6 +264,9 @@ void HPOctree::Initialize(const float3* h_positions, unsigned int numberOfPositi
 	leaf_map.Initialize(capacity_with_margin, 64);
 
 	CUDA_TS(OctreeInitialiize);
+
+	LaunchKernel(Kernel_CreateLeafMap, numberOfPositions,
+		leaf_map.info, d_positions, numberOfPositions, this->maxDepth, domainAABB, domain_length);
 
 	LaunchKernel(Kernel_HPOctree_Occupy, numberOfPositions,
 		keys.info, d_positions, numberOfPositions, this->maxDepth, domainAABB, domain_length);
