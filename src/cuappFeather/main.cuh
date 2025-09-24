@@ -23,6 +23,7 @@
 #include <LBVH.cuh>
 #include <MarginLineFinder.cuh>
 #include <HPOctree.cuh>
+#include <SOMarchingCubes.cuh>
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
@@ -46,6 +47,13 @@ public:
 
     HalfEdgeMeshInterop interop;
 
-    HostPointCloud<PointCloudProperty> ProcessPointCloud(const HostPointCloud<PointCloudProperty>& input, float voxelSize = 0.2f, unsigned int occupyOffset = 3);
+    //HostPointCloud<PointCloudProperty> ProcessPointCloud(const HostPointCloud<PointCloudProperty>& input, float voxelSize = 0.2f, unsigned int occupyOffset = 3);
+    void ProcessPointCloud(float voxelSize = 0.2f, unsigned int occupyOffset = 3);
     void ProcessHalfEdgeMesh(const string& filename);
+
+    vector<float3> FindIntersectionPoints(
+        HostPointCloud<PointCloudProperty>& h_pointCloud,
+        float3 planePosition,
+        float3 planeNormal,
+        float distanceThreshold);
 };

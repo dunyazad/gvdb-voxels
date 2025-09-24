@@ -9,6 +9,7 @@ class Renderable;
 struct PointCloudProperty
 {
     int deepLearningClass = INT32_MAX;
+    int label = INT32_MAX;
 };
 
 class HalfEdgeMeshInterop

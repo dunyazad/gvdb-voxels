@@ -27,8 +27,10 @@
     <CudaCompile Include="Mesh.cu" />
     <CudaCompile Include="MortonCode.cu" />
     <CudaCompile Include="Octree.cu" />
+    <CudaCompile Include="SimpleBVH.cu" />
     <CudaCompile Include="SimplePointCloud.cu" />
     <CudaCompile Include="SCVoxelHashMap.cu" />
+    <CudaCompile Include="SOMarchingCubes.cu" />
     <CudaCompile Include="ThrustHalfEdgeMesh.cu" />
     <CudaCompile Include="VEFM.cu" />
     <CudaCompile Include="VoxelHashMap.cu" />
@@ -92,8 +94,10 @@
     <ClInclude Include="Mesh.cuh" />
     <ClInclude Include="MortonCode.cuh" />
     <ClInclude Include="Octree.cuh" />
+    <ClInclude Include="SimpleBVH.cuh" />
     <ClInclude Include="SimplePointCloud.cuh" />
     <ClInclude Include="SCVoxelHashMap.cuh" />
+    <ClInclude Include="SOMarchingCubes.cuh" />
     <ClInclude Include="ThrustHalfEdgeMesh.cuh" />
     <ClInclude Include="VEFM.cuh" />
     <ClInclude Include="VoxelHashMap.cuh" />

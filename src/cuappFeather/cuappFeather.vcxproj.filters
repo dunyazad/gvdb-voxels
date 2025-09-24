@@ -18,6 +18,8 @@
     </CudaCompile>
     <CudaCompile Include="MarginLineFinder.cu" />
     <CudaCompile Include="HPOctree.cu" />
+    <CudaCompile Include="SOMarchingCubes.cu" />
+    <CudaCompile Include="SimpleBVH.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\External\glad\src\glad.c" />
@@ -178,6 +180,8 @@
     </ClInclude>
     <ClInclude Include="MarginLineFinder.cuh" />
     <ClInclude Include="HPOctree.cuh" />
+    <ClInclude Include="SOMarchingCubes.cuh" />
+    <ClInclude Include="SimpleBVH.cuh" />
   </ItemGroup>
   <ItemGroup>
     <None Include="SimpleHashMap.hpp" />

@@ -29,10 +29,10 @@
 #include <thrust/gather.h>
 #include <thrust/scatter.h>
 #include <thrust/inner_product.h>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/zip_iterator.h>
 #include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/zip_iterator.h>
 #include <thrust/pair.h>
 #include <thrust/tuple.h>
 #include <thrust/execution_policy.h>
@@ -194,6 +194,28 @@ struct cuAABB
 {
     float3 min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
     float3 max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+    __host__ __device__ __forceinline__
+    cuAABB GetDomainAABB()
+    {
+        auto delta = max - min;
+        float hl = std::max({ delta.x, delta.y, delta.z });
+        auto center = (min + max) * 0.5f;
+        float half_length = hl * 0.5f;
+        return {
+            {center.x - half_length, center.y - half_length, center.z - half_length},
+            {center.x + half_length, center.y + half_length, center.z + half_length}
+        };
+    }
+
+    __host__ __device__ __forceinline__
+    bool Contains(const float3& p) const
+    {
+        return
+            p.x >= min.x && p.x <= max.x &&
+            p.y >= min.y && p.y <= max.y &&
+            p.z >= min.z && p.z <= max.z;
+    }
 
     __host__ __device__ __forceinline__
         void expand(const float3& p)

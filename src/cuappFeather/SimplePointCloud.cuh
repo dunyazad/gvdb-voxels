@@ -2,6 +2,12 @@
 
 #include <cuda_common.cuh>
 
+#include <Serialization.hpp>
+
+#include <cuBQL/bvh.h>
+#include <cuBQL/queries/pointData/findClosest.h>
+#include <cuBQL/queries/pointData/knn.h>
+
 template<typename T = void> struct HostPointCloud;
 template<typename T = void> struct DevicePointCloud;
 
@@ -89,6 +95,60 @@ struct HostPointCloud
         }
     }
 
+    void DeserializePLY(const string& filename)
+    {
+        PLYFormat ply;
+        ply.Deserialize(filename);
+
+        auto n = ply.GetPoints().size() / 3;
+
+        if (0 == n) return;
+
+        Terminate();
+        Initialize(n);
+
+        numberOfPoints = n;
+        for (size_t i = 0; i < n; i++)
+        {
+            positions[i].x = ply.GetPoints()[i * 3 + 0];
+            positions[i].y = ply.GetPoints()[i * 3 + 1];
+            positions[i].z = ply.GetPoints()[i * 3 + 2];
+            
+            normals[i].x = ply.GetNormals()[i * 3 + 0];
+            normals[i].y = ply.GetNormals()[i * 3 + 1];
+            normals[i].z = ply.GetNormals()[i * 3 + 2];
+
+            colors[i].x = ply.GetColors()[i * 3 + 0];
+            colors[i].y = ply.GetColors()[i * 3 + 1];
+            colors[i].z = ply.GetColors()[i * 3 + 2];
+
+            if constexpr (!std::is_void_v<T>)
+            {
+                properties[i].deepLearningClass = ply.GetDeepLearningClasses()[i];
+                properties[i].label = ply.GetLabels()[i];
+            }
+        }
+
+        CompactValidPoints();
+    }
+
+    void SerializePLY(const string& filename)
+    {
+        PLYFormat ply;
+
+        ply.AddData((float*)positions, (float*)normals, (float*)colors, numberOfPoints, false);
+
+        //for (size_t i = 0; i < numberOfPoints; i++)
+        //{
+        //    if constexpr (!std::is_void_v<T>)
+        //    {
+        //        ply.AddExtraAttrib(properties[i]);
+        //    }
+        //}
+
+        ply.Serialize(filename);
+    }
+
     void CompactValidPoints()
     {
         std::vector<float3> new_positions, new_normals, new_colors;
@@ -140,9 +200,96 @@ struct HostPointCloud
             std::copy(new_colors.begin(), new_colors.end(), colors);
         }
     }
+
+    //HostPointCloud<T> Subset(const cuAABB& aabb)
+    //{
+    //    using PointType = std::remove_reference_t<decltype(positions[0])>;
+    //    using NormalType = std::remove_reference_t<decltype(normals[0])>;
+    //    using ColorType = std::remove_reference_t<decltype(colors[0])>;
+
+    //    std::vector<PointType> temp_positions;
+    //    std::vector<NormalType> temp_normals;
+    //    std::vector<ColorType> temp_colors;
+
+    //    std::vector<T> temp_properties;
+    //    if constexpr (!std::is_void_v<T>) {
+    //        temp_properties.reserve(numberOfPoints / 4);
+    //    }
+
+    //    temp_positions.reserve(numberOfPoints / 4);
+    //    temp_normals.reserve(numberOfPoints / 4);
+    //    temp_colors.reserve(numberOfPoints / 4);
+
+    //    for (size_t i = 0; i < numberOfPoints; i++) {
+    //        if (aabb.Contains(positions[i])) {
+    //            temp_positions.push_back(positions[i]);
+    //            temp_normals.push_back(normals[i]);
+    //            temp_colors.push_back(colors[i]);
+
+    //            if constexpr (!std::is_void_v<T>) {
+    //                temp_properties.push_back(properties[i]);
+    //            }
+    //        }
+    //    }
+
+    //    HostPointCloud<T> result;
+    //    result.Initialize(temp_positions.size());
+
+    //    memcpy(result.positions, temp_positions.data(), temp_positions.size() * sizeof(PointType));
+    //    memcpy(result.normals, temp_normals.data(), temp_normals.size() * sizeof(NormalType));
+    //    memcpy(result.colors, temp_colors.data(), temp_colors.size() * sizeof(ColorType));
+
+    //    if constexpr (!std::is_void_v<T>) {
+    //        memcpy(result.properties, temp_properties.data(), temp_properties.size() * sizeof(T));
+    //    }
+
+    //    return result;
+    //}
+
+    void Subset(HostPointCloud<T>& result, const cuAABB& aabb)
+    {
+        using PointType = std::remove_reference_t<decltype(positions[0])>;
+        using NormalType = std::remove_reference_t<decltype(normals[0])>;
+        using ColorType = std::remove_reference_t<decltype(colors[0])>;
+
+        std::vector<PointType> temp_positions;
+        std::vector<NormalType> temp_normals;
+        std::vector<ColorType> temp_colors;
+
+        std::vector<T> temp_properties;
+        if constexpr (!std::is_void_v<T>) {
+            temp_properties.reserve(numberOfPoints / 4);
+        }
+
+        temp_positions.reserve(numberOfPoints / 4);
+        temp_normals.reserve(numberOfPoints / 4);
+        temp_colors.reserve(numberOfPoints / 4);
+
+        for (size_t i = 0; i < numberOfPoints; i++) {
+            if (aabb.Contains(positions[i])) {
+                temp_positions.push_back(positions[i]);
+                temp_normals.push_back(normals[i]);
+                temp_colors.push_back(colors[i]);
+
+                if constexpr (!std::is_void_v<T>) {
+                    temp_properties.push_back(properties[i]);
+                }
+            }
+        }
+
+        result.Initialize(temp_positions.size());
+
+        memcpy(result.positions, temp_positions.data(), temp_positions.size() * sizeof(PointType));
+        memcpy(result.normals, temp_normals.data(), temp_normals.size() * sizeof(NormalType));
+        memcpy(result.colors, temp_colors.data(), temp_colors.size() * sizeof(ColorType));
+
+        if constexpr (!std::is_void_v<T>) {
+            memcpy(result.properties, temp_properties.data(), temp_properties.size() * sizeof(T));
+        }
+    }
 };
 
-#ifdef __CUDA_ARCH__
+#ifdef __CUDACC__
 template<typename T>
 __global__ __forceinline__ void Kernel_DevicePointCloudCompactValidPoints(
     float3* in_positions, float3* in_normals, float3* in_colors,
@@ -163,7 +310,28 @@ __global__ __forceinline__ void Kernel_DevicePointCloudCompactValidPoints(
         out_colors[writeIdx] = in_colors[idx];
     }
 }
+
+template<typename T>
+__global__ __forceinline__ void Kernel_Count(
+    float3* positions, float3* normals, float3* colors,
+    unsigned int* counter, unsigned int N)
+{
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= N) return;
+
+    atomicAdd(counter, 1);
+}
 #endif
+
+void Call_DevicePointCloud_generateBoxes(
+    cuBQL::box3f* boxForBuilder,
+    const float3* positions,
+    int numberOfPositions);
+
+void Call_DevicePointCloud_gpuBuilder(
+    cuBQL::bvh3f* bvh,
+    cuBQL::box3f* boxes,
+    unsigned int numberOfPoints);
 
 template<typename T>
 struct DevicePointCloud
@@ -174,6 +342,8 @@ struct DevicePointCloud
     unsigned int numberOfPoints = 0;
 
     T* properties = nullptr;
+
+    cuBQL::bvh3f bvh;
 
     DevicePointCloud() {}
 
@@ -250,7 +420,7 @@ struct DevicePointCloud
 
     void CompactValidPoints()
     {
-#ifdef __CUDA_ARCH__
+#ifdef __CUDACC__
         if (numberOfPoints == 0) return;
 
         float3* new_positions;
@@ -284,5 +454,58 @@ struct DevicePointCloud
         CUDA_FREE(d_valid_count);
         CUDA_SYNC();
 #endif
+
+        Count();
+    }
+
+    void Count()
+    {
+#ifdef __CUDACC__
+        CUDA_TS(Count);
+
+        unsigned int* d_counter = nullptr;
+        CUDA_MALLOC(&d_counter, sizeof(unsigned int));
+        CUDA_MEMSET(d_counter, 0, sizeof(unsigned int));
+
+        LaunchKernel(Kernel_Count<T>, numberOfPoints,
+            positions, normals, colors,
+            d_counter, numberOfPoints);
+
+        unsigned int counter = 0;
+        CUDA_COPY_D2H(&counter, d_counter, sizeof(unsigned int));
+
+        CUDA_FREE(d_counter);
+        CUDA_SYNC();
+
+        printf("Count : %d\n", counter);
+
+        CUDA_TE(Count);
+#endif
+    }
+
+    void UpdateBVH()
+    {
+        //cuBQL::cuda::free(bvh);
+
+        CUDA_SAFE_FREE(boxes);
+        CUDA_MALLOC(&boxes, numberOfPoints * sizeof(cuBQL::box3f));
+
+        //bvh = cuBQL::bvh3f();
+
+        CUDA_TS(InitializeBVH);
+
+        Call_DevicePointCloud_generateBoxes(boxes, positions, numberOfPoints);
+
+        Call_DevicePointCloud_gpuBuilder(&bvh, boxes, numberOfPoints);
+
+        CUDA_SYNC();
+
+        // free the boxes - we could actually re-use that memory below, but
+        // let's just do this cleanly here.
+
+        CUDA_TE(InitializeBVH);
+
+        std::cout << "done building BVH over " << cuBQL::prettyNumber(numberOfPoints)
+            << " points" << std::endl;
     }
 };
