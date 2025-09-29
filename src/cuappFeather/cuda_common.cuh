@@ -101,6 +101,28 @@ typedef double f64;
 #define LaunchKernel_256(KERNEL, NOE, ...) { nvtxRangePushA(#KERNEL); auto NOT = 256; auto NOB = (NOE + NOT - 1) / NOT; KERNEL<<<NOB, NOT>>>(__VA_ARGS__); nvtxRangePop(); }
 #define LaunchKernel_512(KERNEL, NOE, ...) { nvtxRangePushA(#KERNEL); auto NOT = 512; auto NOB = (NOE + NOT - 1) / NOT; KERNEL<<<NOB, NOT>>>(__VA_ARGS__); nvtxRangePop(); }
 #define LaunchKernel(KERNEL, NOE, ...) LaunchKernel_512(KERNEL, NOE, __VA_ARGS__)
+
+#define LaunchKernel2D_16x16(KERNEL, NX, NY, ...) { \
+    nvtxRangePushA(#KERNEL); \
+    dim3 NOT(16, 16); \
+    dim3 NOB((NX + NOT.x - 1) / NOT.x, (NY + NOT.y - 1) / NOT.y); \
+    KERNEL<<<NOB, NOT>>>(__VA_ARGS__); \
+    nvtxRangePop(); \
+}
+#define LaunchKernel2D(KERNEL, NX, NY, ...) LaunchKernel2D_16x16(KERNEL, NX, NY, __VA_ARGS__)
+
+#define LaunchLambdaKernel_256(LAMBDA_KERNEL, NOE, ...) { nvtxRangePushA(#LAMBDA_KERNEL); auto NOT = 256; auto NOB = (NOE + NOT - 1) / NOT; LaunchLambdaKernelTemplate<<<NOB, NOT>>>(LAMBDA_KERNEL, NOE, __VA_ARGS__); nvtxRangePop(); }
+#define LaunchLambdaKernel_512(LAMBDA_KERNEL, NOE, ...) { nvtxRangePushA(#LAMBDA_KERNEL); auto NOT = 512; auto NOB = (NOE + NOT - 1) / NOT; LaunchLambdaKernelTemplate<<<NOB, NOT>>>(LAMBDA_KERNEL, NOE, __VA_ARGS__); nvtxRangePop(); }
+#define LaunchLambdaKernel(LAMBDA_KERNEL, NOE, ...) LaunchLambdaKernel_512(LAMBDA_KERNEL, NOE, __VA_ARGS__)
+
+#define LaunchLambdaKernel2D_16x16(LAMBDA_KERNEL, NX, NY, ...) { \
+    nvtxRangePushA(#LAMBDA_KERNEL); \
+    dim3 NOT(16, 16); \
+    dim3 NOB((NX + NOT.x - 1) / NOT.x, (NY + NOT.y - 1) / NOT.y); \
+    LaunchLambdaKernelTemplate2D<<<NOB, NOT>>>(LAMBDA_KERNEL, NX, NY, __VA_ARGS__); \
+    nvtxRangePop(); \
+}
+#define LaunchLambdaKernel2D(LAMBDA_KERNEL, NX, NY, ...) LaunchLambdaKernel2D_16x16(LAMBDA_KERNEL, NX, NY, __VA_ARGS__)
 #endif
 
 #ifndef CUDA_TS
@@ -280,6 +302,26 @@ struct cuAABB
     }
 };
 
+template <typename Functor, typename... Args>
+__global__ void LaunchLambdaKernelTemplate(Functor func, unsigned int NOE, Args... args)
+{
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= NOE) return;
+
+    func(tid, args...);
+}
+
+template <typename Kernel, typename... Args>
+__global__ void LaunchLambdaKernelTemplate2D(Kernel kernel, unsigned int nx, unsigned int ny, Args... args)
+{
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int j = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (i < nx && j < ny)
+    {
+        kernel(i, j, args...);
+    }
+}
 
 #ifdef __CUDACC__
 __device__ inline void atomicMinF(float* addr, float val)
@@ -350,6 +392,20 @@ __device__ inline void atomicMaxF(float* addr, float val, int* idx, int myIdx)
             break;
         }
     } while (true);
+}
+
+__device__ __forceinline__ void atomicMinFloat3(float3& addr, const float3& val)
+{
+    atomicMinF(&addr.x, val.x);
+    atomicMinF(&addr.y, val.y);
+    atomicMinF(&addr.z, val.z);
+}
+
+__device__ __forceinline__ void atomicMaxFloat3(float3& addr, const float3& val)
+{
+    atomicMaxF(&addr.x, val.x);
+    atomicMaxF(&addr.y, val.y);
+    atomicMaxF(&addr.z, val.z);
 }
 #endif
 
