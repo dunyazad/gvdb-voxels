@@ -50,8 +50,8 @@ struct ThrustHostHalfEdgeMesh
 
     void BuildHalfEdges();
 
-    bool SerializePLY(const string& filename, bool useAlpha = false);
-    bool DeserializePLY(const string& filename);
+    bool SerializePLY(const std::string& filename, bool useAlpha = false);
+    bool DeserializePLY(const std::string& filename);
 
     std::vector<unsigned int> GetOneRingVertices(unsigned int v) const;
 };

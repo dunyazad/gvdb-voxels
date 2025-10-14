@@ -706,7 +706,7 @@ struct DeviceLBVH
         const int R_delta = CommonPrefixLength(key, mortonKeys[index + 1]);
         const int direction = (R_delta > L_delta) ? 1 : -1;
 
-        const int delta_min = min(L_delta, R_delta);
+        const int delta_min = std::min(L_delta, R_delta);
 
         int j = index;
         while (true) {

@@ -329,7 +329,7 @@ struct HostHalfEdgeMesh
         }
     }
 
-    bool SerializePLY(const string& filename, bool useAlpha = false)
+    bool SerializePLY(const std::string& filename, bool useAlpha = false)
     {
         PLYFormat ply;
 
@@ -368,7 +368,7 @@ struct HostHalfEdgeMesh
         return ply.Serialize(filename);
     }
 
-    bool DeserializePLY(const string& filename)
+    bool DeserializePLY(const std::string& filename)
     {
         PLYFormat ply;
         if (!ply.Deserialize(filename))
@@ -1819,7 +1819,7 @@ struct DeviceHalfEdgeMesh
         CUDA_FREE(d_numDropped)
     }
 
-    vector<float3> GetFaceNodePositions()
+    std::vector<float3> GetFaceNodePositions()
     {
         // 1. host로 데이터 복사
         std::vector<SimpleHashMapEntry<uint64_t, FaceNodeSimpleHashMapEntry>> h_entries(faceNodeSimpleHashMap.info.capacity);
@@ -2290,7 +2290,7 @@ struct DeviceHalfEdgeMesh
         //UpdateBVH();
     }
 
-    void GetAABBs(vector<cuAABB>& result, cuAABB& mMaabbs)
+    void GetAABBs(std::vector<cuAABB>& result, cuAABB& mMaabbs)
     {
         result.resize(numberOfFaces);
 
@@ -2312,7 +2312,7 @@ struct DeviceHalfEdgeMesh
         CUDA_FREE(d_mMaabbs);
     }
 
-    vector<uint64_t> GetMortonCodes()
+    std::vector<uint64_t> GetMortonCodes()
     {
         float3 aabb_extent = max - min;
         float max_extent = fmaxf(aabb_extent.x, fmaxf(aabb_extent.y, aabb_extent.z));
@@ -2336,7 +2336,7 @@ struct DeviceHalfEdgeMesh
         return result;
     }
 
-    vector<float> GetFaceCurvatures()
+    std::vector<float> GetFaceCurvatures()
     {
         float* d_curvatures = nullptr;
         CUDA_MALLOC(&d_curvatures, sizeof(float) * numberOfFaces);
@@ -2351,7 +2351,7 @@ struct DeviceHalfEdgeMesh
         return h_curvatures;
     }
 
-	void FindDegenerateFaces(vector<unsigned int>& outFaceIndices) const
+	void FindDegenerateFaces(std::vector<unsigned int>& outFaceIndices) const
     {
         unsigned int* d_degenerateFaceIndices = nullptr;
         unsigned int* d_degenerateCount = nullptr;

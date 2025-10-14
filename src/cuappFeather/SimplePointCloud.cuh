@@ -95,7 +95,7 @@ struct HostPointCloud
         }
     }
 
-    void DeserializePLY(const string& filename)
+    void DeserializePLY(const std::string& filename)
     {
         PLYFormat ply;
         ply.Deserialize(filename);
@@ -132,7 +132,7 @@ struct HostPointCloud
         CompactValidPoints();
     }
 
-    void SerializePLY(const string& filename)
+    void SerializePLY(const std::string& filename)
     {
         PLYFormat ply;
 

@@ -49,9 +49,9 @@ public:
 
     //HostPointCloud<PointCloudProperty> ProcessPointCloud(const HostPointCloud<PointCloudProperty>& input, float voxelSize = 0.2f, unsigned int occupyOffset = 3);
     void ProcessPointCloud(float voxelSize = 0.2f, unsigned int occupyOffset = 3);
-    void ProcessHalfEdgeMesh(const string& filename);
+    void ProcessHalfEdgeMesh(const std::string& filename);
 
-    vector<float3> FindIntersectionPoints(
+    std::vector<float3> FindIntersectionPoints(
         HostPointCloud<PointCloudProperty>& h_pointCloud,
         float3 planePosition,
         float3 planeNormal,

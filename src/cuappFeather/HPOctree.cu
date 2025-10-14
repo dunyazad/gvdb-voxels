@@ -236,7 +236,7 @@ __global__ void Kernel_NNSearch(
 	d_results[tid].distance_sq = best_dist_sq;
 }
 
-void HPOctree::Initialize(const vector<float3>& positions, const cuAABB& aabb, unsigned int maxDepth)
+void HPOctree::Initialize(const std::vector<float3>& positions, const cuAABB& aabb, unsigned int maxDepth)
 {
 	Initialize(positions.data(), positions.size(), aabb, maxDepth);
 }
@@ -350,7 +350,7 @@ std::vector<NNS_Result> HPOctree::Search(const std::vector<float3>& h_queries)
 	return h_results;
 }
 
-vector<HPOctreeKey> HPOctree::Dump()
+std::vector<HPOctreeKey> HPOctree::Dump()
 {
 	unsigned int num_occupied_entries = 0;
 	cudaMemcpy(&num_occupied_entries, keys.info.numberOfEntries, sizeof(unsigned int), cudaMemcpyDeviceToHost);

@@ -11,13 +11,8 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
-#include <iostream>
-#include <libFeather.h>
-
 #include "main.cuh"
-
-#include <iostream>
-using namespace std;
+#include <libFeather.h>
 
 using VD = VisualDebugging;
 
@@ -147,7 +142,7 @@ AABB ApplyPointCloudToEntity(Entity entity, const HostPointCloud<PointCloudPrope
 	AABB aabb{ {FLT_MAX, FLT_MAX, FLT_MAX}, {-FLT_MAX, -FLT_MAX, -FLT_MAX} };
 
 	auto cs = Color::GetContrastingColors(32);
-	map<unsigned int, unsigned int> colorMap;
+	std::map<unsigned int, unsigned int> colorMap;
 
 	for (size_t i = 0; i < h_pointCloud.numberOfPoints; i++)
 	{
@@ -211,7 +206,7 @@ AABB GetDomainAABB(const AABB& aabb)
 	};
 }
 
-tuple<AABB, vector<AABB>> SplitAABB(const AABB& input_aabb, unsigned int cellsPerAxis)
+std::tuple<AABB, std::vector<AABB>> SplitAABB(const AABB& input_aabb, unsigned int cellsPerAxis)
 {
 	AABB totalAABB{ {FLT_MAX, FLT_MAX, FLT_MAX}, {-FLT_MAX, -FLT_MAX, -FLT_MAX} };
 
@@ -315,7 +310,7 @@ int main(int argc, char** argv)
 {
 	ForceGPUPerformance();
 
-	cout << "AppFeather" << endl;
+	std::cout << "AppFeather" << std::endl;
 
 	Feather.Initialize(1920, 1080);
 	Feather.SetClearColor(Color::slategray());

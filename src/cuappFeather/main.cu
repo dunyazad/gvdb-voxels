@@ -39,7 +39,7 @@ CUDAInstance::~CUDAInstance()
     d_mesh.Terminate();
 }
 
-void CUDAInstance::ProcessHalfEdgeMesh(const string& filename)
+void CUDAInstance::ProcessHalfEdgeMesh(const std::string& filename)
 {
     h_mesh.DeserializePLY(filename);
 }
@@ -294,7 +294,7 @@ __global__ void ProjectIntersectionPoints_Kernel(
 
     if (tid == 0)
     {
-        int hits_in_this_block = min(s_local_hit_count, block_size);
+        int hits_in_this_block = std::min(s_local_hit_count, block_size);
         if (hits_in_this_block > 0)
         {
             s_global_base_idx = atomicAdd(d_counter, hits_in_this_block);
@@ -302,7 +302,7 @@ __global__ void ProjectIntersectionPoints_Kernel(
     }
     __syncthreads();
 
-    int const hits_to_copy = min(s_local_hit_count, block_size);
+    int const hits_to_copy = std::min(s_local_hit_count, block_size);
 
     for (int i = tid; i < hits_to_copy; i += block_size)
     {

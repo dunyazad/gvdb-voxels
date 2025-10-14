@@ -62,7 +62,7 @@ struct HPOctreeKey
 		const float dx = aabb.max.x - aabb.min.x;
 		const float dy = aabb.max.y - aabb.min.y;
 		const float dz = aabb.max.z - aabb.min.z;
-		return max(dx, max(dy, dz));
+		return std::max(dx, std::max(dy, dz));
 	}
 
 	__host__ __device__ static cuAABB GetDomainAABB(const cuAABB& aabb)
@@ -193,9 +193,9 @@ struct HPOctreeKey
 		int iz = (int)(norm_z * num_cells_along_axis);
 
 		const int max_coord = (int)num_cells_along_axis - 1;
-		this->x = max(0, min(ix, max_coord));
-		this->y = max(0, min(iy, max_coord));
-		this->z = max(0, min(iz, max_coord));
+		this->x = std::max(0, std::min(ix, max_coord));
+		this->y = std::max(0, std::min(iy, max_coord));
+		this->z = std::max(0, std::min(iz, max_coord));
 	}
 
 	__host__ __device__ uint64_t ToCode() const
@@ -323,14 +323,14 @@ struct HPOctree
 	SimpleHashMap<uint64_t, unsigned int> keys;
 	SimpleHashMap<uint64_t, unsigned int> leaf_map;
 
-	void Initialize(const vector<float3>& positions, const cuAABB& aabb, unsigned int maxDepth = 0);
+	void Initialize(const std::vector<float3>& positions, const cuAABB& aabb, unsigned int maxDepth = 0);
 	void Initialize(const float3* h_positions, unsigned int numberOfPositions, const cuAABB& aabb, unsigned int maxDepth = 0);
 
 	void Terminate();
 
 	std::vector<NNS_Result> Search(const std::vector<float3>& h_queries);
 
-	vector<HPOctreeKey> Dump();
+	std::vector<HPOctreeKey> Dump();
 
 	cuAABB originalAABB;
 	cuAABB domainAABB;
