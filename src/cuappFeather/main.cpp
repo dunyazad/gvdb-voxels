@@ -173,8 +173,8 @@ AABB ApplyPointCloudToEntity(Entity entity, const HostPointCloud<PointCloudPrope
 		aabb.max.y = std::max(aabb.max.y, position.y);
 		aabb.max.z = std::max(aabb.max.z, position.z);
 
-		//renderable->AddInstanceColor(color);
-		renderable->AddInstanceColor(mc);
+		renderable->AddInstanceColor(color);
+		//renderable->AddInstanceColor(mc);
 		renderable->AddInstanceNormal(normal);
 
 		glm::mat4 tm = glm::identity<glm::mat4>();
@@ -520,31 +520,9 @@ int main(int argc, char** argv)
 #pragma endregion
 
 	Feather.AddOnInitializeCallback([&]() {
-		auto filename = "D:\\Debug\\PLY\\Split.ply";
-		HostPointCloud<PointCloudProperty> h_input;
-		h_input.DeserializePLY(filename);
 
-		//cuInstance.h_input = h_input;
+		cuInstance.Test();
 
-		auto entity = Feather.CreateEntity("PointCloud");
-		auto aabb = ApplyPointCloudToEntity(entity, h_input);
-
-		//ifstream ifs("D:\\Debug\\PLY\\AABBs.bin", ios::binary);
-		//unsigned int h_numberOfAABBs = 0;
-		//ifs.read((char*)&h_numberOfAABBs, sizeof(unsigned int));
-		//printf("h_numberOfAABBs : %d\n", h_numberOfAABBs);
-
-		//for (size_t i = 0; i < h_numberOfAABBs; i++)
-		//{
-		//	cuAABB aabb;
-		//	ifs.read((char*)&aabb, sizeof(cuAABB));
-		//	
-		//	VD::AddWiredBox("AABB_" + to_string(i), { {XYZ(aabb.min)}, {XYZ(aabb.max)} }, Color::red());
-
-		//	printf("AABB_%d : min=(%f, %f, %f), max=(%f, %f, %f)\n", i,
-		//		aabb.min.x, aabb.min.y, aabb.min.z,
-		//		aabb.max.x, aabb.max.y, aabb.max.z);
-		//}
 		});
 
 	Feather.AddOnUpdateCallback([&](f32 timeDelta) {

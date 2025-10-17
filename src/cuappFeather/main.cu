@@ -16,16 +16,19 @@
 
 #include <cuda_common.cuh>
 
+#include <algorithm>
 #include <iostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <algorithm>
+#include <random>
 
 #include <Serialization.hpp>
 
 #include "cuBQL/bvh.h"
 #include "cuBQL/queries/triangleData/closestPointOnAnyTriangle.h"
+
+#include "ThrustHashMap.hpp"
 
 CUDAInstance::CUDAInstance()
 {
@@ -137,7 +140,7 @@ void CUDAInstance::ProcessPointCloud(float voxelSize, unsigned int occupyOffset)
 //	const float3* d_points,
 //	int numPoints,
 //	float3 planePosition,
-//	float3 planeNormal, // Assumed to be a unit vector
+//	float3 planeNormal, // Assumed to be a unit std::vector
 //	float distanceThreshold,
 //	float3* d_intersectionPoints,
 //	int* d_counter)
@@ -152,7 +155,7 @@ void CUDAInstance::ProcessPointCloud(float voxelSize, unsigned int occupyOffset)
 //	// Get the current point
 //	float3 point = d_points[idx];
 //
-//	// Calculate vector from a point on the plane to the current point
+//	// Calculate std::vector from a point on the plane to the current point
 //	float3 vec = make_float3(point.x - planePosition.x,
 //		point.y - planePosition.y,
 //		point.z - planePosition.z);
@@ -171,7 +174,7 @@ void CUDAInstance::ProcessPointCloud(float voxelSize, unsigned int occupyOffset)
 //	}
 //}
 //
-//vector<float3> CUDAInstance::FindIntersectionPoints(
+//std::vector<float3> CUDAInstance::FindIntersectionPoints(
 //    HostPointCloud<PointCloudProperty>& h_pointCloud,
 //    float3 planePosition,
 //    float3 planeNormal,
@@ -237,7 +240,7 @@ void CUDAInstance::ProcessPointCloud(float voxelSize, unsigned int occupyOffset)
 //	CUDA_CHECK(cudaFree(d_intersectionPoints));
 //	CUDA_CHECK(cudaFree(d_counter));
 //
-//	// 7. Return the resulting vector of points
+//	// 7. Return the resulting std::vector of points
 //	return h_intersectionPoints;
 //}
 
@@ -377,5 +380,103 @@ std::vector<float3> CUDAInstance::FindIntersectionPoints(
     {
         fprintf(stderr, "Exception: %s\n", e.what());
         return {};
+    }
+}
+
+
+double benchmarkInsert(HashMap<double, int>& map, const std::vector<double>& keys, const std::vector<int>& values) {
+    auto start = std::chrono::high_resolution_clock::now();
+    map.insert(keys, values);
+    cudaDeviceSynchronize();
+    auto end = std::chrono::high_resolution_clock::now();
+    return keys.size() / std::chrono::duration<double>(end - start).count();
+}
+
+double benchmarkFind(HashMap<double, int>& map, const std::vector<double>& keys) {
+    std::vector<int> results;
+    auto start = std::chrono::high_resolution_clock::now();
+    map.find(keys, results);
+    cudaDeviceSynchronize();
+    auto end = std::chrono::high_resolution_clock::now();
+    return keys.size() / std::chrono::duration<double>(end - start).count();
+}
+
+double benchmarkRemove(HashMap<double, int>& map, const std::vector<double>& keys) {
+    auto start = std::chrono::high_resolution_clock::now();
+    map.remove(keys);
+    cudaDeviceSynchronize();
+    auto end = std::chrono::high_resolution_clock::now();
+    return keys.size() / std::chrono::duration<double>(end - start).count();
+}
+
+void printBenchmarkGraph(double insert_d, double find_d, double remove_d) {
+    struct Op {
+        std::string name;
+        double value;
+    };
+
+    std::vector<Op> ops = {
+        {"Insert", insert_d},
+        {"Find  ", find_d},
+        {"Remove", remove_d}
+    };
+
+    // 그래프 스케일 결정 (막대 최대 길이 50)
+    double max_val = std::max({ insert_d, find_d, remove_d });
+    double scale = max_val / 50.0;
+
+    std::cout << "\nHashMap Benchmark (Throughput ops/sec)\n";
+    std::cout << "-------------------------------------\n";
+
+    for (auto& op : ops) {
+        int bar_len = static_cast<int>(op.value / scale);
+        std::cout << op.name << ": ";
+        for (int i = 0; i < bar_len; ++i) std::cout << "#";
+        std::cout << " " << op.value << "\n";
+    }
+
+    std::cout << "-------------------------------------\n";
+}
+
+void CUDAInstance::Test()
+{
+    {
+        const size_t N = 10'000'000; // 1천만 elements
+        std::vector<double> keys(N), keys_float(N);
+        std::vector<int> values(N);
+
+        std::mt19937 rng(12345);
+        std::uniform_real_distribution<double> dist(0.0, 1e6);
+
+        for (size_t i = 0; i < N; i++) {
+            keys[i] = dist(rng); // double Key
+            keys_float[i] = static_cast<float>(keys[i]); // float Key
+            values[i] = static_cast<int>(i);
+        }
+
+        // --- double Key 벤치마크 ---
+        HashMap<double, int> map_double(1 << 24);
+        double insert_d = benchmarkInsert(map_double, keys, values);
+        double find_d = benchmarkFind(map_double, keys);
+        double remove_d = benchmarkRemove(map_double, keys);
+
+        std::cout << "Double Key results:\n";
+        std::cout << "Insert: " << insert_d << " ops/sec\n";
+        std::cout << "Find  : " << find_d << " ops/sec\n";
+        std::cout << "Remove: " << remove_d << " ops/sec\n";
+
+        printBenchmarkGraph(insert_d, find_d, remove_d);
+    }
+
+    {
+        PLYFormat ply;
+        ply.Deserialize("D:\\Debug\\PLY\\input.ply");
+
+        auto N = ply.GetPoints().size() / 3;
+        thrust::host_vector<float3> h_positions(N);
+        memcpy(h_positions.data(), ply.GetPoints().data(), sizeof(float3) * N);
+        thrust::device_vector<float3> d_positions(h_positions);
+
+
     }
 }

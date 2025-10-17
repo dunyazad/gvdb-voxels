@@ -291,7 +291,7 @@ struct HostPointCloud
 
 #ifdef __CUDACC__
 template<typename T>
-__global__ __forceinline__ void Kernel_DevicePointCloudCompactValidPoints(
+__global__ void Kernel_DevicePointCloudCompactValidPoints(
     float3* in_positions, float3* in_normals, float3* in_colors,
     float3* out_positions, float3* out_normals, float3* out_colors,
     unsigned int* valid_counter, unsigned int N)
@@ -312,7 +312,7 @@ __global__ __forceinline__ void Kernel_DevicePointCloudCompactValidPoints(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_Count(
+__global__ void Kernel_Count(
     float3* positions, float3* normals, float3* colors,
     unsigned int* counter, unsigned int N)
 {

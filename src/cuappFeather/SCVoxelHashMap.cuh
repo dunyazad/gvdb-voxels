@@ -51,7 +51,7 @@ template<typename T>
 struct SCVoxelHashMap;
 
 template<typename T>
-__global__ __forceinline__ void Kernel_SCVoxelHashMap_Clear(SCVoxelHashMapInfo<T> info)
+__global__ void Kernel_SCVoxelHashMap_Clear(SCVoxelHashMapInfo<T> info)
 {
 	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx >= info.capacity) return;
@@ -62,7 +62,7 @@ __global__ __forceinline__ void Kernel_SCVoxelHashMap_Clear(SCVoxelHashMapInfo<T
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_SCVoxelHashMap_Occupy(
+__global__ void Kernel_SCVoxelHashMap_Occupy(
 	SCVoxelHashMapInfo<T> info,
 	float3* d_positions,
 	float3* d_normals,
@@ -111,7 +111,7 @@ __global__ __forceinline__ void Kernel_SCVoxelHashMap_Occupy(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
+__global__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 	SCVoxelHashMapInfo<T> info,
 	float3* d_positions,
 	float3* d_normals,
@@ -207,7 +207,7 @@ __global__ __forceinline__ void Kernel_SCVoxelHashMap_CreateZeroCrossingPoints(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_SCVoxelHashMap_MarchingCubes(
+__global__ void Kernel_SCVoxelHashMap_MarchingCubes(
 	SCVoxelHashMapInfo<T> info, float isoValue, uint3* d_faces, unsigned int* d_numberOfFaces)
 {
 	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;

@@ -583,7 +583,7 @@ struct HostHalfEdgeMesh
 
 #pragma region Kernel_DeviceHalfEdgeMesh
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
+__global__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
     const uint3* faces,
     unsigned int numberOfFaces,
     HalfEdge* halfEdges,
@@ -625,7 +625,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_BuildHalfEdges(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_LinkOpposites(
+__global__ void Kernel_DeviceHalfEdgeMesh_LinkOpposites(
     const uint3* faces,
     unsigned int numberOfFaces,
     HalfEdge* halfEdges,
@@ -660,7 +660,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_LinkOpposites(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_ValidateOppositeEdges(const HalfEdge* halfEdges, size_t numHalfEdges)
+__global__ void Kernel_DeviceHalfEdgeMesh_ValidateOppositeEdges(const HalfEdge* halfEdges, size_t numHalfEdges)
 {
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= numHalfEdges)
@@ -710,7 +710,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_ValidateOppositeEdges(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdgeMapping(
+__global__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdgeMapping(
     const HalfEdge* halfEdges,
     unsigned int* vertexToHalfEdge,
     unsigned int numberOfHalfEdges)
@@ -724,7 +724,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_BuildVertexToHalfEdgeM
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_CompactVertices(
+__global__ void Kernel_DeviceHalfEdgeMesh_CompactVertices(
     unsigned int* vertexToHalfEdge,
     unsigned int* vertexIndexMapping,
     unsigned int* vertexIndexMappingIndex,
@@ -755,7 +755,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_CompactVertices(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_RemapVertexToHalfEdge(
+__global__ void Kernel_DeviceHalfEdgeMesh_RemapVertexToHalfEdge(
     unsigned int* vertexToHalfEdge,
     unsigned int* newVertexToHalfEdge,
     unsigned int* vertexIndexMapping,
@@ -771,7 +771,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_RemapVertexToHalfEdge(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_RemapVertexIndexOfFacesAndHalfEdges(uint3* faces, HalfEdge* halfEdges, unsigned int numberOfFaces, unsigned int* vertexIndexMapping)
+__global__ void Kernel_DeviceHalfEdgeMesh_RemapVertexIndexOfFacesAndHalfEdges(uint3* faces, HalfEdge* halfEdges, unsigned int numberOfFaces, unsigned int* vertexIndexMapping)
 {
     unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
     if (threadid >= numberOfFaces) return;
@@ -787,7 +787,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_RemapVertexIndexOfFace
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeSimpleHashMap(
+__global__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeSimpleHashMap(
     SimpleHashMapInfo<uint64_t, FaceNodeSimpleHashMapEntry> info,
     float3* positions,
     uint3* faces,
@@ -850,7 +850,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_BuildFaceNodeSimpleHas
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_SimpleHashMap(
+__global__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_SimpleHashMap(
     const float3* points,
     unsigned int numPoints,
     const float3* positions,
@@ -911,7 +911,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_S
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_SimpleHashMap_ClosestPoint(
+__global__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_SimpleHashMap_ClosestPoint(
     const float3* points,
     unsigned int numPoints,
     const float3* positions,
@@ -978,7 +978,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindNearestTriangles_S
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
+__global__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
     float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
@@ -1024,7 +1024,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_LaplacianSmooth(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_PickFace(
+__global__ void Kernel_DeviceHalfEdgeMesh_PickFace(
     const float3 rayOrigin,
     const float3 rayDir,
     const float3* positions,
@@ -1048,7 +1048,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_PickFace(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_OneRing(
+__global__ void Kernel_DeviceHalfEdgeMesh_OneRing(
     const HalfEdge* halfEdges,
     const unsigned int* vertexToHalfEdge,
     unsigned int numberOfPoints,
@@ -1072,7 +1072,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_OneRing(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_GetVerticesInRadius(
+__global__ void Kernel_DeviceHalfEdgeMesh_GetVerticesInRadius(
     const float3* positions,
     unsigned int numberOfPoints,
     const HalfEdge* halfEdges,
@@ -1123,7 +1123,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_GetVerticesInRadius(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_OneRingFaces(
+__global__ void Kernel_DeviceHalfEdgeMesh_OneRingFaces(
     unsigned int f,
     const HalfEdge* halfEdges,
     unsigned int numberOfFaces,
@@ -1137,7 +1137,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_OneRingFaces(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_GetFacesInRadius(
+__global__ void Kernel_DeviceHalfEdgeMesh_GetFacesInRadius(
     const float3* positions,
     const uint3* faces,
     const HalfEdge* halfEdges,
@@ -1191,7 +1191,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_GetFacesInRadius(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_RadiusLaplacianSmooth(
+__global__ void Kernel_DeviceHalfEdgeMesh_RadiusLaplacianSmooth(
     const float3* positions_in,
     float3* positions_out,
     unsigned int numberOfPoints,
@@ -1234,7 +1234,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_RadiusLaplacianSmooth(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_GetAABB(
+__global__ void Kernel_DeviceHalfEdgeMesh_GetAABB(
     float3* positions,
     uint3* faces,
     cuAABB* aabbs,
@@ -1280,7 +1280,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_GetAABB(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_GetMortonCodes(
+__global__ void Kernel_DeviceHalfEdgeMesh_GetMortonCodes(
     const float3* positions,
     const uint3* faces,
     uint64_t* mortonCodes,
@@ -1305,7 +1305,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_GetMortonCodes(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_RecalcAABB(float3* positions, float3* min, float3* max, unsigned int numberOfPoints)
+__global__ void Kernel_DeviceHalfEdgeMesh_RecalcAABB(float3* positions, float3* min, float3* max, unsigned int numberOfPoints)
 {
     unsigned int threadid = blockIdx.x * blockDim.x + threadIdx.x;
     if (threadid >= numberOfPoints) return;
@@ -1320,7 +1320,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_RecalcAABB(float3* pos
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_GetFaceCurvatures(
+__global__ void Kernel_DeviceHalfEdgeMesh_GetFaceCurvatures(
     const float3* positions,
     const uint3* faces,
     const HalfEdge* halfEdges,
@@ -1367,7 +1367,7 @@ __global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_GetFaceCurvatures(
 }
 
 template<typename T>
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindDegenerateFaces(
+__global__ void Kernel_DeviceHalfEdgeMesh_FindDegenerateFaces(
     const float3* positions,
     const HalfEdge* halfEdges,
     const uint3* faces,

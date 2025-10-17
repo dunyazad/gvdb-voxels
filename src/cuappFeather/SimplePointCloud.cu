@@ -1,6 +1,6 @@
 #include <SimplePointCloud.cuh>
 
-__global__ __forceinline__ void DevicePointCloud_generateBoxes(
+__global__ void DevicePointCloud_generateBoxes(
     cuBQL::box3f* boxForBuilder,
     const float3* positions,
     int numberOfPositions)

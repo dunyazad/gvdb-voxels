@@ -56,4 +56,6 @@ public:
         float3 planePosition,
         float3 planeNormal,
         float distanceThreshold);
+
+    void Test();
 };

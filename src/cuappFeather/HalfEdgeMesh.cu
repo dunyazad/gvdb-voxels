@@ -3,7 +3,7 @@
 #include "cuBQL/bvh.h"
 #include "cuBQL/queries/triangleData/closestPointOnAnyTriangle.h"
 
-__global__ __forceinline__ void generateCentroids(
+__global__ void generateCentroids(
     float3* positions,
     uint3* faces,
     unsigned int numberOfFaces,
@@ -23,7 +23,7 @@ __global__ __forceinline__ void generateCentroids(
     // 	  triangles[tid].c.x, triangles[tid].c.y, triangles[tid].c.z);
 }
 
-__global__ __forceinline__ void generateBoxes(
+__global__ void generateBoxes(
     cuBQL::box3f* boxForBuilder,
     const cuBQL::Triangle* triangles,
     int numTriangles)
@@ -66,7 +66,7 @@ void Call_gpuBuilder(
     cuBQL::gpuBuilder(*bvh, boxes, numberOfFaces, cuBQL::BuildConfig());
 }
 
-__global__ __forceinline__ void Kernel_DeviceHalfEdgeMesh_FindNearestPoints(
+__global__ void Kernel_DeviceHalfEdgeMesh_FindNearestPoints(
     const cuBQL::Triangle* __restrict__ triangles,
     cuBQL::bvh3f bvh,
     const float3* __restrict__ queries,

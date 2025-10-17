@@ -99,6 +99,7 @@
     <ClInclude Include="SCVoxelHashMap.cuh" />
     <ClInclude Include="SOMarchingCubes.cuh" />
     <ClInclude Include="ThrustHalfEdgeMesh.cuh" />
+    <ClInclude Include="ThrustHashMap.hpp" />
     <ClInclude Include="VEFM.cuh" />
     <ClInclude Include="VoxelHashMap.cuh" />
     <ClInclude Include="SCVoxelKey.hpp" />
