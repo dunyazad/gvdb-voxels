@@ -523,6 +523,12 @@ int main(int argc, char** argv)
 
 		cuInstance.Test();
 
+		auto filename = "D:\\Debug\\PLY\\input.ply";
+		HostPointCloud<PointCloudProperty> h_input;
+		h_input.DeserializePLY(filename);
+		auto entity = Feather.CreateEntity("PointCloud");
+		auto aabb = ApplyPointCloudToEntity(entity, h_input);
+
 		});
 
 	Feather.AddOnUpdateCallback([&](f32 timeDelta) {

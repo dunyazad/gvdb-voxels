@@ -30,6 +30,9 @@
 
 #include "ThrustHashMap.hpp"
 
+#include <IVisualDebugging.h>
+using VD = IVisualDebugging;
+
 CUDAInstance::CUDAInstance()
 {
 }
@@ -477,6 +480,34 @@ void CUDAInstance::Test()
         memcpy(h_positions.data(), ply.GetPoints().data(), sizeof(float3) * N);
         thrust::device_vector<float3> d_positions(h_positions);
 
+        thrust::device_vector<float3> d_positions_inside(N);
 
+        cuAABB aabb = { make_float3(-5.0f, -5.0f, -5.0f), make_float3(5.0f, 5.0f, 5.0f) };
+
+        auto end_iterator = thrust::copy_if(d_positions.begin(),
+            d_positions.end(),
+            d_positions_inside.begin(),
+            [aabb] __host__ __device__(const float3 & p) {
+            return (
+                p.x >= aabb.min.x && p.x <= aabb.max.x &&
+                p.y >= aabb.min.y && p.y <= aabb.max.y &&
+                p.z >= aabb.min.z && p.z <= aabb.max.z);
+        });
+
+        int count = end_iterator - d_positions_inside.begin();
+
+        std::cout << "Points inside AABB (using Thrust): " << count << std::endl;
+
+        if (count > 0) {
+            std::vector<float3> h_positions_inside(count);
+            thrust::copy(d_positions_inside.begin(), end_iterator, h_positions_inside.begin());
+
+            for (auto& p : h_positions_inside)
+            {
+                VD::AddSphere("insider", { XYZ(p) }, 0.1f, Color::red());
+            }
+        }
+
+        VD::AddWiredBox("aabb", aabb, Color::red());
     }
 }

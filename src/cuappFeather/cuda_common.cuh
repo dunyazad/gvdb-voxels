@@ -47,6 +47,8 @@
 
 #include <Serialization.hpp>
 
+#include <TypeDefinitions.h>
+
 #define alog(...) printf("\033[38;5;1m\033[48;5;15m(^(OO)^) /V/\033[0m\t" __VA_ARGS__)
 #define alogt(tag, ...) printf("\033[38;5;1m\033[48;5;15m [%d] (^(OO)^) /V/\033[0m\t" tag, __VA_ARGS__)
 
@@ -299,6 +301,15 @@ struct cuAABB
         clamped.y = fmaxf(aabb.min.y, fminf(p.y, aabb.max.y));
         clamped.z = fmaxf(aabb.min.z, fminf(p.z, aabb.max.z));
         return length2(p - clamped);
+    }
+
+    __host__ __device__ __forceinline__
+        operator AABB() const
+    {
+        AABB aabb;
+        aabb.min = glm::vec3(min.x, min.y, min.z);
+        aabb.max = glm::vec3(max.x, max.y, max.z);
+        return aabb;
     }
 };
 
