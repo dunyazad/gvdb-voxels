@@ -224,8 +224,11 @@ void VisualizeVectorField(const H_OctreeNode& node,
 
 void subdivide(H_OctreeNode& node,
 	const std::vector<float3>& points,
-	int maxPoints, int maxDepth, int depth = 0)
+	int maxPoints, int maxDepth, int depth,
+	int& nodeCount)
 {
+	nodeCount++;
+
 	if (node.indices.size() <= maxPoints || depth >= maxDepth)
 		return;
 
@@ -233,25 +236,19 @@ void subdivide(H_OctreeNode& node,
 	const float3& mn = node.bounds.min;
 	const float3& mx = node.bounds.max;
 
-	// 8개 자식 인덱스 버킷
 	std::vector<unsigned int> childIdx[8];
-
-	// 반열림 규칙: (low: < c) (high: >= c)
 	for (unsigned int idx : node.indices) {
 		const float3& p = points[idx];
-
 		int ox = (p.x >= c.x) ? 1 : 0;
 		int oy = (p.y >= c.y) ? 1 : 0;
 		int oz = (p.z >= c.z) ? 1 : 0;
 		int oct = (ox) | (oy << 1) | (oz << 2);
-
 		childIdx[oct].push_back(idx);
 	}
 
 	node.indices.clear();
 	node.isLeaf = false;
 
-	// 자식 AABB 생성 및 재귀
 	for (int i = 0; i < 8; ++i) {
 		if (childIdx[i].empty()) continue;
 
@@ -262,24 +259,21 @@ void subdivide(H_OctreeNode& node,
 		float3 childMin = make_float3(ox ? c.x : mn.x,
 			oy ? c.y : mn.y,
 			oz ? c.z : mn.z);
-
 		float3 childMax = make_float3(ox ? mx.x : c.x,
 			oy ? mx.y : c.y,
 			oz ? mx.z : c.z);
 
-		// (선택) 너무 작은 셀로 더 쪼개지지 않게 epsilon 체크
 		const float eps = 1e-7f;
 		if ((childMax.x - childMin.x) < eps ||
 			(childMax.y - childMin.y) < eps ||
-			(childMax.z - childMin.z) < eps) {
-			continue; // 더 분할하지 않음
-		}
+			(childMax.z - childMin.z) < eps)
+			continue;
 
 		node.children[i] = std::make_unique<H_OctreeNode>();
 		node.children[i]->bounds = { childMin, childMax };
 		node.children[i]->indices = std::move(childIdx[i]);
 
-		subdivide(*node.children[i], points, maxPoints, maxDepth, depth + 1);
+		subdivide(*node.children[i], points, maxPoints, maxDepth, depth + 1, nodeCount);
 	}
 }
 
@@ -292,10 +286,30 @@ H_OctreeNode buildOctree(const std::vector<float3>& points,
 	root.bounds = aabb;
 
 	root.indices.resize(points.size());
-	std::iota(root.indices.begin(), root.indices.end(), 0); // 0,1,2,3,...
+	std::iota(root.indices.begin(), root.indices.end(), 0);
 
-	subdivide(root, points, maxPoints, maxDepth);
+	int nodeCount = 0;
+	subdivide(root, points, maxPoints, maxDepth, 0, nodeCount);
+	printf("[Octree] Total Nodes: %d\n", nodeCount);
+
 	return root;
+}
+
+template<typename Func>
+void traverseOctreeNode(H_OctreeNode& node, Func&& callback, int depth = 0)
+{
+	callback(node, depth);
+
+	if (!node.isLeaf)
+	{
+		for (int i = 0; i < 8; ++i)
+		{
+			if (node.children[i])
+			{
+				traverseOctreeNode(*node.children[i], callback, depth + 1);
+			}
+		}
+	}
 }
 
 void drawOctreeNode(const H_OctreeNode& node,
@@ -1058,7 +1072,7 @@ int main(int argc, char** argv)
 
 	Feather.AddOnInitializeCallback([&]() {
 
-		unsigned int OCTREE_DEPTH = 16;
+		unsigned int OCTREE_DEPTH = 12;
 
 		//inpterpolatedColors = Color::InterpolateColors({ Color::blue(), Color::yellow(), Color::black(), Color::green(), Color::red() }, 16);
 		inpterpolatedColors = Color::InterpolateColors({ Color::blue(), Color::red() }, OCTREE_DEPTH);
@@ -1242,6 +1256,30 @@ int main(int argc, char** argv)
 						VD::AddSphere("in AABB", { XYZ(p) }, 0.05f, Color::red());
 					}
 					TE(FindKNN);
+				}
+
+				{
+					TS(Traverse);
+
+					int maxCount = 0;
+					traverseOctreeNode(root,
+						[&](H_OctreeNode& node, int depth)
+						{
+							if (1 < node.indices.size())
+							{
+								maxCount = std::max(maxCount, (int)node.indices.size());
+
+								for (auto& i : node.indices)
+								{
+									auto& p = inputPositions[i];
+									VD::AddSphere("in AABB", { XYZ(p) }, 0.05f, Color::red());
+								}
+							}
+						}
+					);
+
+					TE(Traverse);
+					printf("Max Count : %d\n", maxCount);
 				}
 			}
 
