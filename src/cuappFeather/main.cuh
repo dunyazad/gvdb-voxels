@@ -51,11 +51,5 @@ public:
     void ProcessPointCloud(float voxelSize = 0.2f, unsigned int occupyOffset = 3);
     void ProcessHalfEdgeMesh(const std::string& filename);
 
-    std::vector<float3> FindIntersectionPoints(
-        HostPointCloud<PointCloudProperty>& h_pointCloud,
-        float3 planePosition,
-        float3 planeNormal,
-        float distanceThreshold);
-
     void Test();
 };

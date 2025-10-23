@@ -16,34 +16,35 @@
 #include <thrust/device_vector.h>
 
 // Algorithms
+#include <thrust/binary_search.h>
 #include <thrust/copy.h>
-#include <thrust/fill.h>
-#include <thrust/sort.h>
-#include <thrust/reduce.h>
-#include <thrust/transform.h>
-#include <thrust/for_each.h>
 #include <thrust/count.h>
-#include <thrust/unique.h>
-#include <thrust/remove.h>
-#include <thrust/scan.h>
+#include <thrust/execution_policy.h>
+#include <thrust/fill.h>
+#include <thrust/for_each.h>
+#include <thrust/functional.h>
 #include <thrust/gather.h>
-#include <thrust/scatter.h>
 #include <thrust/inner_product.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
-#include <thrust/pair.h>
-#include <thrust/tuple.h>
-#include <thrust/execution_policy.h>
-#include <thrust/functional.h>
-#include <thrust/sequence.h>
-#include <thrust/partition.h>
 #include <thrust/merge.h>
+#include <thrust/pair.h>
+#include <thrust/partition.h>
+#include <thrust/reduce.h>
+#include <thrust/remove.h>
+#include <thrust/scan.h>
+#include <thrust/scatter.h>
+#include <thrust/sequence.h>
 #include <thrust/set_operations.h>
-#include <thrust/binary_search.h>
+#include <thrust/sort.h>
+#include <thrust/transform.h>
+#include <thrust/tuple.h>
+#include <thrust/unique.h>
 
 
+//#include <cublas_v2.h>
 
 #include <Serialization.hpp>
 
@@ -223,7 +224,7 @@ struct cuAABB
     cuAABB GetDomainAABB()
     {
         auto delta = max - min;
-        float hl = std::max({ delta.x, delta.y, delta.z });
+        float hl = fmaxf(fmaxf(delta.x, delta.y), delta.z);
         auto center = (min + max) * 0.5f;
         float half_length = hl * 0.5f;
         return {
@@ -279,6 +280,28 @@ struct cuAABB
         return make_float3((min.x + max.x) * 0.5f,
             (min.y + max.y) * 0.5f,
             (min.z + max.z) * 0.5f);
+    }
+
+    __host__ __device__ float3 extent() const
+    {
+        return make_float3(
+            max.x - min.x,
+            max.y - min.y,
+            max.z - min.z);
+    }
+
+    __host__ __device__ float volume() const
+    {
+        float3 e = extent();
+        return fabsf(e.x * e.y * e.z);
+    }
+
+    __host__ __device__ __forceinline__
+    bool intersects(const cuAABB& other) const
+    {
+        return (min.x <= other.max.x && max.x >= other.min.x &&
+            min.y <= other.max.y && max.y >= other.min.y &&
+            min.z <= other.max.z && max.z >= other.min.z);
     }
 
     __host__ __device__ __forceinline__ static

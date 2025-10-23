@@ -182,6 +182,7 @@
     <ClInclude Include="HPOctree.cuh" />
     <ClInclude Include="SOMarchingCubes.cuh" />
     <ClInclude Include="SimpleBVH.cuh" />
+    <ClInclude Include="ThrustHashMap.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="SimpleHashMap.hpp" />

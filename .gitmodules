@@ -21,3 +21,6 @@
 [submodule "External/eigen"]
 	path = External/eigen
 	url = https://gitlab.com/libeigen/eigen.git
+[submodule "External/imnodes"]
+	path = External/imnodes
+	url = https://github.com/Nelarius/imnodes
