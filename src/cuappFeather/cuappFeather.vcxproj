@@ -21,6 +21,7 @@
     <CudaCompile Include="cuBQL\builder\cuda\instantiate_builders.cu" />
     <CudaCompile Include="HalfEdgeMesh.cu" />
     <CudaCompile Include="HPOctree.cu" />
+    <CudaCompile Include="HybridOctree.cu" />
     <CudaCompile Include="LBVH.cu" />
     <CudaCompile Include="main.cu" />
     <CudaCompile Include="MarginLineFinder.cu" />
@@ -86,6 +87,7 @@
     <ClInclude Include="DenseGrid.hpp" />
     <ClInclude Include="HalfEdgeMesh.cuh" />
     <ClInclude Include="HPOctree.cuh" />
+    <ClInclude Include="HybridOctree.cuh" />
     <ClInclude Include="KdTree.hpp" />
     <ClInclude Include="LBVH.cuh" />
     <ClInclude Include="main.cuh" />

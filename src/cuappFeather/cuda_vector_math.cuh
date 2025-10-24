@@ -2,6 +2,11 @@
 #include <cuda_runtime.h>
 #include <math.h>
 
+__host__ __device__ inline float clampf(float v, float lo, float hi)
+{
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
 __host__ __device__ inline float2 make_float2(float s)
 {
     return make_float2(s, s);

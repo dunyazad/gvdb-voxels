@@ -299,9 +299,10 @@ struct cuAABB
     __host__ __device__ __forceinline__
     bool intersects(const cuAABB& other) const
     {
-        return (min.x <= other.max.x && max.x >= other.min.x &&
-            min.y <= other.max.y && max.y >= other.min.y &&
-            min.z <= other.max.z && max.z >= other.min.z);
+        return
+            (min.x <= other.max.x && max.x >= other.min.x) &&
+            (min.y <= other.max.y && max.y >= other.min.y) &&
+            (min.z <= other.max.z && max.z >= other.min.z);
     }
 
     __host__ __device__ __forceinline__ static

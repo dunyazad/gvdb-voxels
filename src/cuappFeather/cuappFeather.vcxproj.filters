@@ -20,6 +20,7 @@
     <CudaCompile Include="HPOctree.cu" />
     <CudaCompile Include="SOMarchingCubes.cu" />
     <CudaCompile Include="SimpleBVH.cu" />
+    <CudaCompile Include="HybridOctree.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\External\glad\src\glad.c" />
@@ -183,6 +184,7 @@
     <ClInclude Include="SOMarchingCubes.cuh" />
     <ClInclude Include="SimpleBVH.cuh" />
     <ClInclude Include="ThrustHashMap.hpp" />
+    <ClInclude Include="HybridOctree.cuh" />
   </ItemGroup>
   <ItemGroup>
     <None Include="SimpleHashMap.hpp" />

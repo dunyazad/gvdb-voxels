@@ -1,403 +1,726 @@
-#include <HPOctree.cuh>
+#include <HybridOctree.cuh>
 
-__global__ void Kernel_CreateLeafMap(
-	SimpleHashMapInfo<uint64_t, unsigned int> leaf_map_info,
-	const float3* d_positions,
-	unsigned int numberOfPositions,
-	unsigned int maxDepth,
-	cuAABB aabb,
-	float domain_length)
+#include <numeric>
+
+#include <IVisualDebugging.h>
+using VD = IVisualDebugging;
+
+#define STACK_MAX 1024
+
+__device__ unsigned int QueryPoint(const HybridDeviceOctreeNode* nodes, unsigned int nodeCount, const float3& p);
+
+__global__ void Kernel_QueryPoint(const HybridDeviceOctreeNode* nodes,
+    unsigned int nodeCount, const float3* queryPoints, unsigned int queryCount, unsigned int* outNodeIndices);
+
+__device__ void QueryRange(const HybridDeviceOctreeNode* nodes,
+    unsigned int nodeCount, const cuAABB& range, unsigned int* outIndices, unsigned int maxOut, unsigned int& outCount);
+
+__global__ void Kernel_QueryRange(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const cuAABB* ranges, unsigned int queryCount,
+    unsigned int* outIndices /*[queryCount * maxOutPerQuery]*/,
+    unsigned int* outCounts  /*[queryCount]*/,
+    unsigned int maxOutPerQuery);
+
+__device__ void QueryRadius(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3& center, float radius,
+    unsigned int* outIndices, unsigned int maxOut, unsigned int& outCount);
+
+__global__ void Kernel_QueryRadius(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3* centers, const float* radii, unsigned int queryCount,
+    unsigned int* outIndices, unsigned int* outCounts, unsigned int maxOutPerQuery);
+
+__device__ unsigned int QueryNearestNodeDevice(const HybridDeviceOctreeNode* nodes, unsigned int nodeCount, const float3& p);
+
+__global__ void Kernel_QueryNearestNode(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3* queryPoints, unsigned int queryCount,
+    unsigned int* outNearest /*[queryCount]*/);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+HybridOctree::HybridOctree(unsigned int maxDepth)
+	: maxDepth(maxDepth)
 {
-	auto tid = blockDim.x * blockIdx.x + threadIdx.x;
-	if (tid >= numberOfPositions) return;
-
-	const float3& p = d_positions[tid];
-	HPOctreeKey leaf_key;
-	leaf_key.FromPosition(p, aabb, domain_length, maxDepth);
-	uint64_t leaf_code = leaf_key.ToCode();
-
-	SimpleHashMap<uint64_t, unsigned int>::insert(leaf_map_info, leaf_code, tid);
+	interpolatedColors = Color::InterpolateColors({ Color::blue(), Color::red() }, maxDepth);
 }
 
-__global__ void Kernel_HPOctree_Occupy(
-	SimpleHashMapInfo<uint64_t, unsigned int> info,
-	float3* d_positions,
-	unsigned int numberOfPositions,
-	unsigned int maxDepth,
-	cuAABB aabb,
-	float domain_length)
+HybridOctree::~HybridOctree()
 {
-	auto tid = blockDim.x * blockIdx.x + threadIdx.x;
-	if (tid >= numberOfPositions) return;
-
-	const float3& p = d_positions[tid];
-
-	HPOctreeKey leaf_key;
-	leaf_key.FromPosition(p, aabb, domain_length, maxDepth);
-
-	for (int d = leaf_key.d; d >= 0; --d)
-	{
-		HPOctreeKey ancestor_key = leaf_key.GetAncestorKey(d);
-		uint64_t ancestor_code = ancestor_key.ToCode();
-
-		unsigned int dummy_value;
-		if (SimpleHashMap<uint64_t, unsigned int>::find(info, ancestor_code, &dummy_value))
-		{
-			break;
-		}
-
-		SimpleHashMap<uint64_t, unsigned int>::insert(info, ancestor_code, 1);
-	}
+	CUDA_SAFE_FREE(device_nodes);
+	CUDA_SAFE_FREE(device_flatIndices);
 }
 
-__global__ void Kernel_CompactOccupiedKeys(
-	SimpleHashMapInfo<uint64_t, unsigned int> info,
-	uint64_t* compacted_keys,
-	unsigned int* counter)
+void HybridOctree::Subdivide(
+    unsigned int nodeIndex,
+    const std::vector<float3>& points,
+    unsigned int maxPoints, unsigned int maxDepth, unsigned int depth)
 {
-	auto tid = blockDim.x * blockIdx.x + threadIdx.x;
-	if (tid >= info.capacity) return;
+    HybridHostOctreeNode& node = host_nodes[nodeIndex];
 
-	const uint64_t empty_val = empty_key<uint64_t>();
-	const uint64_t key_code = info.entries[tid].key;
+    // 종료 조건: 리프로 유지
+    if (node.indices.size() <= (size_t)maxPoints || depth >= maxDepth)
+        return;
 
-	if (key_code != empty_val)
-	{
-		unsigned int write_idx = atomicAdd(counter, 1);
+    const float3 c = (node.bounds.min + node.bounds.max) * 0.5f;
+    const float3 mn = node.bounds.min;
+    const float3 mx = node.bounds.max;
 
-		compacted_keys[write_idx] = key_code;
-	}
+    // 1) 임시 버킷에만 분배 (원본 indices는 자식 생성 확정 전까지 유지)
+    std::vector<unsigned int> childIdx[8];
+    for (unsigned int idx : node.indices)
+    {
+        const float3& p = points[idx];
+        const unsigned int ox = (p.x >= c.x) ? 1 : 0;
+        const unsigned int oy = (p.y >= c.y) ? 1 : 0;
+        const unsigned int oz = (p.z >= c.z) ? 1 : 0;
+        const unsigned int oct = (ox) | (oy << 1) | (oz << 2);
+        childIdx[oct].push_back(idx);
+    }
+
+    // 2) 실제로 생성되는 자식 수를 계산
+    unsigned int created = 0;
+    unsigned int newChildIndex[8]; // 생성된 경우에만 인덱스 기록
+    std::fill(std::begin(newChildIndex), std::end(newChildIndex), -1);
+
+    const float eps = 1e-7f;
+
+    for (unsigned int i = 0; i < 8; ++i)
+    {
+        if (childIdx[i].empty()) continue;
+
+        const unsigned int ox = i & 1;
+        const unsigned int oy = (i >> 1) & 1;
+        const unsigned int oz = (i >> 2) & 1;
+
+        const float3 childMin = make_float3(
+            ox ? c.x : mn.x,
+            oy ? c.y : mn.y,
+            oz ? c.z : mn.z);
+
+        const float3 childMax = make_float3(
+            ox ? mx.x : c.x,
+            oy ? mx.y : c.y,
+            oz ? mx.z : c.z);
+
+        // 너무 얇은 셀은 스킵
+        if ((childMax.x - childMin.x) < eps ||
+            (childMax.y - childMin.y) < eps ||
+            (childMax.z - childMin.z) < eps)
+        {
+            continue;
+        }
+
+        // 자식 노드 생성
+        const unsigned int newIdx = (int)host_nodes.size();
+        host_nodes.emplace_back();
+
+        HybridHostOctreeNode& child = host_nodes.back();
+        child.bounds = { childMin, childMax };
+        child.parent = (unsigned int)nodeIndex;
+        child.indices = std::move(childIdx[i]);
+
+        newChildIndex[i] = newIdx;
+        ++created;
+    }
+
+    // 3) 자식이 하나도 없다면 리프로 유지하고 반환 (인덱스 보존!)
+    if (created == 0)
+    {
+        node.isLeaf = 1;
+        return;
+    }
+
+    // 4) 자식이 하나 이상이면 내부 노드로 전환하고 인덱스 비움
+    node.isLeaf = 0;
+    //node.indices.clear();
+    for (unsigned int i = 0; i < 8; ++i)
+        node.children[i] = newChildIndex[i];
+
+    // 5) 재귀 분할
+    for (unsigned int i = 0; i < 8; ++i)
+    {
+        const unsigned int cidx = node.children[i];
+        if (cidx != -1)
+            Subdivide(cidx, points, maxPoints, maxDepth, depth + 1);
+    }
 }
 
-__device__ inline unsigned int lower_bound_device(const uint64_t* arr, unsigned int arr_size, uint64_t value)
+void HybridOctree::Build(
+	const std::vector<float3>& points,
+	const cuAABB& aabb,
+    unsigned int maxPoints, unsigned int maxDepth)
 {
-	unsigned int low = 0;
-	unsigned int high = arr_size;
-	while (low < high)
+    if (this->maxDepth != maxDepth) {
+        this->maxDepth = maxDepth;
+        interpolatedColors = Color::InterpolateColors({ Color::blue(), Color::red() }, this->maxDepth);
+    }
+
+    host_nodes.clear();
+	host_nodes.reserve(points.size() * 8 / (maxPoints == 0 ? 1 : maxPoints));
+	host_nodes.emplace_back();
+
+	HybridHostOctreeNode& root = host_nodes[0];
+	root.bounds = aabb;
+	root.indices.resize(points.size());
+	std::iota(root.indices.begin(), root.indices.end(), 0);
+
+	Subdivide(0, points, maxPoints, maxDepth, 0);
+	printf("[Octree] Total Nodes: %zu\n", host_nodes.size());
+
+
+
+	unsigned int nodeCount = host_nodes.size();
+
+	std::vector<unsigned int> flatIndices;
+	flatIndices.reserve(points.size());
+
+	std::vector<HybridDeviceOctreeNode> nodesToCopy(nodeCount);
+	size_t offset = 0;
+	for (size_t i = 0; i < nodeCount; ++i)
 	{
-		unsigned int mid = low + (high - low) / 2;
-		if (arr[mid] < value)
-		{
-			low = mid + 1;
-		}
-		else
-		{
-			high = mid;
-		}
-	}
-	return low;
-}
+		const HybridHostOctreeNode& src = host_nodes[i];
+		HybridDeviceOctreeNode& dst = nodesToCopy[i];
 
-__global__ void Kernel_BuildOctreeNodes(
-	SimpleHashMapInfo<uint64_t, unsigned int> leaf_map_info,
-	HPOctreeNode* nodes,
-	const uint64_t* d_sorted_keys,
-	unsigned int numNodes,
-	unsigned int maxDepth)
-{
-	auto tid = blockDim.x * blockIdx.x + threadIdx.x;
-	if (tid >= numNodes) return;
+		dst.bounds = src.bounds;
+		dst.parent = src.parent;
+		memcpy(dst.children, src.children.data(), sizeof(unsigned int) * 8);
+		dst.isLeaf = src.isLeaf;
 
-	const uint64_t my_key_code = d_sorted_keys[tid];
-	HPOctreeKey my_key;
-	my_key.FromCode(my_key_code);
+		dst.V = src.V;
+		dst.divergence = src.divergence;
+		dst.chi = src.chi;
 
-	uint32_t parent_idx = UINT32_MAX;
-	if (my_key.d > 0)
-	{
-		HPOctreeKey parent_key = my_key.GetParentKey();
-		uint64_t parent_key_code = parent_key.ToCode();
-		parent_idx = lower_bound_device(d_sorted_keys, numNodes, parent_key_code);
-		if (parent_idx >= numNodes || d_sorted_keys[parent_idx] != parent_key_code)
-		{
-			parent_idx = UINT32_MAX;
-		}
-	}
+		dst.indexOffset = (unsigned int)offset;
+		dst.indexCount = (unsigned int)src.indices.size();
 
-	unsigned int point_idx = UINT32_MAX; // 기본값은 '없음'
-	if (my_key.d == maxDepth) // 현재 노드가 리프 노드라면
-	{
-		// leaf_map에서 현재 리프 키로 pointIndex를 찾는다.
-		SimpleHashMap<uint64_t, unsigned int>::find(leaf_map_info, my_key_code, &point_idx);
-	}
-
-	uint32_t first_child_idx = UINT32_MAX;
-	uint32_t child_count = 0;
-	if (my_key.d < maxDepth)
-	{
-		// 현재 노드의 Morton 코드 부분만 추출 (상위 깊이 비트 제거)
-		const uint64_t my_morton = my_key_code & HPOctreeKey::COORD_MASK;
-
-		// 자식 노드의 깊이에 해당하는 비트 마스크를 계산
-		const uint64_t child_depth_bits = (uint64_t)(my_key.d + 1) << HPOctreeKey::DEPTH_SHIFT;
-
-		// **하한선**: 첫 번째 자식(000)의 전체 키(Key) 계산
-		// 부모 Morton 코드를 3비트 왼쪽으로 밀면 첫 자식의 Morton 코드가 됨
-		const uint64_t first_child_morton = my_morton << 3;
-		const uint64_t lower_bound_code = child_depth_bits | first_child_morton;
-
-		// **상한선**: 마지막 자식(111) 바로 다음 키 계산
-		// 부모의 다음 형제 노드의 첫 번째 자식에 해당함
-		const uint64_t after_last_child_morton = (my_morton + 1) << 3;
-		const uint64_t upper_bound_code = child_depth_bits | after_last_child_morton;
-
-		// 이진 탐색으로 자식 그룹의 시작과 끝 인덱스를 찾음
-		const uint32_t start_idx = lower_bound_device(d_sorted_keys, numNodes, lower_bound_code);
-		const uint32_t end_idx = lower_bound_device(d_sorted_keys, numNodes, upper_bound_code);
-
-		child_count = end_idx - start_idx;
-		if (child_count > 0)
-		{
-			first_child_idx = start_idx;
-		}
-	}
-
-	nodes[tid].parentIndex = parent_idx;
-	nodes[tid].firstChildIndex = first_child_idx;
-	nodes[tid].childCount = child_count;
-	nodes[tid].key = my_key;
-	nodes[tid].pointIndex = point_idx;
-}
-
-__global__ void Kernel_NNSearch(
-	NNS_Result* d_results,
-	const float3* d_query_points,
-	unsigned int numQueries,
-	const HPOctreeNode* d_nodes,
-	unsigned int numNodes,
-	const float3* d_positions, // 원본 데이터 포인트 배열
-	cuAABB domain_aabb,
-	float domain_length,
-	unsigned int maxDepth)
-{
-	auto tid = blockDim.x * blockIdx.x + threadIdx.x;
-	if (tid >= numQueries) return;
-
-	const float3 query_pos = d_query_points[tid];
-
-	// 1. 각 스레드(쿼리 포인트)를 위한 변수 초기화
-	float best_dist_sq = FLT_MAX;
-	unsigned int best_index = UINT32_MAX;
-
-	// GPU 커널 내에서 사용할 작은 로컬 메모리 스택
-	unsigned int stack[64]; // 옥트리 최대 깊이보다 충분히 큰 크기
-	int stack_ptr = 0;
-
-	// 2. 탐색 시작: 스택에 루트 노드(인덱스 0)를 넣는다.
-	stack[stack_ptr++] = 0;
-
-	int count = 0;
-	// 3. 스택이 빌 때까지 깊이 우선 탐색(DFS) 수행
-	while (stack_ptr > 0)
-	{
-		unsigned int nodeIndex = stack[--stack_ptr]; // 스택에서 노드를 꺼냄(Pop)
-		const HPOctreeNode& node = d_nodes[nodeIndex];
-
-		// **가지치기(Pruning) 검사**
-		cuAABB aabb = node.key.GetAABB(domain_aabb, domain_length);
-		if (detail::PointToAABBDistanceSq(query_pos, aabb) >= best_dist_sq)
-		{
-			continue; // 이 노드와 모든 자식은 탐색할 필요 없음
-		}
-
-		// 4. 노드 타입에 따라 처리
-		if (node.childCount > 0) // 내부 노드(Internal Node)인 경우
-		{
-			// 자식들을 스택에 넣는다 (Push)
-			// (최적화: 쿼리 지점과 가까운 자식부터 스택에 넣으면 더 좋음)
-			for (unsigned int i = 0; i < node.childCount; ++i)
-			{
-				if (stack_ptr < 64) // 스택 오버플로우 방지
-				{
-					stack[stack_ptr++] = node.firstChildIndex + i;
-				}
-			}
-		}
-		else // 리프 노드(Leaf Node)인 경우
-		{
-			// 노드에 저장된 pointIndex를 이용해 실제 데이터 포인트와 거리 비교
-			unsigned int point_idx = node.pointIndex;
-			if (UINT32_MAX != point_idx)
-			{
-				float dist_sq = detail::DistanceSq(query_pos, d_positions[point_idx]);
-
-				// 더 가까운 점을 찾으면 업데이트
-				if (dist_sq < best_dist_sq)
-				{
-					best_dist_sq = dist_sq;
-					best_index = point_idx;
-				}
-			}
-		}
+		flatIndices.insert(flatIndices.end(), src.indices.begin(), src.indices.end());
+		offset += src.indices.size();
 	}
 
-	// 5. 최종 결과를 전역 메모리에 기록
-	d_results[tid].index = best_index;
-	d_results[tid].distance_sq = best_dist_sq;
+    CUDA_SAFE_FREE(device_nodes);
+    CUDA_SAFE_FREE(device_flatIndices);
+
+    if (nodeCount > 0)
+    {
+        CUDA_MALLOC(&device_nodes, sizeof(HybridDeviceOctreeNode) * nodeCount);
+        CUDA_COPY_H2D(device_nodes, nodesToCopy.data(), sizeof(HybridDeviceOctreeNode) * nodeCount);
+    }
+    else
+    {
+        device_nodes = nullptr;
+    }
+
+    if (!flatIndices.empty())
+    {
+        CUDA_MALLOC(&device_flatIndices, sizeof(unsigned int) * flatIndices.size());
+        CUDA_COPY_H2D(device_flatIndices, flatIndices.data(), sizeof(unsigned int) * flatIndices.size());
+    }
+    else
+    {
+        device_flatIndices = nullptr;
+    }
 }
 
-void HPOctree::Initialize(const std::vector<float3>& positions, const cuAABB& aabb, unsigned int maxDepth)
+void HybridOctree::DrawNode(unsigned int nodeIndex, unsigned int depth)
 {
-	Initialize(positions.data(), positions.size(), aabb, maxDepth);
-}
+	const HybridHostOctreeNode& node = host_nodes[nodeIndex];
+    glm::vec4 color = glm::vec4(1, 1, 1, 1);
+    if (!interpolatedColors.empty())
+        color = interpolatedColors[depth % interpolatedColors.size()];
 
-void HPOctree::Initialize(const float3* h_positions, unsigned int numberOfPositions, const cuAABB& aabb, unsigned int maxDepth)
-{
-	originalAABB = aabb;
-	domainAABB = HPOctreeKey::GetDomainAABB(aabb);
-	this->domain_length = HPOctreeKey::GetDomainLength(domainAABB);
-
-	this->maxDepth = maxDepth;
-	if (0 == this->maxDepth) this->maxDepth = (1u << HPOctreeKey::DEPTH_BITS) - 1;
-	
-	this->numberOfPositions = numberOfPositions;
-
-	CUDA_MALLOC(&d_positions, sizeof(float3) * numberOfPositions);
-	CUDA_COPY_H2D(d_positions, h_positions, sizeof(float3) * numberOfPositions);
-	CUDA_SYNC();
-
-	const unsigned int max_keys_per_point = this->maxDepth + 1;
-	const size_t required_capacity = (size_t)numberOfPositions * max_keys_per_point;
-	const size_t capacity_with_margin = required_capacity * 2;
-	
-	keys.Initialize(capacity_with_margin, 64);
-	leaf_map.Initialize(capacity_with_margin, 64);
-
-	CUDA_TS(OctreeInitialiize);
-
-	LaunchKernel(Kernel_CreateLeafMap, numberOfPositions,
-		leaf_map.info, d_positions, numberOfPositions, this->maxDepth, domainAABB, domain_length);
-
-	LaunchKernel(Kernel_HPOctree_Occupy, numberOfPositions,
-		keys.info, d_positions, numberOfPositions, this->maxDepth, domainAABB, domain_length);
-
-	CUDA_COPY_D2H(&numberOfNodes, keys.info.numberOfEntries, sizeof(unsigned int));
-
-	uint64_t* d_compacted_keys = nullptr;
-	CUDA_MALLOC(&d_compacted_keys, sizeof(uint64_t) * numberOfNodes);
-
-	unsigned int* d_compaction_counter = nullptr;
-	CUDA_MALLOC(&d_compaction_counter, sizeof(unsigned int));
-	CUDA_MEMSET(d_compaction_counter, 0, sizeof(unsigned int));
-
-	LaunchKernel(Kernel_CompactOccupiedKeys, keys.info.capacity,
-		keys.info, d_compacted_keys, d_compaction_counter);
-
-	thrust::device_ptr<uint64_t> d_sorted_keys(d_compacted_keys);
-
-	thrust::sort(d_sorted_keys, d_sorted_keys + numberOfNodes);
-
-	CUDA_MALLOC(&d_nodes, sizeof(HPOctreeNode) * numberOfNodes);
-	CUDA_MEMSET(d_nodes, 0xFF, sizeof(HPOctreeNode) * numberOfNodes);
-
-	LaunchKernel(Kernel_BuildOctreeNodes, numberOfNodes,
-		leaf_map.info, d_nodes, thrust::raw_pointer_cast(d_sorted_keys), numberOfNodes, maxDepth);
-
-	CUDA_SAFE_FREE(d_compacted_keys);
-	CUDA_SAFE_FREE(d_compaction_counter);
-
-	CUDA_TE(OctreeInitialiize);
-}
-
-void HPOctree::Terminate()
-{
-	keys.Terminate();
-	leaf_map.Terminate();
-
-	CUDA_SAFE_FREE(d_positions);
-	numberOfPositions = 0;
-
-	CUDA_SAFE_FREE(d_nodes);
-	numberOfNodes = 0;
-}
-
-std::vector<NNS_Result> HPOctree::Search(const std::vector<float3>& h_queries)
-{
-	unsigned int numQueries = h_queries.size();
-	std::vector<NNS_Result> h_results(numQueries);
-	if (numQueries == 0) return h_results;
-
-	float3* d_query_points;
-	NNS_Result* d_results;
-
-	CUDA_MALLOC(&d_query_points, sizeof(float3) * numQueries);
-	CUDA_MALLOC(&d_results, sizeof(NNS_Result) * numQueries);
-
-	CUDA_COPY_H2D(d_query_points, h_queries.data(), sizeof(float3) * numQueries);
-
-	// NN 탐색 커널 실행!
-	LaunchKernel(Kernel_NNSearch, numQueries,
-		d_results,
-		d_query_points,
-		numQueries,
-		d_nodes,
-		numberOfNodes,
-		d_positions, // 원본 데이터 포인트의 GPU 포인터
-		domainAABB,
-		domain_length,
-		maxDepth
-	);
-	CUDA_SYNC();
-
-	CUDA_COPY_D2H(h_results.data(), d_results, sizeof(NNS_Result) * numQueries);
-
-	// h_results에 담긴 결과 확인...
-	// ...
-
-	cudaFree(d_query_points);
-	cudaFree(d_results);
-
-	return h_results;
-}
-
-std::vector<HPOctreeKey> HPOctree::Dump()
-{
-	unsigned int num_occupied_entries = 0;
-	cudaMemcpy(&num_occupied_entries, keys.info.numberOfEntries, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-
-	if (num_occupied_entries == 0)
-	{
-		return {};
-	}
-
-	uint64_t* d_compacted_keys = nullptr;
-	cudaMalloc(&d_compacted_keys, sizeof(uint64_t) * num_occupied_entries);
-
-	unsigned int* d_compaction_counter = nullptr;
-	cudaMalloc(&d_compaction_counter, sizeof(unsigned int));
-	cudaMemset(d_compaction_counter, 0, sizeof(unsigned int));
-
-	const size_t capacity = keys.info.capacity;
-	const int threads_per_block = 256;
-	const int blocks = (capacity + threads_per_block - 1) / threads_per_block;
-
-	Kernel_CompactOccupiedKeys << <blocks, threads_per_block >> > (
-		keys.info,
-		d_compacted_keys,
-		d_compaction_counter
-		);
-	cudaDeviceSynchronize();
-
-	std::vector<uint64_t> h_compacted_codes(num_occupied_entries);
-	cudaMemcpy(
-		h_compacted_codes.data(),
-		d_compacted_keys,
-		sizeof(uint64_t) * num_occupied_entries,
-		cudaMemcpyDeviceToHost
+	VD::AddWiredBox(
+		"octree_" + std::to_string(depth),
+		{ glm::vec3(XYZ(node.bounds.min)), glm::vec3(XYZ(node.bounds.max)) },
+		color
 	);
 
-	cudaFree(d_compacted_keys);
-	cudaFree(d_compaction_counter);
-
-	std::vector<HPOctreeKey> result_keys;
-	result_keys.reserve(num_occupied_entries);
-
-	for (uint64_t code : h_compacted_codes)
+	if (0 == node.isLeaf)
 	{
-		HPOctreeKey key;
-		key.FromCode(code);
-		result_keys.push_back(key);
+		for (unsigned int i = 0; i < 8; ++i)
+		{
+            unsigned int c = node.children[i];
+			if (c != -1)
+				DrawNode(c, depth + 1);
+		}
 	}
+}
 
-	return result_keys;
+void HybridOctree::Draw()
+{
+    if (host_nodes.empty()) return;
+
+	DrawNode(0, 0);
+}
+
+std::vector<unsigned int> HybridOctree::QueryPoints(const std::vector<float3>& queryPoints)
+{
+    if (!device_nodes || queryPoints.empty()) return {};
+
+    unsigned int queryCount = (unsigned int)queryPoints.size();
+
+    float3* d_points = nullptr;
+    unsigned int* d_results = nullptr;
+
+    CUDA_MALLOC(&d_points, sizeof(float3) * queryCount);
+    CUDA_MALLOC(&d_results, sizeof(unsigned int) * queryCount);
+
+    CUDA_COPY_H2D(d_points, queryPoints.data(), sizeof(float3) * queryCount);
+
+    LaunchKernel(Kernel_QueryPoint, queryCount,
+        device_nodes,
+        (int)host_nodes.size(),
+        d_points,
+        queryCount,
+        d_results);
+
+    std::vector<unsigned int> results(queryCount);
+    CUDA_COPY_D2H(results.data(), d_results, sizeof(unsigned int) * queryCount);
+
+    CUDA_SYNC();
+
+    // 메모리 정리
+    CUDA_SAFE_FREE(d_points);
+    CUDA_SAFE_FREE(d_results);
+
+    return results;
+}
+
+void HybridOctree::QueryRange(
+    const std::vector<cuAABB>& ranges,
+    unsigned int maxOutPerQuery,
+    std::vector<unsigned int>& outFlatIndices,
+    std::vector<unsigned int>& outCounts)
+{
+    if (!device_nodes || ranges.empty() || maxOutPerQuery <= 0) { outFlatIndices.clear(); outCounts.clear(); return; }
+
+    unsigned int queryCount = (unsigned int)ranges.size();
+    cuAABB* d_ranges = nullptr;
+    unsigned int* d_idx = nullptr;
+    unsigned int* d_counts = nullptr;
+
+    CUDA_MALLOC(&d_ranges, sizeof(cuAABB) * queryCount);
+    CUDA_COPY_H2D(d_ranges, ranges.data(), sizeof(cuAABB) * queryCount);
+
+    CUDA_MALLOC(&d_idx, sizeof(unsigned int) * queryCount * maxOutPerQuery);
+    CUDA_MALLOC(&d_counts, sizeof(unsigned int) * queryCount);
+
+    LaunchKernel(Kernel_QueryRange, queryCount,
+        device_nodes, (unsigned int)host_nodes.size(),
+        d_ranges, queryCount,
+        d_idx, d_counts, maxOutPerQuery);
+
+    outFlatIndices.resize((size_t)queryCount * maxOutPerQuery);
+    outCounts.resize(queryCount);
+    CUDA_COPY_D2H(outFlatIndices.data(), d_idx, sizeof(unsigned int) * queryCount * maxOutPerQuery);
+    CUDA_COPY_D2H(outCounts.data(), d_counts, sizeof(unsigned int) * queryCount);
+    CUDA_SYNC();
+
+    CUDA_SAFE_FREE(d_ranges);
+    CUDA_SAFE_FREE(d_idx);
+    CUDA_SAFE_FREE(d_counts);
+}
+
+void HybridOctree::QueryRadius(
+    const std::vector<float3>& centers,
+    const std::vector<float>& radii,
+    unsigned int maxOutPerQuery,
+    std::vector<unsigned int>& outFlatIndices,
+    std::vector<unsigned int>& outCounts)
+{
+    unsigned int q = (unsigned int)centers.size();
+    if (!device_nodes || q == 0 || (unsigned int)radii.size() != q || maxOutPerQuery <= 0) { outFlatIndices.clear(); outCounts.clear(); return; }
+
+    float3* d_centers = nullptr;
+    float* d_radii = nullptr;
+    unsigned int* d_idx = nullptr;
+    unsigned int* d_counts = nullptr;
+    CUDA_MALLOC(&d_centers, sizeof(float3) * q);
+    CUDA_MALLOC(&d_radii, sizeof(float) * q);
+    CUDA_MALLOC(&d_idx, sizeof(unsigned int) * q * maxOutPerQuery);
+    CUDA_MALLOC(&d_counts, sizeof(unsigned int) * q);
+
+    CUDA_COPY_H2D(d_centers, centers.data(), sizeof(float3) * q);
+    CUDA_COPY_H2D(d_radii, radii.data(), sizeof(float) * q);
+
+    LaunchKernel(Kernel_QueryRadius, q,
+        device_nodes, (unsigned int)host_nodes.size(), d_centers, d_radii, q,
+        d_idx, d_counts, maxOutPerQuery);
+
+    outFlatIndices.resize((size_t)q * maxOutPerQuery);
+    outCounts.resize(q);
+    CUDA_COPY_D2H(outFlatIndices.data(), d_idx, sizeof(unsigned int) * q * maxOutPerQuery);
+    CUDA_COPY_D2H(outCounts.data(), d_counts, sizeof(unsigned int) * q);
+    CUDA_SYNC();
+
+    CUDA_SAFE_FREE(d_centers);
+    CUDA_SAFE_FREE(d_radii);
+    CUDA_SAFE_FREE(d_idx);
+    CUDA_SAFE_FREE(d_counts);
+}
+
+std::vector<unsigned int> HybridOctree::QueryNearestNode(const std::vector<float3>& queryPoints)
+{
+    std::vector<unsigned int> out;
+    if (!device_nodes || queryPoints.empty()) return out;
+
+    int q = (unsigned int)queryPoints.size();
+    float3* d_points = nullptr;
+    unsigned int* d_out = nullptr;
+
+    CUDA_MALLOC(&d_points, sizeof(float3) * q);
+    CUDA_MALLOC(&d_out, sizeof(unsigned int) * q);
+    CUDA_COPY_H2D(d_points, queryPoints.data(), sizeof(float3) * q);
+
+    LaunchKernel(Kernel_QueryNearestNode, q,
+        device_nodes, (unsigned int)host_nodes.size(), d_points, q, d_out);
+
+    out.resize(q);
+    CUDA_COPY_D2H(out.data(), d_out, sizeof(unsigned int) * q);
+    CUDA_SYNC();
+
+    CUDA_SAFE_FREE(d_points);
+    CUDA_SAFE_FREE(d_out);
+    return out;
+}
+
+
+
+
+
+__device__ unsigned int QueryPoint(const HybridDeviceOctreeNode* nodes, unsigned int nodeCount, const float3& p)
+{
+    unsigned int current = 0;
+    while (true)
+    {
+        if (current < 0 || current >= nodeCount)
+            return UINT32_MAX;
+
+        const HybridDeviceOctreeNode& node = nodes[current];
+
+        // 점이 현재 노드 bounds에 포함되지 않으면 실패
+        if (!(p.x >= node.bounds.min.x && p.x <= node.bounds.max.x &&
+            p.y >= node.bounds.min.y && p.y <= node.bounds.max.y &&
+            p.z >= node.bounds.min.z && p.z <= node.bounds.max.z))
+        {
+            return UINT32_MAX;
+        }
+
+        if (node.isLeaf)
+            return current;
+
+        bool found = false;
+        for (unsigned int i = 0; i < 8; ++i)
+        {
+            unsigned int c = node.children[i];
+            if (c == UINT32_MAX) continue;
+
+            const HybridDeviceOctreeNode& child = nodes[c];
+            if (p.x >= child.bounds.min.x && p.x <= child.bounds.max.x &&
+                p.y >= child.bounds.min.y && p.y <= child.bounds.max.y &&
+                p.z >= child.bounds.min.z && p.z <= child.bounds.max.z)
+            {
+                current = c;
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            return current; // 해당 자식이 없으면 현재 노드 리턴
+    }
+}
+
+__global__ void Kernel_QueryPoint(
+    const HybridDeviceOctreeNode* nodes,
+    unsigned int nodeCount,
+    const float3* queryPoints,
+    unsigned int queryCount,
+    unsigned int* outNodeIndices)
+{
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= queryCount) return;
+
+    outNodeIndices[tid] = QueryPoint(nodes, nodeCount, queryPoints[tid]);
+}
+
+
+
+
+
+__device__ void QueryRange(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const cuAABB& range,
+    unsigned int* outIndices, unsigned int maxOut, unsigned int& outCount)
+{
+    unsigned int stack[STACK_MAX];
+    unsigned int sp = 0;
+    stack[sp++] = 0;
+    outCount = 0;
+
+    while (sp > 0)
+    {
+        unsigned int idx = stack[--sp];
+        if (idx >= nodeCount) continue;
+
+        const auto& node = nodes[idx];
+        if (!node.bounds.intersects(range)) continue;
+
+        if (node.isLeaf)
+        {
+            if (outCount < maxOut)
+                outIndices[outCount] = idx;
+            ++outCount;
+        }
+        else
+        {
+#pragma unroll
+            for (unsigned int i = 0; i < 8; ++i)
+            {
+                unsigned int c = node.children[i];
+                if (c != UINT32_MAX && sp < STACK_MAX)
+                    stack[sp++] = c;
+            }
+        }
+    }
+}
+
+__global__ void Kernel_QueryRange(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const cuAABB* ranges, unsigned int queryCount,
+    unsigned int* outIndices /*[queryCount * maxOutPerQuery]*/,
+    unsigned int* outCounts  /*[queryCount]*/,
+    unsigned int maxOutPerQuery)
+{
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= queryCount) return;
+
+    unsigned int* myOut = outIndices + tid * maxOutPerQuery;
+    unsigned int count = 0;
+    QueryRange(nodes, nodeCount, ranges[tid], myOut, maxOutPerQuery, count);
+
+    if (count > maxOutPerQuery)
+        count = maxOutPerQuery;
+
+    outCounts[tid] = count;
+}
+
+__device__ void QueryRadius(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3& center, float radius,
+    unsigned int* outIndices, unsigned int maxOut, unsigned int& outCount)
+{
+    float r2 = radius * radius;
+    unsigned int stack[STACK_MAX];
+    unsigned int sp = 0;
+    stack[sp++] = 0; outCount = 0;
+
+    while (sp > 0) {
+        unsigned int idx = stack[--sp];
+        if (idx < 0 || idx >= nodeCount) continue;
+        const auto& node = nodes[idx];
+
+        float d2 = cuAABB::Distance2(node.bounds, center);
+        if (d2 > r2) continue;
+
+        if (outCount < maxOut) outIndices[outCount] = idx;
+        ++outCount;
+
+        if (!node.isLeaf) {
+#pragma unroll
+            for (unsigned int i = 0; i < 8; ++i) {
+                unsigned int c = node.children[i];
+                if (c != -1 && sp < STACK_MAX) stack[sp++] = c;
+            }
+        }
+    }
+}
+
+__global__ void Kernel_QueryRadius(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3* centers, const float* radii, unsigned int queryCount,
+    unsigned int* outIndices, unsigned int* outCounts, unsigned int maxOutPerQuery)
+{
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= queryCount) return;
+
+    unsigned int* myOut = outIndices + tid * maxOutPerQuery;
+    unsigned int count = 0;
+    QueryRadius(nodes, nodeCount, centers[tid], radii[tid], myOut, maxOutPerQuery, count);
+    outCounts[tid] = count;
+}
+
+
+
+
+
+
+__device__ unsigned int QueryNearestNodeDevice(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3& p)
+{
+    unsigned int bestNode = -1;
+    float bestD2 = FLT_MAX;
+
+    unsigned int stack[STACK_MAX];
+    unsigned int sp = 0; stack[sp++] = 0;
+
+    while (sp > 0) {
+        unsigned int idx = stack[--sp];
+        if (idx < 0 || idx >= nodeCount) continue;
+        const auto& node = nodes[idx];
+
+        float d2 = cuAABB::Distance2(node.bounds, p);
+        if (d2 >= bestD2) continue;
+
+        if (node.isLeaf) {
+            bestD2 = d2; bestNode = idx;
+        }
+        else {
+#pragma unroll
+            for (unsigned int i = 0; i < 8; ++i) {
+                unsigned int c = node.children[i];
+                if (c != -1 && sp < STACK_MAX) stack[sp++] = c;
+            }
+        }
+    }
+    return bestNode;
+}
+
+__global__ void Kernel_QueryNearestNode(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3* queryPoints, unsigned int queryCount,
+    unsigned int* outNearest /*[queryCount]*/)
+{
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= queryCount) return;
+    outNearest[tid] = QueryNearestNodeDevice(nodes, nodeCount, queryPoints[tid]);
+}
+
+template<unsigned int K>
+struct SmallKList {
+    // 거리 오름차순 유지
+    unsigned int   idx[K];
+    float d2[K];
+    unsigned int n;
+    __device__ void init() { n = 0; }
+    __device__ void try_push(unsigned int id, float dist2) {
+        // 이미 K개면, 마지막(최대)보다 작은 경우만 삽입
+        if (n == K) {
+            if (dist2 >= d2[n - 1]) return;
+            // 한 칸 비우기 위해 마지막 버림
+            --n;
+        }
+        // 뒤에서부터 삽입 위치 탐색 (오름차순)
+        unsigned int pos = n;
+        while (pos > 0 && d2[pos - 1] > dist2) {
+            if (pos < K) { idx[pos] = idx[pos - 1]; d2[pos] = d2[pos - 1]; }
+            --pos;
+        }
+        if (pos < K) { idx[pos] = id; d2[pos] = dist2; }
+        if (n < K) ++n;
+    }
+};
+
+template<unsigned int K>
+__device__ unsigned int QueryKNNNodeDevice(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3& p,
+    unsigned int* outIdx /*size K*/)
+{
+    SmallKList<K> heap;
+    heap.init();
+
+    unsigned int stack[STACK_MAX]; unsigned int sp = 0; stack[sp++] = 0;
+
+    while (sp > 0) {
+        unsigned int idx = stack[--sp];
+        if (idx < 0 || idx >= nodeCount) continue;
+        const auto& node = nodes[idx];
+
+        float d2 = cuAABB::Distance2(node.bounds, p);
+
+        // 현재 리스트가 가득 찼고, 이 서브트리 AABB가 더 멀면 가지치기
+        if (heap.n == K && d2 >= heap.d2[heap.n - 1]) continue;
+
+        if (node.isLeaf) {
+            heap.try_push(idx, d2);
+        }
+        else {
+#pragma unroll
+            for (unsigned int i = 0; i < 8; ++i) {
+                unsigned int c = node.children[i];
+                if (c != -1 && sp < STACK_MAX) stack[sp++] = c;
+            }
+        }
+    }
+
+    // 결과 복사
+    unsigned int ret = heap.n; // 실제 채워진 개수
+    for (unsigned int i = 0; i < K; ++i) outIdx[i] = (i < heap.n) ? heap.idx[i] : -1;
+    return ret;
+}
+
+// K는 템플릿로 고정: 빌드시 자주 쓰는 값에 대해 인스턴스화 추천(예: 4,8,16)
+template<unsigned int K>
+__global__ void Kernel_QueryKNNNode(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3* queryPoints, unsigned int queryCount,
+    unsigned int* outKnn /*[queryCount*K]*/, unsigned int* outCounts /*[queryCount]*/)
+{
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= queryCount) return;
+    unsigned int* myOut = outKnn + tid * K;
+    unsigned int n = QueryKNNNodeDevice<K>(nodes, nodeCount, queryPoints[tid], myOut);
+    outCounts[tid] = n;
+}
+
+//// 필요 K에 대해 커널 인스턴스 선언
+//template __global__ void Kernel_QueryKNNNode<8>(
+//    const HybridDeviceOctreeNode*, int, const float3*, int, int*, int*);
+
+void HybridOctree::QueryKNNNode_K8(
+    const std::vector<float3>& querypoints,
+    std::vector<unsigned int>& outFlatK,  // size = queryCount * 8
+    std::vector<unsigned int>& outCounts) // size = queryCount
+{
+    const unsigned int K = 8;
+    outFlatK.clear(); outCounts.clear();
+    if (!device_nodes || querypoints.empty()) return;
+
+    unsigned int q = (unsigned int)querypoints.size();
+    float3* d_points = nullptr; unsigned int* d_out = nullptr; unsigned int* d_counts = nullptr;
+
+    CUDA_MALLOC(&d_points, sizeof(float3) * q);
+    CUDA_MALLOC(&d_out, sizeof(unsigned int) * q * K);
+    CUDA_MALLOC(&d_counts, sizeof(unsigned int) * q);
+
+    CUDA_COPY_H2D(d_points, querypoints.data(), sizeof(float3) * q);
+
+    LaunchKernel(Kernel_QueryKNNNode<8>, q,
+        device_nodes, (unsigned int)host_nodes.size(), d_points, q, d_out, d_counts);
+
+    outFlatK.resize((size_t)q * K);
+    outCounts.resize(q);
+    CUDA_COPY_D2H(outFlatK.data(), d_out, sizeof(unsigned int) * q * K);
+    CUDA_COPY_D2H(outCounts.data(), d_counts, sizeof(unsigned int) * q);
+    CUDA_SYNC();
+
+    CUDA_SAFE_FREE(d_points);
+    CUDA_SAFE_FREE(d_out);
+    CUDA_SAFE_FREE(d_counts);
 }
