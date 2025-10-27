@@ -660,75 +660,75 @@ int main(int argc, char** argv)
 
 
 #pragma region QueryRadius
-//				{
-//					TS(QueryRadius);
-//					std::vector<unsigned int> outFlatIndices;
-//					std::vector<unsigned int> outCounts;
-//					octree.QueryRadius({ { 0.0f, 0.0f, 0.0f } }, { 5.0f }, 500000, outFlatIndices, outCounts);
-//					TE(QueryRadius);
-//
-//					size_t offset = 0;
-//					for (size_t q = 0; q < outCounts.size(); ++q)
-//					{
-//						unsigned int count = outCounts[q];
-//						for (unsigned int i = 0; i < count; ++i)
-//						{
-//							unsigned int nodeIdx = outFlatIndices[offset + i];
-//							if (nodeIdx < octree.host_nodes.size())
-//							{
-//								const auto& node = octree.host_nodes[nodeIdx];
-//
-//								for (unsigned int pointIdx : node.indices)
-//								{
-//									const auto& p = h_input.positions[pointIdx];
-//									if (5.0f > sqrtf(p.x * p.x + p.y * p.y + p.z * p.z))
-//									{
-//										VD::AddSphere("queried_points", { XYZ(p) }, 0.1f, Color::red());
-//									}
-//								}
-//							}
-//						}
-//						offset += count;
-//					}
-//				}
-#pragma endregion
-
-#pragma region QueryNearestNode
 				{
-					std::vector<float3> inputPositions(h_input.numberOfPoints);
-					memcpy(inputPositions.data(), h_input.positions, sizeof(float3)* h_input.numberOfPoints);
-					for (size_t i = 0; i < inputPositions.size(); i++)
-					{
-						auto& p = inputPositions[i];
-						p.z += 10.0f;
-					}
-
-					TS(QueryNearestNode);
+					TS(QueryRadius);
 					std::vector<unsigned int> outFlatIndices;
 					std::vector<unsigned int> outCounts;
-					auto indices = octree.QueryNearestNode(inputPositions);
-					TE(QueryNearestNode);
+					octree.QueryRadius({ { 0.0f, 0.0f, 0.0f } }, { 5.0f }, 500000, outFlatIndices, outCounts);
+					TE(QueryRadius);
 
 					size_t offset = 0;
-					for (size_t i = 0; i < indices.size(); i++)
+					for (size_t q = 0; q < outCounts.size(); ++q)
 					{
-						unsigned int nodeIdx = indices[i];
-						if (nodeIdx < octree.host_nodes.size())
+						unsigned int count = outCounts[q];
+						for (unsigned int i = 0; i < count; ++i)
 						{
-							const auto& node = octree.host_nodes[nodeIdx];
-							for (unsigned int pointIdx : node.indices)
+							unsigned int nodeIdx = outFlatIndices[offset + i];
+							if (nodeIdx < octree.host_nodes.size())
 							{
-								const auto& p = h_input.positions[pointIdx];
-								auto n = normalize(inputPositions[i] - p);
-								auto np = p + n;
-								
-								//VD::AddSphere("queried_points", { XYZ(p) }, 0.1f, Color::red());
-								VD::AddLine("queried_line", { XYZ(p) }, { XYZ(np) }, Color::red(), Color::red());
+								const auto& node = octree.host_nodes[nodeIdx];
+
+								for (unsigned int pointIdx : node.indices)
+								{
+									const auto& p = h_input.positions[pointIdx];
+									if (5.0f > sqrtf(p.x * p.x + p.y * p.y + p.z * p.z))
+									{
+										VD::AddSphere("queried_points", { XYZ(p) }, 0.1f, Color::red());
+									}
+								}
 							}
 						}
+						offset += count;
 					}
 				}
 #pragma endregion
+
+//#pragma region QueryNearestNode
+//				{
+//					std::vector<float3> inputPositions(h_input.numberOfPoints);
+//					memcpy(inputPositions.data(), h_input.positions, sizeof(float3)* h_input.numberOfPoints);
+//					for (size_t i = 0; i < inputPositions.size(); i++)
+//					{
+//						auto& p = inputPositions[i];
+//						p.z += 10.0f;
+//					}
+//
+//					TS(QueryNearestNode);
+//					std::vector<unsigned int> outFlatIndices;
+//					std::vector<unsigned int> outCounts;
+//					auto indices = octree.QueryNearestPoint(inputPositions, inputPositions);
+//					TE(QueryNearestNode);
+//
+//					size_t offset = 0;
+//					for (size_t i = 0; i < indices.size(); i++)
+//					{
+//						unsigned int nodeIdx = indices[i];
+//						if (nodeIdx < octree.host_nodes.size())
+//						{
+//							const auto& node = octree.host_nodes[nodeIdx];
+//							for (unsigned int pointIdx : node.indices)
+//							{
+//								const auto& p = h_input.positions[pointIdx];
+//								auto n = normalize(inputPositions[i] - p);
+//								auto np = p + n;
+//								
+//								//VD::AddSphere("queried_points", { XYZ(p) }, 0.1f, Color::red());
+//								VD::AddLine("queried_line", { XYZ(p) }, { XYZ(np) }, Color::red(), Color::red());
+//							}
+//						}
+//					}
+//				}
+//#pragma endregion
 
 			}
 

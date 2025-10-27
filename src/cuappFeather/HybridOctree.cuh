@@ -72,7 +72,7 @@ struct HybridOctree
 		std::vector<unsigned int>& outFlatIndices,
 		std::vector<unsigned int>& outCounts);
 
-	std::vector<unsigned int> QueryNearestNode(const std::vector<float3>& queryPoints);
+	std::vector<unsigned int> QueryNearestPoint(const std::vector<float3>& queryPoints, const std::vector<float3>& points);
 
 	void QueryKNNNode_K8(
 		const std::vector<float3>& queryPoints,

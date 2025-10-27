@@ -32,12 +32,18 @@ __global__ void Kernel_QueryRadius(
     const float3* centers, const float* radii, unsigned int queryCount,
     unsigned int* outIndices, unsigned int* outCounts, unsigned int maxOutPerQuery);
 
-__device__ unsigned int QueryNearestNodeDevice(const HybridDeviceOctreeNode* nodes, unsigned int nodeCount, const float3& p);
-
-__global__ void Kernel_QueryNearestNode(
+__device__ unsigned int QueryNearestPointDevice(
     const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3* points, unsigned int pointCount,
+    const unsigned int* flatIndices,
+    const float3& p);
+
+__global__ void Kernel_QueryNearestPoint(
+    const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3* points, unsigned int pointCount,
+    const unsigned int* flatIndices,
     const float3* queryPoints, unsigned int queryCount,
-    unsigned int* outNearest /*[queryCount]*/);
+    unsigned int* outNearest);
 
 
 
@@ -374,30 +380,43 @@ void HybridOctree::QueryRadius(
     CUDA_SAFE_FREE(d_counts);
 }
 
-std::vector<unsigned int> HybridOctree::QueryNearestNode(const std::vector<float3>& queryPoints)
+std::vector<unsigned int> HybridOctree::QueryNearestPoint(const std::vector<float3>& queryPoints,
+    const std::vector<float3>& points)
 {
     std::vector<unsigned int> out;
-    if (!device_nodes || queryPoints.empty()) return out;
+    if (!device_nodes || !device_flatIndices || queryPoints.empty() || points.empty()) return out;
 
-    int q = (unsigned int)queryPoints.size();
+    unsigned int q = (unsigned int)queryPoints.size();
+    unsigned int p = (unsigned int)points.size();
+
     float3* d_points = nullptr;
+    float3* d_queries = nullptr;
     unsigned int* d_out = nullptr;
 
-    CUDA_MALLOC(&d_points, sizeof(float3) * q);
+    CUDA_MALLOC(&d_points, sizeof(float3) * p);
+    CUDA_MALLOC(&d_queries, sizeof(float3) * q);
     CUDA_MALLOC(&d_out, sizeof(unsigned int) * q);
-    CUDA_COPY_H2D(d_points, queryPoints.data(), sizeof(float3) * q);
 
-    LaunchKernel(Kernel_QueryNearestNode, q,
-        device_nodes, (unsigned int)host_nodes.size(), d_points, q, d_out);
+    CUDA_COPY_H2D(d_points, points.data(), sizeof(float3) * p);
+    CUDA_COPY_H2D(d_queries, queryPoints.data(), sizeof(float3) * q);
+
+    LaunchKernel(Kernel_QueryNearestPoint, q,
+        device_nodes, (unsigned int)host_nodes.size(),
+        d_points, p,
+        device_flatIndices,
+        d_queries, q,
+        d_out);
 
     out.resize(q);
     CUDA_COPY_D2H(out.data(), d_out, sizeof(unsigned int) * q);
     CUDA_SYNC();
 
     CUDA_SAFE_FREE(d_points);
+    CUDA_SAFE_FREE(d_queries);
     CUDA_SAFE_FREE(d_out);
     return out;
 }
+
 
 
 
@@ -569,47 +588,77 @@ __global__ void Kernel_QueryRadius(
 
 
 
-__device__ unsigned int QueryNearestNodeDevice(
+__device__ unsigned int QueryNearestPointDevice(
     const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3* points, unsigned int pointCount,
+    const unsigned int* flatIndices,
     const float3& p)
 {
-    unsigned int bestNode = -1;
+    unsigned int bestPoint = UINT32_MAX;
     float bestD2 = FLT_MAX;
 
     unsigned int stack[STACK_MAX];
-    unsigned int sp = 0; stack[sp++] = 0;
+    unsigned int sp = 0;
+    stack[sp++] = 0;
 
     while (sp > 0) {
         unsigned int idx = stack[--sp];
-        if (idx < 0 || idx >= nodeCount) continue;
+        if (idx >= nodeCount) continue;
         const auto& node = nodes[idx];
 
+        // AABB까지의 최소거리로 가지치기
         float d2 = cuAABB::Distance2(node.bounds, p);
         if (d2 >= bestD2) continue;
 
         if (node.isLeaf) {
-            bestD2 = d2; bestNode = idx;
+            // 실제 점들과 거리 계산
+            for (unsigned int i = 0; i < node.indexCount; ++i) {
+                unsigned int pi = flatIndices[node.indexOffset + i];
+                if (pi >= pointCount) continue;
+                float3 q = points[pi];
+                float3 diff = make_float3(q.x - p.x, q.y - p.y, q.z - p.z);
+                float d2p = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
+                if (d2p < bestD2) {
+                    bestD2 = d2p;
+                    bestPoint = pi;
+                }
+            }
         }
         else {
 #pragma unroll
             for (unsigned int i = 0; i < 8; ++i) {
                 unsigned int c = node.children[i];
-                if (c != -1 && sp < STACK_MAX) stack[sp++] = c;
+                if (c != UINT32_MAX && sp < STACK_MAX)
+                    stack[sp++] = c;
             }
         }
     }
-    return bestNode;
+
+    return bestPoint;
 }
 
-__global__ void Kernel_QueryNearestNode(
+__global__ void Kernel_QueryNearestPoint(
     const HybridDeviceOctreeNode* nodes, unsigned int nodeCount,
+    const float3* points, unsigned int pointCount,
+    const unsigned int* flatIndices,
     const float3* queryPoints, unsigned int queryCount,
-    unsigned int* outNearest /*[queryCount]*/)
+    unsigned int* outNearest)
 {
     unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= queryCount) return;
-    outNearest[tid] = QueryNearestNodeDevice(nodes, nodeCount, queryPoints[tid]);
+    outNearest[tid] = QueryNearestPointDevice(
+        nodes, nodeCount, points, pointCount,
+        flatIndices, queryPoints[tid]);
 }
+
+
+
+
+
+
+
+
+
 
 template<unsigned int K>
 struct SmallKList {
