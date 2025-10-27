@@ -8,6 +8,10 @@ cmake_minimum_required(VERSION 3.10)
 
 project(gvdb_all)
 
+if (WIN32)
+    add_definitions(-DNOMINMAX)
+endif()
+
 # These samples depend only on the things included with GVDB.
 add_subdirectory("source/gvdb_library" "gvdb_library")
 add_subdirectory("source/g3DPrint" "g3DPrint")

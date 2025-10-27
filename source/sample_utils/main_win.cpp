@@ -23,6 +23,8 @@
 #include <windows.h>
 #include <windowsx.h>
 
+#include <file_png.h>
+
 extern "C" { _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001; }
 
 HINSTANCE   g_hInstance = 0;
