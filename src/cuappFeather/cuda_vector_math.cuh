@@ -1165,3 +1165,8 @@ __host__ __device__ inline double4 lerp(const double4& a, const double4& b, doub
         a.z + t * (b.z - a.z),
         a.w + t * (b.w - a.w));
 }
+
+__host__ __device__ inline int3 make_int3(uchar4 v)
+{
+    return make_int3((int)v.x, (int)v.y, (int)v.z);
+}

@@ -572,25 +572,24 @@ int main(int argc, char** argv)
 
 	Feather.AddOnInitializeCallback([&]() {
 		{
-			{
-				auto entity = Feather.CreateEntity("gvdb plane");
-				auto renderable = Feather.CreateComponent<Renderable>(entity);
-				renderable->Initialize(Renderable::GeometryMode::Triangles);
-				renderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Texturing.vs"), File("../../res/Shaders/Texturing.fs")));
+			auto entity = Feather.CreateEntity("gvdb plane");
+			auto renderable = Feather.CreateComponent<Renderable>(entity);
+			renderable->Initialize(Renderable::GeometryMode::Triangles);
+			renderable->AddShader(Feather.CreateShader("Default", File("../../res/Shaders/Texturing.vs"), File("../../res/Shaders/Texturing.fs")));
 
-				auto [indices, vertices, normals, colors, uvs] = GeometryBuilder::BuildPlane(192, 108, 2, 2, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f });
-				renderable->AddIndices(indices);
-				renderable->AddVertices(vertices);
-				renderable->AddNormals(normals);
-				renderable->AddColors(colors);
-				renderable->AddUVs(uvs);
+			auto [indices, vertices, normals, colors, uvs] = GeometryBuilder::BuildPlane(192, 108, 2, 2, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f});
+			renderable->AddIndices(indices);
+			renderable->AddVertices(vertices);
+			renderable->AddNormals(normals);
+			renderable->AddColors(colors);
+			renderable->AddUVs(uvs);
 
-				auto texture = Feather.CreateComponent<Texture>(entity);
-				texture->AllocTextureData(1920, 1080);
-				texture->GetTextureID();
+			auto texture = Feather.CreateComponent<Texture>(entity);
+			texture->AllocTextureData(1920, 1080);
+			texture->GetTextureID();
 
-				texture->Bind();
-			}
+			texture->Bind();
+
 			
 
 
@@ -618,105 +617,33 @@ int main(int argc, char** argv)
 			}
 			printf("Loading VBX. %s\n", scnpath);
 			gvdb.SetChannelDefault(16, 16, 16);
-			//gvdb.LoadVBX(scnpath);
+			gvdb.LoadVBX(scnpath);
 
+			printf("--------------------------------------------------\n");
+			printf("[GVDB] Diagnostic Info\n");
+			printf("  Level 0 nodes : %d\n", gvdb.getNumNodes(0));
+			printf("  Level 1 nodes : %d\n", gvdb.getNumNodes(1));
+			printf("  Level 2 nodes : %d\n", gvdb.getNumNodes(2));
+			printf("--------------------------------------------------\n");
 
-
-			float radius = 100.0f;
-
-			gvdb.Clear();
-			gvdb.Configure(3, 3, 3, 3, 5);
-			gvdb.AddChannel(0, T_FLOAT, 1, 0);
-
-			const int numSamples = 100000;
-			const Vector3DF center(0, 0, 0);
-
-			// 대략 반경 100 근처만 활성화
-			for (int z = -2; z <= 2; ++z)
-				for (int y = -2; y <= 2; ++y)
-					for (int x = -2; x <= 2; ++x)
-						gvdb.ActivateSpace(Vector3DI(x, y, z));
-
-			gvdb.FinishTopology();
-			gvdb.UpdateAtlas();
-
-			// 포인트 클라우드 생성
-			std::vector<Vector3DF> points(numSamples);
-			std::vector<Vector3DF> colors(numSamples, Vector3DF(1, 0.5f, 0.2f));
-
-			for (int i = 0; i < numSamples; i++) {
-				float u = (float)rand() / RAND_MAX;
-				float v = (float)rand() / RAND_MAX;
-				float theta = 2.0f * 3.1415926f * u;
-				float phi = acosf(2.0f * v - 1.0f);
-				float x = radius * sinf(phi) * cosf(theta);
-				float y = radius * sinf(phi) * sinf(theta);
-				float z = radius * cosf(phi);
-				points[i] = Vector3DF(center.x + x, center.y + y, center.z + z);
-			}
-
-			// 포인트 데이터 등록
-			DataPtr pntpos, pntclr, dummy;
-			gvdb.AllocData(pntpos, numSamples, sizeof(Vector3DF));
-			gvdb.AllocData(pntclr, numSamples, sizeof(Vector3DF));
-			gvdb.SetDataCPU(pntpos, numSamples, (char*)points.data(), 0, sizeof(Vector3DF));
-			gvdb.SetDataCPU(pntclr, numSamples, (char*)colors.data(), 0, sizeof(Vector3DF));
-			gvdb.SetPoints(pntpos, dummy, pntclr);
-
-			// 서브셀 생성 및 밀도 계산
-			int subcell_size = 4;
-			float gather_radius = 6.0f;
-			int scPntLen = 0;
-
-			gvdb.InsertPointsSubcell(subcell_size, numSamples, gather_radius, Vector3DF(0, 0, 0), scPntLen);
-			if (scPntLen == 0) {
-				printf("Warning: No subcells created. Points likely outside of volume bounds.\n");
-				return;
-			}
-
-			gvdb.GatherDensity(subcell_size, numSamples, gather_radius, Vector3DF(0, 0, 0),
-				scPntLen, 0, 1, true);
-			gvdb.UpdateApron();
-
-			printf("Sphere SDF generated successfully. Points: %d, subcells: %d\n",
-				numSamples, scPntLen);
-
-
-
-
-
-
-
-			//// 모든 복셀 값을 0으로 초기화
-			////gvdb.FillChannel(0, { 0.0f, 0.0f, 0.0f, 0.0f });
-
-			//printf("[GVDB] 5000³ logical volume initialized.\n");
-
-			//printf("--------------------------------------------------\n");
-			//printf("[GVDB] Diagnostic Info\n");
-			//printf("  Level 0 nodes : %d\n", gvdb.getNumNodes(0));
-			//printf("  Level 1 nodes : %d\n", gvdb.getNumNodes(1));
-			//printf("  Level 2 nodes : %d\n", gvdb.getNumNodes(2));
-			//printf("--------------------------------------------------\n");
-
-			//// Set volume params
-			//gvdb.SetTransform(m_pretrans, m_scale, m_angs, m_trans);
-			//gvdb.getScene()->SetSteps(.25f, 16, .25f);			// Set raycasting steps
-			//gvdb.getScene()->SetExtinct(-1.0f, 1.0f, 0.0f);		// Set volume extinction
-			//gvdb.getScene()->SetVolumeRange(0.1f, 0.0f, .5f);	// Set volume value range
-			//gvdb.getScene()->SetCutoff(0.005f, 0.005f, 0.0f);
-			//gvdb.getScene()->SetBackgroundClr(0.1f, 0.2f, 0.4f, 1.0);
-			//gvdb.getScene()->LinearTransferFunc(0.00f, 0.25f, Vector4DF(0, 0, 0, 0), Vector4DF(1, 0, 0, 0.05f));
-			//gvdb.getScene()->LinearTransferFunc(0.25f, 0.50f, Vector4DF(1, 0, 0, 0.05f), Vector4DF(1, .5f, 0, 0.1f));
-			//gvdb.getScene()->LinearTransferFunc(0.50f, 0.75f, Vector4DF(1, .5f, 0, 0.1f), Vector4DF(1, 1, 0, 0.15f));
-			//gvdb.getScene()->LinearTransferFunc(0.75f, 1.00f, Vector4DF(1, 1, 0, 0.15f), Vector4DF(1, 1, 1, 0.2f));
-			//gvdb.CommitTransferFunc();
+			// Set volume params
+			gvdb.SetTransform(m_pretrans, m_scale, m_angs, m_trans);
+			gvdb.getScene()->SetSteps(.25f, 16, .25f);			// Set raycasting steps
+			gvdb.getScene()->SetExtinct(-1.0f, 1.0f, 0.0f);		// Set volume extinction
+			gvdb.getScene()->SetVolumeRange(0.1f, 0.0f, .5f);	// Set volume value range
+			gvdb.getScene()->SetCutoff(0.005f, 0.005f, 0.0f);
+			gvdb.getScene()->SetBackgroundClr(0.1f, 0.2f, 0.4f, 1.0);
+			gvdb.getScene()->LinearTransferFunc(0.00f, 0.25f, Vector4DF(0, 0, 0, 0), Vector4DF(1, 0, 0, 0.05f));
+			gvdb.getScene()->LinearTransferFunc(0.25f, 0.50f, Vector4DF(1, 0, 0, 0.05f), Vector4DF(1, .5f, 0, 0.1f));
+			gvdb.getScene()->LinearTransferFunc(0.50f, 0.75f, Vector4DF(1, .5f, 0, 0.1f), Vector4DF(1, 1, 0, 0.15f));
+			gvdb.getScene()->LinearTransferFunc(0.75f, 1.00f, Vector4DF(1, 1, 0, 0.15f), Vector4DF(1, 1, 1, 0.2f));
+			gvdb.CommitTransferFunc();
 
 
 			// Create Camera 
 			Camera3D* cam = new Camera3D;
 			cam->setFov(50.0);
-			cam->setOrbit(Vector3DF(30, 45, 0), Vector3DF(2500, 2500, 2500), 10000, 1.0);
+			cam->setOrbit(Vector3DF(20, 30, 0), Vector3DF(0, 0, 0), 700, 1.0);
 			gvdb.getScene()->SetCamera(cam);
 
 			// Create Light
@@ -735,7 +662,7 @@ int main(int argc, char** argv)
 
 	Feather.AddOnUpdateCallback([&](f32 timeDelta) {
 
-		m_angs.y += timeDelta * 0.01f;
+		m_angs.y += 0.5f;
 		gvdb.SetTransform(m_pretrans, m_scale, m_angs, m_trans);
 
 		// Render volume

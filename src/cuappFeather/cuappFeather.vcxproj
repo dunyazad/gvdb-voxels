@@ -170,14 +170,14 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;WIN32_LEAN_AND_MEAN;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(SolutionDir)External\Eigen;$(SolutionDir)External\glfw\include;$(SolutionDir)External\entt\single_include;$(SolutionDir)External\Feather\include\;$(SolutionDir)External\Feather\External\glm;$(SolutionDir)External\glad\include;$(SolutionDir)External\imgui;$(SolutionDir)External\implot;$(SolutionDir)External\imnodes;$(SolutionDir)External\;$(SolutionDir)src;$(SolutionDir)src\$(ProjectName);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)External\gvdb-voxels\source\gvdb_library\src;$(SolutionDir)External\Eigen;$(SolutionDir)External\glfw\include;$(SolutionDir)External\entt\single_include;$(SolutionDir)External\Feather\include\;$(SolutionDir)External\Feather\External\glm;$(SolutionDir)External\glad\include;$(SolutionDir)External\imgui;$(SolutionDir)External\implot;$(SolutionDir)External\imnodes;$(SolutionDir)External\;$(SolutionDir)src;$(SolutionDir)src\$(ProjectName);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;glfw3.lib;libFeather.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(SolutionDir)External\glfw\build\src\Debug;%(AdditionalLibraryDirectories);$(SolutionDir)\External\Feather\bin\$(Configuration);$(SolutionDir)External\nvapi510\amd64</AdditionalLibraryDirectories>
+      <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;glfw3.lib;libFeather.lib;gvdb.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)External\glfw\build\src\Debug;%(AdditionalLibraryDirectories);$(SolutionDir)\External\Feather\bin\$(Configuration);$(SolutionDir)External\nvapi510\amd64;$(SolutionDir)External\gvdb-voxels\_output\lib</AdditionalLibraryDirectories>
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
@@ -193,7 +193,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;WIN32_LEAN_AND_MEAN;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(SolutionDir)External\Eigen;$(SolutionDir)External\glfw\include;$(SolutionDir)External\entt\single_include;$(SolutionDir)External\Feather\include\;$(SolutionDir)External\Feather\External\glm;$(SolutionDir)External\glad\include;$(SolutionDir)External\imgui;$(SolutionDir)External\implot;$(SolutionDir)External\imnodes;$(SolutionDir)External\;$(SolutionDir)src;$(SolutionDir)src\$(ProjectName);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)External\gvdb-voxels\source\gvdb_library\src;$(SolutionDir)External\Eigen;$(SolutionDir)External\glfw\include;$(SolutionDir)External\entt\single_include;$(SolutionDir)External\Feather\include\;$(SolutionDir)External\Feather\External\glm;$(SolutionDir)External\glad\include;$(SolutionDir)External\imgui;$(SolutionDir)External\implot;$(SolutionDir)External\imnodes;$(SolutionDir)External\;$(SolutionDir)src;$(SolutionDir)src\$(ProjectName);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -201,8 +201,8 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;glfw3.lib;libFeather.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(SolutionDir)External\glfw\build\src\Release;%(AdditionalLibraryDirectories);$(SolutionDir)\External\Feather\bin\$(Configuration);$(SolutionDir)External\nvapi510\amd64</AdditionalLibraryDirectories>
+      <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;glfw3.lib;libFeather.lib;gvdb.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)External\glfw\build\src\Release;%(AdditionalLibraryDirectories);$(SolutionDir)\External\Feather\bin\$(Configuration);$(SolutionDir)External\nvapi510\amd64;$(SolutionDir)External\gvdb-voxels\_output\lib</AdditionalLibraryDirectories>
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>

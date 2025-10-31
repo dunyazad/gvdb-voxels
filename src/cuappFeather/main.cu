@@ -35,6 +35,11 @@
 #include <IVisualDebugging.h>
 using VD = IVisualDebugging;
 
+
+#include "cuda.h"
+#pragma comment(lib, "cuda.lib")
+
+
 CUDAInstance::CUDAInstance()
 {
 }
@@ -141,22 +146,126 @@ void CUDAInstance::ProcessPointCloud(float voxelSize, unsigned int occupyOffset)
 
 }
 
-void CUDAInstance::Test()
-{
-    PLYFormat ply;
-    ply.Deserialize("D:\\Debug\\PLY\\input.ply");
+void savePPM(const char* filename, const uchar* buffer, int width, int height) {
+    FILE* fp = fopen(filename, "wb");
+    if (!fp) {
+        printf("Error opening file %s\n", filename);
+        return;
+    }
+    fprintf(fp, "P6\n%d %d\n255\n", width, height);
+    for (int i = 0; i < width * height; ++i) {
+        // RGBA¿¡¼­ RGB¸¸ ¾¸
+        fwrite(buffer + i * 4, 1, 3, fp);
+    }
+    fclose(fp);
+    printf("Rendered image saved to %s\n", filename);
+}
 
-    std::vector<float3> inputPoints;
 
-    for (size_t i = 0; i < ply.GetPoints().size() / 3; i++)
-    {
-        auto x = ply.GetPoints()[i * 3 + 0];
-        auto y = ply.GetPoints()[i * 3 + 1];
-        auto z = ply.GetPoints()[i * 3 + 2];
 
-        inputPoints.push_back(make_float3(x, y, z));
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+using namespace nvdb;
+
+// -------- BMP Save Utility --------
+#pragma pack(push, 1)
+struct BmpFileHeader {
+    unsigned short bfType;
+    unsigned int bfSize;
+    unsigned short bfReserved1;
+    unsigned short bfReserved2;
+    unsigned int bfOffBits;
+};
+struct BmpInfoHeader {
+    unsigned int biSize;
+    int biWidth;
+    int biHeight;
+    unsigned short biPlanes;
+    unsigned short biBitCount;
+    unsigned int biCompression;
+    unsigned int biSizeImage;
+    int biXPelsPerMeter;
+    int biYPelsPerMeter;
+    unsigned int biClrUsed;
+    unsigned int biClrImportant;
+};
+#pragma pack(pop)
+
+static void saveBMP(const char* filename, const unsigned char* buffer, int width, int height) {
+    FILE* fp = fopen(filename, "wb");
+    if (!fp) {
+        printf("Error opening %s\n", filename);
+        return;
+    }
+    int bpp = 3;
+    int pad = (4 - (width * bpp) % 4) % 4;
+    int img = (width * bpp + pad) * height;
+
+    BmpFileHeader fh = { 0x4D42, sizeof(BmpFileHeader) + sizeof(BmpInfoHeader) + img, 0, 0,
+                         sizeof(BmpFileHeader) + sizeof(BmpInfoHeader) };
+    BmpInfoHeader ih = { sizeof(BmpInfoHeader), width, height, 1, 24, 0, img, 0, 0, 0, 0 };
+
+    fwrite(&fh, sizeof(fh), 1, fp);
+    fwrite(&ih, sizeof(ih), 1, fp);
+
+    unsigned char zero[3] = { 0, 0, 0 };
+    for (int y = height - 1; y >= 0; --y) {
+        const unsigned char* row = buffer + y * width * 4;
+        for (int x = 0; x < width; ++x) {
+            unsigned char bgr[3] = { row[2], row[1], row[0] };
+            fwrite(bgr, 1, 3, fp);
+            row += 4;
+        }
+        fwrite(zero, 1, pad, fp);
     }
 
-    Octree octree;
-    octree.Build(inputPoints);
+    fclose(fp);
+    printf("Saved %s\n", filename);
+}
+
+// -------- Generate Sphere Surface Points --------
+static std::vector<Vector3DF> makeSpherePoints(float radius, int n, const Vector3DF& c) {
+    std::vector<Vector3DF> pts;
+    pts.reserve(n);
+
+    for (int i = 0; i < n; ++i) {
+        float phi = acosf(1.0f - 2.0f * (float)i / (float)n);
+        float theta = 3.1415926535f * (1.0f + sqrtf(5.0f)) * (float)i;
+        float x = c.x + radius * cosf(theta) * sinf(phi);
+        float y = c.y + radius * sinf(theta) * sinf(phi);
+        float z = c.z + radius * cosf(phi);
+        pts.emplace_back(x, y, z);
+    }
+    return pts;
+}
+
+// -------- Main Test --------
+void CUDAInstance::Test(GLuint textureID)
+{
+	
 }

@@ -25,12 +25,12 @@
 #include <HPOctree.cuh>
 #include <SOMarchingCubes.cuh>
 
-#include <Eigen/Core>
-#include <Eigen/Dense>
-namespace Eigen {
-    using Vector3b = Vector<unsigned char, 3>;
-    using Vector3ui = Vector<unsigned int, 3>;
-}
+//#include <Eigen/Core>
+//#include <Eigen/Dense>
+//namespace Eigen {
+//    using Vector3b = Vector<unsigned char, 3>;
+//    using Vector3ui = Vector<unsigned int, 3>;
+//}
 
 
 class CUDAInstance
@@ -51,5 +51,5 @@ public:
     void ProcessPointCloud(float voxelSize = 0.2f, unsigned int occupyOffset = 3);
     void ProcessHalfEdgeMesh(const std::string& filename);
 
-    void Test();
+    void Test(GLuint textureID);
 };

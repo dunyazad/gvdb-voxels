@@ -24,3 +24,6 @@
 [submodule "External/imnodes"]
 	path = External/imnodes
 	url = https://github.com/Nelarius/imnodes
+[submodule "External/gvdb-voxels"]
+	path = External/gvdb-voxels
+	url = https://github.com/dunyazad/gvdb-voxels.git

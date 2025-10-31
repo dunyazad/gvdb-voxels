@@ -10,6 +10,7 @@
 
 #include <cuda_vector_math.cuh>
 #include <marching_cubes_constants.cuh>
+#include <surface_functions.h>
 
 // Vector containers
 #include <thrust/host_vector.h>
@@ -49,6 +50,8 @@
 #include <Serialization.hpp>
 
 #include <TypeDefinitions.h>
+
+#include "gvdb.h"
 
 #define alog(...) printf("\033[38;5;1m\033[48;5;15m(^(OO)^) /V/\033[0m\t" __VA_ARGS__)
 #define alogt(tag, ...) printf("\033[38;5;1m\033[48;5;15m [%d] (^(OO)^) /V/\033[0m\t" tag, __VA_ARGS__)
