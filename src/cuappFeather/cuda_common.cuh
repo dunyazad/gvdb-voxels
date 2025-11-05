@@ -628,3 +628,80 @@ __host__ __device__ inline float3 Morton64ToFloat3(uint64_t code, const float3& 
     return p;
 }
 #pragma endregion
+
+#include "nvapi510/include/nvapi.h"
+#include "nvapi510/include/NvApiDriverSettings.h"
+
+#ifdef __NVOPTIMUSENABLEMENT__
+#define __NVOPTIMUSENABLEMENT__
+extern "C" __declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
+extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+#define PREFERRED_PSTATE_ID 0x0000001B
+#define PREFERRED_PSTATE_PREFER_MAX 0x00000000
+#define PREFERRED_PSTATE_PREFER_MIN 0x00000001
+#endif
+
+inline bool ForceGPUPerformance()
+{
+    NvAPI_Status status;
+
+    status = NvAPI_Initialize();
+    if (status != NVAPI_OK)
+    {
+        return false;
+    }
+
+    NvDRSSessionHandle hSession = 0;
+    status = NvAPI_DRS_CreateSession(&hSession);
+    if (status != NVAPI_OK)
+    {
+        return false;
+    }
+
+    // (2) load all the system settings into the session
+    status = NvAPI_DRS_LoadSettings(hSession);
+    if (status != NVAPI_OK)
+    {
+        return false;
+    }
+
+    NvDRSProfileHandle hProfile = 0;
+    status = NvAPI_DRS_GetBaseProfile(hSession, &hProfile);
+    if (status != NVAPI_OK)
+    {
+        return false;
+    }
+
+    NVDRS_SETTING drsGet = { 0, };
+    drsGet.version = NVDRS_SETTING_VER;
+    status = NvAPI_DRS_GetSetting(hSession, hProfile, PREFERRED_PSTATE_ID, &drsGet);
+    if (status != NVAPI_OK)
+    {
+        return false;
+    }
+    auto m_gpu_performance = drsGet.u32CurrentValue;
+
+    NVDRS_SETTING drsSetting = { 0, };
+    drsSetting.version = NVDRS_SETTING_VER;
+    drsSetting.settingId = PREFERRED_PSTATE_ID;
+    drsSetting.settingType = NVDRS_DWORD_TYPE;
+    drsSetting.u32CurrentValue = PREFERRED_PSTATE_PREFER_MAX;
+
+    status = NvAPI_DRS_SetSetting(hSession, hProfile, &drsSetting);
+    if (status != NVAPI_OK)
+    {
+        return false;
+    }
+
+    status = NvAPI_DRS_SaveSettings(hSession);
+    if (status != NVAPI_OK)
+    {
+        return false;
+    }
+
+    // (6) We clean up. This is analogous to doing a free()
+    NvAPI_DRS_DestroySession(hSession);
+    hSession = 0;
+
+    return true;
+}

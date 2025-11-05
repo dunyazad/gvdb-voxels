@@ -29,6 +29,7 @@
     <ClCompile Include="cuBQL\builder\cpu\instantiate_builders.cpp">
       <Filter>cuBQL\builder\cpu</Filter>
     </ClCompile>
+    <ClCompile Include="stb_impl.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="main.cuh" />
