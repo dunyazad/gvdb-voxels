@@ -257,14 +257,14 @@ int main(int argc, char** argv)
 
 	auto w = Feather.GetFeatherWindow();
 
-	RxTx udp(Protocol::UDP);
-	udp.Init();
-	udp.SetMode(UdpMode::Broadcast);
-	udp.Bind(5000); // 자동 NIC 선택
-	udp.OnReceive([](const std::string& msg, const std::string& ip) {
-		std::cout << "[UDP Received] " << msg << std::endl;
-		});
-	udp.Start();
+	//RxTx udp(Protocol::UDP);
+	//udp.Init();
+	//udp.SetMode(UdpMode::Broadcast);
+	//udp.Bind(5000); // 자동 NIC 선택
+	//udp.OnReceive([](const std::string& msg, const std::string& ip) {
+	//	std::cout << "[UDP Received] " << msg << std::endl;
+	//	});
+	//udp.Start();
 	
 #pragma region AppMain
 	{
