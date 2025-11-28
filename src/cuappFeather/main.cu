@@ -189,7 +189,6 @@ void savePPM(const char* filename, const uchar* buffer, int width, int height) {
 
 
 
-
 using namespace nvdb;
 
 // -------- BMP Save Utility --------
@@ -268,4 +267,41 @@ static std::vector<Vector3DF> makeSpherePoints(float radius, int n, const Vector
 void CUDAInstance::Test(GLuint textureID)
 {
 	
+}
+
+
+
+void CUDAMain()
+{
+    PLYFormat ply;
+    ply.Deserialize("D:\\Debug\\PLY\\inputA.ply");
+    auto [minx, miny, minz] = ply.GetAABBMin();
+
+    std::vector<glm::vec3> pointCloud;
+    size_t pointCount = ply.GetPoints().size() / 3;
+    pointCloud.reserve(pointCount);
+
+    for (size_t i = 0; i < pointCount; ++i)
+    {
+        float x = ply.GetPoints()[i * 3 + 0];
+        float y = ply.GetPoints()[i * 3 + 1];
+        float z = ply.GetPoints()[i * 3 + 2];
+
+        if (-10.0f < x && x < 10.0f &&
+            -10.0f < y && y < 10.0f &&
+            -10.0f < z && z < 10.0f)
+        {
+            pointCloud.emplace_back(x, y, z);
+        }
+    }
+
+    HostPointCloud<glm::vec3> h_pcd;
+	h_pcd.Initialize(static_cast<unsigned int>(pointCloud.size()));
+    h_pcd.positions = new float3[h_pcd.numberOfPoints];
+    memcpy(h_pcd.positions, pointCloud.data(), sizeof(float3) * h_pcd.numberOfPoints);
+
+    DevicePointCloud<glm::vec3> d_pcd;
+    d_pcd = h_pcd;
+    d_pcd.UpdateBVH();
+
 }

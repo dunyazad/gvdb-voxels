@@ -344,6 +344,7 @@ struct DevicePointCloud
     T* properties = nullptr;
 
     cuBQL::bvh3f bvh;
+    cuBQL::box3f* boxes = nullptr;
 
     DevicePointCloud() {}
 

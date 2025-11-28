@@ -243,6 +243,162 @@ void SortByAABBs(HostPointCloud<PointCloudProperty>& pointCloud, const AABB& tot
 	pointCloud = std::move(sortedPointCloud);
 }
 
+// --- KD-Tree Implementation Start ---
+struct KDPoint {
+	glm::vec3 position;
+	size_t originalIndex;
+};
+
+struct KDNode {
+	KDPoint point;
+	KDNode* left = nullptr;
+	KDNode* right = nullptr;
+	int axis;
+
+	KDNode(const KDPoint& pt, int ax) : point(pt), axis(ax), left(nullptr), right(nullptr) {}
+};
+
+class SimpleKDTree {
+public:
+	SimpleKDTree() : root(nullptr) {}
+	~SimpleKDTree() { Clear(root); }
+
+	void Build(const std::vector<glm::vec3>& rawPoints) {
+		Clear(root);
+		points.clear();
+		points.reserve(rawPoints.size());
+
+		for (size_t i = 0; i < rawPoints.size(); ++i) {
+			points.push_back({ rawPoints[i], i });
+		}
+
+		root = BuildRecursive(points.begin(), points.end(), 0);
+		printf("[KDTree] Built with %zu points.\n", points.size());
+	}
+
+	void Search(const glm::vec3& query, int k, std::vector<size_t>& outIndices, std::vector<float>& outDistSq) {
+		if (!root || k <= 0) return;
+
+		// Max-heap to store the k nearest neighbors found so far.
+		// Pair: <Squared Distance, Original Index>
+		std::priority_queue<std::pair<float, size_t>> pq;
+
+		SearchRecursive(root, query, k, pq);
+
+		// Extract results from PQ
+		outIndices.resize(pq.size());
+		outDistSq.resize(pq.size());
+
+		// PQ pops the largest element first, so we fill from back to front
+		for (int i = static_cast<int>(pq.size()) - 1; i >= 0; --i) {
+			outIndices[i] = pq.top().second;
+			outDistSq[i] = pq.top().first;
+			pq.pop();
+		}
+	}
+
+	void SearchRadius(const glm::vec3& query, float radius, std::vector<size_t>& outIndices) {
+		if (!root || radius <= 0.0f) return;
+
+		outIndices.clear();
+		float radiusSq = radius * radius;
+		SearchRadiusRecursive(root, query, radiusSq, outIndices);
+	}
+
+private:
+	KDNode* root;
+	std::vector<KDPoint> points;
+
+	void Clear(KDNode* node) {
+		if (!node) return;
+		Clear(node->left);
+		Clear(node->right);
+		delete node;
+	}
+
+	KDNode* BuildRecursive(std::vector<KDPoint>::iterator start, std::vector<KDPoint>::iterator end, int depth) {
+		if (start >= end) return nullptr;
+
+		int axis = depth % 3;
+		size_t len = std::distance(start, end);
+		auto mid = start + len / 2;
+
+		std::nth_element(start, mid, end, [axis](const KDPoint& a, const KDPoint& b) {
+			return a.position[axis] < b.position[axis];
+			});
+
+		KDNode* node = new KDNode(*mid, axis);
+		node->left = BuildRecursive(start, mid, depth + 1);
+		node->right = BuildRecursive(mid + 1, end, depth + 1);
+
+		return node;
+	}
+
+	void SearchRecursive(KDNode* node, const glm::vec3& query, int k, std::priority_queue<std::pair<float, size_t>>& pq) {
+		if (!node) return;
+
+		// Calculate squared distance between query and current node
+		float dx = query.x - node->point.position.x;
+		float dy = query.y - node->point.position.y;
+		float dz = query.z - node->point.position.z;
+		float distSq = dx * dx + dy * dy + dz * dz;
+
+		// Update priority queue
+		if (pq.size() < k) {
+			pq.push({ distSq, node->point.originalIndex });
+		}
+		else if (distSq < pq.top().first) {
+			pq.pop();
+			pq.push({ distSq, node->point.originalIndex });
+		}
+
+		// Determine which side to traverse first
+		float diff = query[node->axis] - node->point.position[node->axis];
+		KDNode* nearNode = diff < 0 ? node->left : node->right;
+		KDNode* farNode = diff < 0 ? node->right : node->left;
+
+		// Visit near side
+		SearchRecursive(nearNode, query, k, pq);
+
+		// Visit far side only if necessary
+		// If we haven't found k items yet, OR if the plane distance is within our current search radius
+		if (pq.size() < k || (diff * diff) < pq.top().first) {
+			SearchRecursive(farNode, query, k, pq);
+		}
+	}
+
+	void SearchRadiusRecursive(KDNode* node, const glm::vec3& query, float radiusSq, std::vector<size_t>& outIndices) {
+		if (!node) return;
+
+		// Calculate squared distance
+		float dx = query.x - node->point.position.x;
+		float dy = query.y - node->point.position.y;
+		float dz = query.z - node->point.position.z;
+		float distSq = dx * dx + dy * dy + dz * dz;
+
+		// Collect point if within radius
+		if (distSq <= radiusSq) {
+			outIndices.push_back(node->point.originalIndex);
+		}
+
+		// Determine traversal order
+		float diff = query[node->axis] - node->point.position[node->axis];
+		float diffSq = diff * diff;
+
+		KDNode* nearNode = diff < 0 ? node->left : node->right;
+		KDNode* farNode = diff < 0 ? node->right : node->left;
+
+		// Always search the near side
+		SearchRadiusRecursive(nearNode, query, radiusSq, outIndices);
+
+		// Search the far side only if the plane intersects the search radius
+		if (diffSq <= radiusSq) {
+			SearchRadiusRecursive(farNode, query, radiusSq, outIndices);
+		}
+	}
+};
+// --- KD-Tree Implementation End ---
+
 int main(int argc, char** argv)
 {
 	ForceGPUPerformance();
@@ -409,18 +565,84 @@ int main(int argc, char** argv)
 	{
 		auto entity = Feather.CreateEntity("Control Panel");
 		auto controlPanel = Feather.CreateComponent<ControlPanel>(entity, "Control Panel");
-
-		{
-			auto rxtx = [&]() {
-				udp.SendToAll("Hello from SendToAll!", 5000);
-			};
-
-			controlPanel->AddButton("Send", 0, 0, rxtx);
-		}
 	}
 #pragma endregion
 
 	Feather.AddOnInitializeCallback([&]() {
+
+		CUDAMain();
+		
+#if 0
+		{
+			PLYFormat ply;
+			ply.Deserialize("D:\\Debug\\PLY\\inputA.ply");
+			auto [minx, miny, minz] = ply.GetAABBMin();
+
+			std::vector<glm::vec3> pointCloud;
+			size_t pointCount = ply.GetPoints().size() / 3;
+			pointCloud.reserve(pointCount);
+
+			for (size_t i = 0; i < pointCount; ++i)
+			{
+				float x = ply.GetPoints()[i * 3 + 0];
+				float y = ply.GetPoints()[i * 3 + 1];
+				float z = ply.GetPoints()[i * 3 + 2];
+
+				if (-10.0f < x && x < 10.0f &&
+					-10.0f < y && y < 10.0f &&
+					-10.0f < z && z < 10.0f)
+				{
+					pointCloud.emplace_back(x, y, z);
+				}
+			}
+
+			TS(build_KDTree);
+			SimpleKDTree kdtree;
+			kdtree.Build(pointCloud);
+			TE(build_KDTree);
+
+			std::vector<size_t> numberOfNeighbors(pointCount);
+			std::vector<size_t> borderPoints(pointCount);
+			TS(KNN);
+			for (auto& p : pointCloud)
+			{
+				std::vector<size_t> indices;
+				kdtree.SearchRadius(p, 0.2f, indices);
+
+				numberOfNeighbors.push_back(indices.size());
+
+				if (25 > indices.size())
+				{
+					borderPoints.push_back(1);
+				}
+				else
+				{
+					borderPoints.push_back(0);
+				}
+			}
+			TE(KNN);
+
+			for (auto& p : pointCloud)
+			{
+				std::vector<size_t> indices;
+				kdtree.SearchRadius(p, 0.3f, indices);
+
+				numberOfNeighbors.push_back(indices.size());
+
+				size_t threshold = 25;
+				if (threshold > indices.size())
+				{
+					VD::AddSphere("points", p, 0.05f, Color::red());
+				}
+				else
+				{
+					VD::AddSphere("points", p, 0.05f, Color::white());
+				}
+			}
+		}
+#endif // 0
+
+
 		});
 
 	Feather.AddOnUpdateCallback([&](f32 timeDelta) {

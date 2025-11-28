@@ -32,6 +32,7 @@
 //    using Vector3ui = Vector<unsigned int, 3>;
 //}
 
+void CUDAMain();
 
 class CUDAInstance
 {
